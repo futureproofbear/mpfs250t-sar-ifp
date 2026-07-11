@@ -1,0 +1,18 @@
+# Fabric I/O pin assignments for SAR_TOP (Icicle MPFS250T-FCVG484E).
+# DDR / REFCLK are MSS-dedicated and auto-placed; these are the user fabric pins.
+set_io -port_name REF_CLK_50MHz \
+    -pin_name W12 \
+    -fixed true \
+    -DIRECTION INPUT
+
+set_io -port_name MMUART_0_TXD_M2F \
+    -pin_name B14 \
+    -fixed true \
+    -io_std LVCMOS33 \
+    -DIRECTION OUTPUT
+
+set_io -port_name MMUART_0_RXD_F2M \
+    -pin_name F15 \
+    -fixed true \
+    -io_std LVCMOS33 \
+    -DIRECTION INPUT

@@ -1,0 +1,68 @@
+## corefft_iso.gdb -- silicon iso-test of the FABRIC CoreFFT range-FFT path.
+## Drives fft_feeder(0x60004000) -> gearbox -> CoreFFT -> fft_unloader(0x60005000)
+## directly over JTAG (no firmware FFT: the current fft_pass() runs the CPU FFT, so we
+## poke the fabric kernels ourselves, like fft_iso_test.gdb does for the HLS K_FFT).
+##
+## Reg map (sar_kernels.h): +0x08 START/STATUS (write 1=start, read 0=done), +0x0c ARG0
+## (buffer addr), +0x10 ARG1 (nbeats). Word = (re<<16)|im (matches fft_golden hex).
+## Requires (per SILICON_ISO_TEST_RUNBOOK.md): CoreFFT fabric programmed FABRIC-ONLY so the
+## debug APP stays in eNVM (do NOT flash HSS/boot-mode-1 -- JTAG then can't halt), boot mode 0.
+## flush_l2_cache is the app fn: pushes gdb-loaded input L2->DDR (FIC0 non-coherent) before
+## arming, and evicts dst for readback. Placeholders filled by run_corefft_iso.sh.
+set pagination off
+set confirm off
+set architecture riscv:rv64
+set mem inaccessible-by-default off
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+target extended-remote localhost:3333
+monitor reset halt
+monitor mpfs.hart1_u54_1 arp_halt
+thread 2
+monitor resume
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
+monitor mpfs.hart1_u54_1 arp_halt
+
+echo >>> load N known FFT input rows to SIG 0x88000000\n
+restore @INBIN@ binary 0x88000000
+printf ">>> SIG[0..3] (row0 samples 0..3, expect (re<<16)|im): "
+x/4xw 0x88000000
+echo >>> pre-clear SCRATCH[0] + flush input L2->DDR (FIC0 non-coherent)\n
+set *(unsigned int*)0x98000000 = 0
+call (void) flush_l2_cache(1)
+
+echo >>> arm fft_unloader @0x60005000: dst=SCRATCH(0x98000000), nbeats=@NBEATS@, start\n
+set *(unsigned int*)0x60005010 = @NBEATS@
+set *(unsigned int*)0x6000500c = 0x98000000
+set *(unsigned int*)0x60005008 = 1
+echo >>> arm fft_feeder   @0x60004000: src=SIG(0x88000000),     nbeats=@NBEATS@, start\n
+set *(unsigned int*)0x60004010 = @NBEATS@
+set *(unsigned int*)0x6000400c = 0x88000000
+set *(unsigned int*)0x60004008 = 1
+
+## --- progress probe: read busy at 2s and 10s to see if the chain moves or is stuck ---
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(2)"
+monitor mpfs.hart1_u54_1 arp_halt
+printf ">>> t=2s  feeder busy(0=done)=%u  unloader busy(0=done)=%u\n", *(unsigned int*)0x60004008, *(unsigned int*)0x60005008
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(8)"
+monitor mpfs.hart1_u54_1 arp_halt
+printf ">>> t=10s feeder busy(0=done)=%u  unloader busy(0=done)=%u\n", *(unsigned int*)0x60004008, *(unsigned int*)0x60005008
+
+## --- HANG-PROOF: capture busy + a raw JTAG SCRATCH read/dump BEFORE any CPU flush.
+## If the fabric wedged an AXI transaction, flush_l2_cache() hangs the CPU un-haltably and
+## nothing after it runs -- so grab everything decisive FIRST. Raw JTAG DDR reads may see
+## stale L2 (FIC0 non-coherent) but still reveal whether the unloader wrote anything.
+echo >>> RAW (pre-flush) SCRATCH row0 [0..7]:\n
+x/8xw 0x98000000
+echo >>> RAW (pre-flush) dump SCRATCH -> OUTBIN (may be stale-L2 but hang-proof)\n
+dump binary memory @OUTBIN@ 0x98000000 (0x98000000 + @DUMPHEX@)
+
+## --- now attempt the coherent evict (LAST, because it may hang on a wedged fabric txn) ---
+echo >>> evict dst L2->DDR (flush_l2_cache -- HANGS if fabric AXI wedged; data already dumped above)\n
+call (void) flush_l2_cache(1)
+echo >>> COHERENT SCRATCH row0 [0..7] (transformed bins):\n
+x/8xw 0x98000000
+echo >>> COHERENT dump SCRATCH -> OUTBIN (overwrites raw dump when flush succeeds)\n
+dump binary memory @OUTBIN@ 0x98000000 (0x98000000 + @DUMPHEX@)
+monitor resume
+monitor shutdown
+quit

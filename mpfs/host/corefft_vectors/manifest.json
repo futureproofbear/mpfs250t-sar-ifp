@@ -1,0 +1,217 @@
+{
+  "n": 8192,
+  "nbits": 16,
+  "nbits_tw": 18,
+  "hex_format": "(uint16(I)<<16)|uint16(Q), two's complement",
+  "reference": "fixedpoint.fft1d_bfp (radix-2 DIT, BFP, truncated twiddles)",
+  "cases": {
+    "impulse": {
+      "e_in": -4,
+      "e_out": -4,
+      "bfp_shift": 0,
+      "stage_exps": [
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4
+      ],
+      "out_peak_code": 32000,
+      "files": {
+        "in": "impulse_in.hex",
+        "out": "impulse_out.hex"
+      }
+    },
+    "dc": {
+      "e_in": -4,
+      "e_out": 9,
+      "bfp_shift": 13,
+      "stage_exps": [
+        -4,
+        -3,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "out_peak_code": 31987,
+      "files": {
+        "in": "dc_in.hex",
+        "out": "dc_out.hex"
+      }
+    },
+    "tone": {
+      "e_in": -4,
+      "e_out": 9,
+      "bfp_shift": 13,
+      "stage_exps": [
+        -4,
+        -3,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "out_peak_code": 31993,
+      "files": {
+        "in": "tone_in.hex",
+        "out": "tone_out.hex"
+      }
+    },
+    "twotone": {
+      "e_in": -3,
+      "e_out": 9,
+      "bfp_shift": 12,
+      "stage_exps": [
+        -3,
+        -3,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "out_peak_code": 31994,
+      "files": {
+        "in": "twotone_in.hex",
+        "out": "twotone_out.hex"
+      }
+    },
+    "random": {
+      "e_in": -2,
+      "e_out": 5,
+      "bfp_shift": 7,
+      "stage_exps": [
+        -2,
+        -1,
+        -1,
+        0,
+        0,
+        0,
+        1,
+        1,
+        2,
+        2,
+        3,
+        3,
+        4,
+        5
+      ],
+      "out_peak_code": 17171,
+      "files": {
+        "in": "random_in.hex",
+        "out": "random_out.hex"
+      }
+    },
+    "impulse_k": {
+      "e_in": -4,
+      "e_out": -4,
+      "bfp_shift": 0,
+      "stage_exps": [
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4,
+        -4
+      ],
+      "out_peak_code": 32002,
+      "files": {
+        "in": "impulse_k_in.hex",
+        "out": "impulse_k_out.hex"
+      }
+    },
+    "twotone_hidr": {
+      "e_in": -4,
+      "e_out": 9,
+      "bfp_shift": 13,
+      "stage_exps": [
+        -4,
+        -3,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "out_peak_code": 31995,
+      "files": {
+        "in": "twotone_hidr_in.hex",
+        "out": "twotone_hidr_out.hex"
+      }
+    },
+    "dc_smalltone": {
+      "e_in": -4,
+      "e_out": 9,
+      "bfp_shift": 13,
+      "stage_exps": [
+        -4,
+        -3,
+        -2,
+        -1,
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "out_peak_code": 31987,
+      "files": {
+        "in": "dc_smalltone_in.hex",
+        "out": "dc_smalltone_out.hex"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+# Input data configuration for src/form_image_pfa.py
+# Override any field here; anything omitted falls back to the script defaults.
+
+# --- input dataset (Umbra open-data catalog) ---
+s3_base: https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com
+key: sar-data/tasks/ship_detection_testdata/6e495891-3cdd-4856-9b6f-b4f512a95f36/2023-09-06-06-12-08_UMBRA-04/2023-09-06-06-12-08_UMBRA-04_CPHD.cphd
+
+# --- local paths (relative to project root) ---
+data_root: data        # bucket mirror: data/<key...>  (download target / cache)
+output_dir: output      # generated products
+
+# --- processing ---
+mode: pfa               # pfa | quicklook
+decimate_pulse: 1       # >1 -> coarser azimuth resolution, faster / less RAM
+decimate_sample: 1      # >1 -> coarser range resolution, faster / less RAM
+window: true            # Hamming taper to suppress sidelobes
+estimate_only: false    # true -> print the resource estimate and stop
+
+# --- detected GeoTIFF / geocoding ---
+save_geotiff: true
+geo_epsg: auto          # "auto" -> derive UTM zone from the scene; or a fixed EPSG int
+flip_col: true          # rot180 vs the GEC convention (verified on Centerfield)
+flip_row: true

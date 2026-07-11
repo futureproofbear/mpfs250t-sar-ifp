@@ -1,0 +1,172 @@
+[1m[33m> 'Source Code and/or Project Settings' is more recent than 'Compile Software to Hardware' step.[39m[0m
+  Enter 'Y' (yes) to run the following step(s) automatically before continuing to 'SW/HW Co-Simulation'.
+  Alternatively, you may override the step(s) as up to date if the source code or project setting changes do not affect the step(s) below.
+
+  - Compile Software to Hardware
+
+Y - yes (default)
+s - no, skip above step(s)
+o - no, skip and override above step(s) as up to date
+c - cancel
+[Y/s/o/c]:
+Info: Running the following targets: hw cosim
+----------------------------------------------------------------------------
+Smart High-Level Synthesis Tool Version 2025.2
+Copyright (c) 2015-2025 Microchip Technology Inc. All Rights Reserved.
+For support, please visit https://onlinedocs.microchip.com/v2/keyword-lookup?keyword=techsupport&redirect=true&version=latest.
+Date: Mon Jun 22 10:11:05 2026
+----------------------------------------------------------------------------
+Info: Checking for Libero license.
+Info: Libero license found.
+corner_turn.cpp:39:26: warning: [HLS pragma] ignored: expected a loop after the pragma [-Wignored-pragmas]
+#pragma HLS loop pipeline
+                         ^
+corner_turn.cpp:47:26: warning: [HLS pragma] ignored: expected a loop after the pragma [-Wignored-pragmas]
+#pragma HLS loop pipeline
+                         ^
+2 warnings generated.
+Info: Completely unrolling the loop on line 36 of corner_turn.cpp
+Info: Completely unrolling the loop on line 46 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info: Partially unrolling the loop on line 38 of corner_turn.cpp
+Info:    (SHLS-87) Add 'NoInline' attribute to the user-specified function 'corner_turn'.
+Info:    (SHLS-23) Partitioning memory 'band' on line 32 of corner_turn.cpp into 8 partitions.
+Info: Default FIFO depth is set to 2
+Info: Default FIFO depth is set to 2
+Info: Running Allocation.
+Info: Target FPGA: MICROCHIP PolarFireSoC.
+Info: Project type: hw_only
+Info: Clock period constraint: 5.00 ns (200.00 MHz).
+Info: Allocating memories.
+Info: Running Scheduling for function: corner_turn(unsigned int*, unsigned int*).
+Info: Found a group of dependent FIFOs: axi4initiator_aw_addr, axi4initiator_w_data, axi4initiator_b_resp
+Info: Found a group of dependent FIFOs: axi4initiator_ar_addr, axi4initiator_r_data
+Info: Done Scheduling.
+Info: Generating RTL for function: corner_turn(unsigned int*, unsigned int*).
+Info: Generating module declaration.
+Info: Generating module signals.
+Info: Running Binding for function: corner_turn(unsigned int*, unsigned int*).
+Info: Generating module datapath.
+Info: Generating interconnect for top-level module.
+Info: Outputting VHDL wrapper for top-level module: corner_turn_top
+Info: Printing RTL to file.
+Info: Outputting top-level module: corner_turn_top.
+Info: Exporting IP modules.
+Info: Generating HDL+ Tcl script to be imported in SmartDesign: C:\Users\lkwangsi\Documents\github\sarProcessor\mpfs\fpga\hls_corner_turn\hls_output\scripts\\libero\create_hdl_plus.tcl.
+Info: Generated accelerator driver files are in hls_output/accelerator_drivers/
+Info:    (SHLS-2) Generating Co-simulation Software Wrapper.
+Info: Compiling Software...
+Gathering inputs/outputs from software execution for corner_turn function call 1.
+corner_turn 128x128 band 8: PASS (0 errors)
+Info:    (SHLS-2) Generating Co-simulation RTL testbench.
+Info: Running RTL simulation
+QuestaSim Pro Microchip Edition-64 vlog 2024.3 Compiler 2024.09 Sep 10 2024
+Start time: 10:13:23 on Jun 22,2026
+vlog -sv "+define+MEM_INIT_DIR="C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/hls_corner_turn/hls_output/rtl/mem_init/"" "+delay_mode_zero" C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/hls_corner_turn/hls_output/rtl/hls_corner_turn_corner_turn.v cosim_tb.sv 
+-- Compiling module corner_turn_top
+-- Compiling module corner_turn_hw_top
+-- Compiling module corner_turn_corner_turn
+-- Compiling module corner_turn_axi4slv
+-- Compiling module corner_turn_axi4slv_accel_ctrl
+-- Compiling module corner_turn_axi4slv_ram_dual_port_drwp
+-- Compiling module corner_turn_axi4slv_read_controller
+-- Compiling module corner_turn_axi4slv_register
+-- Compiling module corner_turn_axi4slv_write_controller
+-- Compiling module corner_turn_first_word
+-- Compiling module corner_turn_shift_reg
+-- Compiling module corner_turn_ram_dual_port
+-- Compiling module corner_turn_ram_dual_port_byte_enabled
+-- Compiling module corner_turn_ram_dual_port_regular
+-- Compiling module corner_turn_fwft_fifo
+-- Compiling module corner_turn_fwft_fifo_bram
+-- Compiling module corner_turn_fwft_fifo_lutram
+-- Compiling module corner_turn_simple_ram_dual_port_fifo
+-- Compiling module corner_turn_lutram_dual_port_fifo
+-- Compiling module corner_turn_ram_single_port
+-- Compiling module corner_turn_top_tb
+-- Compiling module cosim_tb
+-- Compiling module cosim_axi4slv
+-- Compiling module cosim_axi4slv_accel_ctrl
+-- Compiling module cosim_axi4slv_ram_dual_port_drwp
+-- Compiling module cosim_axi4slv_read_controller
+-- Compiling module cosim_axi4slv_register
+-- Compiling module cosim_axi4slv_write_controller
+-- Compiling module cosim_first_word
+-- Compiling module cosim_shift_reg
+-- Compiling module cosim_ram_dual_port
+-- Compiling module cosim_ram_dual_port_byte_enabled
+-- Compiling module cosim_ram_dual_port_regular
+-- Compiling module cosim_fwft_fifo
+-- Compiling module cosim_fwft_fifo_bram
+-- Compiling module cosim_fwft_fifo_lutram
+-- Compiling module cosim_simple_ram_dual_port_fifo
+-- Compiling module cosim_lutram_dual_port_fifo
+
+Top level modules:
+	cosim_tb
+End time: 10:13:25 on Jun 22,2026, Elapsed time: 0:00:02
+Errors: 0, Warnings: 0
+Reading pref.tcl
+
+# 2024.3
+
+# vsim -suppress 8607 -suppress 2249 -suppress 2685 -suppress 2718 -suppress 3017 -suppress 3722 -suppress 12110 -suppress 8891 -suppress 14423 "+nowarn8891" -l transcript -c -do "set StdArithNoWarnings 1; run 1000000000000000ns; exit;" work.cosim_tb 
+# Start time: 10:13:34 on Jun 22,2026
+# ** Note: (vsim-3813) Design is being optimized due to module recompilation...
+# //  QuestaSim Pro Microchip Edition-64
+# //  Version 2024.3 win64 Sep 10 2024
+# //
+# // Unpublished work. Copyright 2024 Siemens
+# //
+# // This material contains trade secrets or otherwise confidential information
+# // owned by Siemens Industry Software Inc. or its affiliates (collectively,
+# // "SISW"), or its licensors. Access to and use of this information is strictly
+# // limited as set forth in the Customer's applicable agreements with SISW.
+# //
+# // This material may not be copied, distributed, or otherwise disclosed outside
+# // of the Customer's facilities without the express written permission of SISW,
+# // and may not be used in any way not expressly authorized by SISW.
+# //
+# Loading sv_std.std
+# Loading work.cosim_tb(fast)
+# set StdArithNoWarnings 1
+# 1
+#  run 1000000000000000ns
+# Running SW/HW co-simulation...
+# Initializing AXI target input arguments at cycle =           0
+# AXI target initialization: Writing argument "dst_addr" at cycle =           0
+# AXI target initialization: Writing argument "src_addr" at cycle =           0
+# Finished initializing of AXI target input arguments at cycle =           0
+# --- corner_turn_top Call           0: start at cycle =           0
+# Initializing memory dst at cycle =           0
+# Initializing memory src at cycle =           0
+# --- corner_turn_top Call           0: finish at cycle =      153763, total latency =      153763
+# Storing memory contents dst at cycle =      153763
+# Storing memory contents src at cycle =      153763
+#           1 /           1 function calls completed.
+# Retrieving AXI target output arguments at cycle =      153763
+# Finished retrieving AXI target output arguments at cycle =      153763
+# corner_turn_top execution time (cycles):      153763
+# Number of calls:           1
+# corner_turn_top simulation time (cycles):      153763
+# ** Note: $finish    : cosim_tb.sv(1081)
+#    Time: 768897500 ps  Iteration: 1  Instance: /cosim_tb
+# End time: 10:14:09 on Jun 22,2026, Elapsed time: 0:00:35
+# Errors: 0, Warnings: 0, Suppressed Warnings: 47
+Info: Verifying RTL simulation
+Retrieving hardware outputs from RTL simulation for corner_turn function call 1.
+corner_turn 128x128 band 8: PASS (0 errors)
++-----------------+-----------------+--------------------------+----------------------------+-----------------------+
+| Top-Level Name  | Number of calls | Simulation time (cycles) | Call Latency (min/max/avg) | Call II (min/max/avg) |
++-----------------+-----------------+--------------------------+----------------------------+-----------------------+
+| corner_turn_top | 1               | 153,763                  | 153,763 (single call)      | N/A (single call)     |
++-----------------+-----------------+--------------------------+----------------------------+-----------------------+
+Simulation time (cycles): 153,763
+SW/HW co-simulation: PASS
+

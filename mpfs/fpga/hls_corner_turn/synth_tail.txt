@@ -1,0 +1,29 @@
+[1m[33m> 'Source Code and/or Project Settings' is more recent than 'Compile Software to Hardware' step.[39m[0m
+  Enter 'Y' (yes) to run the following step(s) automatically before continuing to 'Run Libero RTL synthesis'.
+  Alternatively, you may override the step(s) as up to date if the source code or project setting changes do not affect the step(s) below.
+
+  - Compile Software to Hardware
+
+Y - yes (default)
+s - no, skip above step(s)
+o - no, skip and override above step(s) as up to date
+c - cancel
+[Y/s/o/c]:
+Info: Running the following targets: hw rtl_synth
+----------------------------------------------------------------------------
+Smart High-Level Synthesis Tool Version 2025.2
+Copyright (c) 2015-2025 Microchip Technology Inc. All Rights Reserved.
+For support, please visit https://onlinedocs.microchip.com/v2/keyword-lookup?keyword=techsupport&redirect=true&version=latest.
+Date: Mon Jun 22 08:00:44 2026
+----------------------------------------------------------------------------
+Info: Checking for Libero license.
+Info: Libero license found.
+corner_turn.cpp:49:26: warning: [HLS pragma] ignored: expected a loop after the pragma [-Wignored-pragmas]
+#pragma HLS loop pipeline
+                         ^
+corner_turn.cpp:56:26: warning: [HLS pragma] ignored: expected a loop after the pragma [-Wignored-pragmas]
+#pragma HLS loop pipeline
+                         ^
+2 warnings generated.
+Error: max_outstanding_reads must be in the range 1-8 (inclusive).
+Error: SmartHLS has exited due to an error. For support, please visit https://onlinedocs.microchip.com/v2/keyword-lookup?keyword=techsupport&redirect=true&version=latest.

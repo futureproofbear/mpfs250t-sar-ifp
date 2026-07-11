@@ -1,0 +1,140 @@
+set sd SAR_TOP
+catch {delete_component -component_name $sd}
+create_smartdesign -sd_name $sd
+
+## ---------------- instantiate ----------------
+sd_instantiate_component -sd_name $sd -component_name {ICICLE_MSS}   -instance_name {MSS}
+sd_instantiate_component -sd_name $sd -component_name {PF_CCC_C0}    -instance_name {CCC}
+sd_instantiate_component -sd_name $sd -component_name {CORERESET_C0} -instance_name {RST}
+sd_instantiate_component -sd_name $sd -component_name {AXIIC_C0}     -instance_name {DIC}
+sd_instantiate_component -sd_name $sd -component_name {AXIIC_CTRL}   -instance_name {CIC}
+sd_instantiate_component -sd_name $sd -component_name {COREFFT_C0}   -instance_name {FFT}
+sd_instantiate_component -sd_name $sd -component_name {AXIDMA_C0}    -instance_name {DMA}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corner_turn_top}          -instance_name {CT}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {window_top}               -instance_name {WIN}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {detect_top}               -instance_name {DET}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {resample_top}             -instance_name {RES}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_feeder_top}           -instance_name {FEED}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corefft_stream64_adapter} -instance_name {GBX}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_axi_idconv}           -instance_name {ID_FIX}
+
+## ---------------- clocks ----------------
+sd_create_scalar_port -sd_name $sd -port_name {REF_CLK_50MHz} -port_direction {IN}
+sd_instantiate_macro -sd_name $sd -macro_name {CLKINT} -instance_name {CLKREF}
+sd_connect_pins -sd_name $sd -pin_names {"REF_CLK_50MHz" "CLKREF:A"}
+sd_connect_pins -sd_name $sd -pin_names {"CLKREF:Y" "CCC:REF_CLK_0"}
+sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT0_FABCLK_0" \
+    "MSS:FIC_0_ACLK" "DIC:ACLK" "CIC:ACLK" "DMA:CLOCK" "FFT:CLK" "GBX:clk" \
+    "CT:clk" "WIN:clk" "DET:clk" "RES:clk" "FEED:clk" "RST:CLK" "ID_FIX:ACLK"}
+sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT1_FABCLK_0" "FFT:SLOWCLK"}
+
+## ---------------- reset (CORERESET_PF) ----------------
+sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:BANK_x_VDDI_STATUS} -value {VCC}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:BANK_y_VDDI_STATUS} -value {VCC}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:SS_BUSY}            -value {GND}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:FF_US_RESTORE}      -value {GND}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:INIT_DONE}          -value {VCC}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:FPGA_POR_N}         -value {VCC}
+sd_connect_pins -sd_name $sd -pin_names {"CCC:PLL_LOCK_0"        "RST:PLL_LOCK"}
+sd_connect_pins -sd_name $sd -pin_names {"RST:PLL_POWERDOWN_B"   "CCC:PLL_POWERDOWN_N_0"}
+sd_connect_pins -sd_name $sd -pin_names {"MSS:MSS_RESET_N_M2F"   "RST:EXT_RST_N"}
+sd_connect_pins -sd_name $sd -pin_names {"RST:FABRIC_RESET_N" \
+    "FFT:NGRST" "DMA:RESETN" "DIC:ARESETN" "CIC:ARESETN" "GBX:resetn" "ID_FIX:ARESETN"}
+foreach k {CT WIN DET RES FEED} {
+    sd_invert_pins -sd_name $sd -pin_names "${k}:reset"
+    sd_connect_pins -sd_name $sd -pin_names "RST:FABRIC_RESET_N ${k}:reset"
+}
+
+## ---------------- data plane (AXIIC 3.0.130): 6 initiators -> DIC -> ID_FIX -> MSS FIC0 ----------------
+sd_connect_pins -sd_name $sd -pin_names {"CT:axi4initiator"        "DIC:AXI4minitiator0"}
+sd_connect_pins -sd_name $sd -pin_names {"WIN:axi4initiator"       "DIC:AXI4minitiator1"}
+sd_connect_pins -sd_name $sd -pin_names {"DET:axi4initiator"       "DIC:AXI4minitiator2"}
+sd_connect_pins -sd_name $sd -pin_names {"RES:axi4initiator"       "DIC:AXI4minitiator3"}
+sd_connect_pins -sd_name $sd -pin_names {"FEED:axi4initiator"      "DIC:AXI4minitiator4"}
+sd_connect_pins -sd_name $sd -pin_names {"DMA:AXI4InitiatorDMA_IF" "DIC:AXI4minitiator5"}
+sd_connect_pins -sd_name $sd -pin_names {"DIC:AXI4mtarget0" "ID_FIX:S_AXI"}
+## ID_FIX:M_AXI -> MSS FIC_0_AXI4_S at SIGNAL level (interface-metadata incompatible; signals match exactly)
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARADDR" "MSS:FIC_0_AXI4_S_ARADDR"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARBURST" "MSS:FIC_0_AXI4_S_ARBURST"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARCACHE" "MSS:FIC_0_AXI4_S_ARCACHE"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARID" "MSS:FIC_0_AXI4_S_ARID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARLEN" "MSS:FIC_0_AXI4_S_ARLEN"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARLOCK" "MSS:FIC_0_AXI4_S_ARLOCK"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARPROT" "MSS:FIC_0_AXI4_S_ARPROT"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARQOS" "MSS:FIC_0_AXI4_S_ARQOS"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARREADY" "MSS:FIC_0_AXI4_S_ARREADY"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARSIZE" "MSS:FIC_0_AXI4_S_ARSIZE"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_ARVALID" "MSS:FIC_0_AXI4_S_ARVALID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWADDR" "MSS:FIC_0_AXI4_S_AWADDR"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWBURST" "MSS:FIC_0_AXI4_S_AWBURST"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWCACHE" "MSS:FIC_0_AXI4_S_AWCACHE"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWID" "MSS:FIC_0_AXI4_S_AWID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWLEN" "MSS:FIC_0_AXI4_S_AWLEN"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWLOCK" "MSS:FIC_0_AXI4_S_AWLOCK"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWPROT" "MSS:FIC_0_AXI4_S_AWPROT"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWQOS" "MSS:FIC_0_AXI4_S_AWQOS"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWREADY" "MSS:FIC_0_AXI4_S_AWREADY"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWSIZE" "MSS:FIC_0_AXI4_S_AWSIZE"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWVALID" "MSS:FIC_0_AXI4_S_AWVALID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BID" "MSS:FIC_0_AXI4_S_BID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BREADY" "MSS:FIC_0_AXI4_S_BREADY"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BRESP" "MSS:FIC_0_AXI4_S_BRESP"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BVALID" "MSS:FIC_0_AXI4_S_BVALID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RDATA" "MSS:FIC_0_AXI4_S_RDATA"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RID" "MSS:FIC_0_AXI4_S_RID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RLAST" "MSS:FIC_0_AXI4_S_RLAST"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RREADY" "MSS:FIC_0_AXI4_S_RREADY"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RRESP" "MSS:FIC_0_AXI4_S_RRESP"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RVALID" "MSS:FIC_0_AXI4_S_RVALID"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WDATA" "MSS:FIC_0_AXI4_S_WDATA"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WLAST" "MSS:FIC_0_AXI4_S_WLAST"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WREADY" "MSS:FIC_0_AXI4_S_WREADY"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WSTRB" "MSS:FIC_0_AXI4_S_WSTRB"}
+sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WVALID" "MSS:FIC_0_AXI4_S_WVALID"}
+
+## ---------------- control plane (AXIIC 3.0.130): FIC0 initiator -> CIC -> 6 targets ----------------
+sd_connect_pins -sd_name $sd -pin_names {"MSS:FIC_0_AXI4_INITIATOR" "CIC:AXI4minitiator0"}
+sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget0" "CT:axi4target"}
+sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget1" "WIN:axi4target"}
+sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget2" "DET:axi4target"}
+sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget3" "RES:axi4target"}
+sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget4" "FEED:axi4target"}
+sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4Lmtarget5" "DMA:AXI4TargetCtrl_IF"}
+
+## ---------------- CoreFFT streaming path ----------------
+sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var"       "GBX:s_axis_tdata"}
+sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var_valid" "GBX:s_axis_tvalid"}
+sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var_ready" "GBX:s_axis_tready"}
+sd_connect_pins -sd_name $sd -pin_names {"GBX:datai_re"    "FFT:DATAI_RE"}
+sd_connect_pins -sd_name $sd -pin_names {"GBX:datai_im"    "FFT:DATAI_IM"}
+sd_connect_pins -sd_name $sd -pin_names {"GBX:datai_valid" "FFT:DATAI_VALID"}
+sd_connect_pins -sd_name $sd -pin_names {"FFT:BUF_READY"   "GBX:buf_ready"}
+sd_connect_pins -sd_name $sd -pin_names {"FFT:DATAO_RE"    "GBX:datao_re"}
+sd_connect_pins -sd_name $sd -pin_names {"FFT:DATAO_IM"    "GBX:datao_im"}
+sd_connect_pins -sd_name $sd -pin_names {"FFT:DATAO_VALID" "GBX:datao_valid"}
+sd_connect_pins -sd_name $sd -pin_names {"FFT:OUTP_READY"  "GBX:outp_ready"}
+sd_connect_pins -sd_name $sd -pin_names {"GBX:read_outp"   "FFT:READ_OUTP"}
+sd_connect_pins -sd_name $sd -pin_names {"GBX:m_axis_tdata"  "DMA:TDATA"}
+sd_connect_pins -sd_name $sd -pin_names {"GBX:m_axis_tvalid" "DMA:TVALID"}
+sd_connect_pins -sd_name $sd -pin_names {"DMA:TREADY"        "GBX:m_axis_tready"}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {DMA:TKEEP}     -value {VCC}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {DMA:TSTRB}     -value {VCC}
+## TLAST from the gearbox (asserted on each transform's last output beat) -- REQUIRED: the
+## CoreAXI4DMAController stream target FSM gates transaction-close on TLAST (was tied GND -> the
+## 2nd back-to-back stream transaction hung; silicon+RTL confirmed).
+sd_connect_pins -sd_name $sd -pin_names {"GBX:m_axis_tlast" "DMA:TLAST"}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {DMA:TID}       -value {GND}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {DMA:TDEST}     -value {GND}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {DMA:STRTDMAOP} -value {GND}
+
+## ---------------- misc + MSS ----------------
+sd_mark_pins_unused -sd_name $sd -pin_names {FFT:SCALE_EXP}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {MSS:MSS_INT_F2M} -value {GND}
+sd_mark_pins_unused -sd_name $sd -pin_names {MSS:MSS_INT_M2F}
+sd_connect_instance_pins_to_ports -sd_name $sd -instance_name {MSS}
+
+## ---------------- generate ----------------
+save_smartdesign -sd_name $sd
+generate_component -component_name $sd
+save_project
+puts "SARTOP330_DONE"

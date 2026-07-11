@@ -1,0 +1,20 @@
+schema: spec-driven
+
+context: |
+  Domain: Synthetic Aperture Radar (SAR) image-formation processor on a Microchip PolarFire
+  SoC (MPFS250T_ES, FCVG484). JTAG-only bring-up (no ethernet/UART data path) -> bare-metal C
+  on the MSS + fabric HLS/Verilog kernels + host-offload over FlashPro6.
+  Data plane: complex range lines move DDR -> fabric kernels -> DDR via FIC_0 (non-coherent).
+  Toolchain: Libero SoC 2025.2 (headless tcl), SmartHLS 2025.2, QuestaSim, OpenOCD+gdb over
+  FlashPro6/J33. RTL is Verilog; builds are gated on TIMING MET (setup + hold).
+  Key hard-won facts live in docs/fpga/*.md (SILICON_ISO_TEST_RUNBOOK, SMARTDEBUG_RUNBOOK,
+  LIBERO_HEADLESS_PLAYBOOK) and in the agent memory. The shipping FFT runs on the MSS CPU
+  (corr 0.9923); CoreFFT-on-fabric is the in-progress acceleration path.
+
+rules:
+  proposal:
+    - State the silicon/RTL evidence, not just intent. Cite file:line and UG section where relevant.
+    - Include a "Non-goals" section; call out what stays on the CPU / stays unchanged.
+  tasks:
+    - Every RTL change task must name its verification (a QuestaSim TB target or a silicon iso-test case).
+    - A fabric-rebuild task is not done until TIMING MET (setup + hold) is verified.

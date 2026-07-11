@@ -1,0 +1,93 @@
+Info: Running the following targets: rtl_synth
+----------------------------------------------------------------------------
+Smart High-Level Synthesis Tool Version 2025.2
+Copyright (c) 2015-2025 Microchip Technology Inc. All Rights Reserved.
+For support, please visit https://onlinedocs.microchip.com/v2/keyword-lookup?keyword=techsupport&redirect=true&version=latest.
+Date: Mon Jun 22 08:05:58 2026
+----------------------------------------------------------------------------
+Info: Checking for Libero license.
+Info: Libero license found.
+Console Mode = TCL_BEGIN: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\setup_proj_libero.tcl
+
+Fetching device info...
+
+Creating new Libero project in C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/hls_corner_turn/hls_output/synthesis/hls_corner_turn/
+
+Info: This version of Libero supports only the enhanced constraint flow.
+The hls_corner_turn project was created.
+Linking constraints file:
+
+    hls_corner_turn.sdc
+
+Linking Verilog files:
+
+    ../rtl/hls_corner_turn_corner_turn.v
+
+Building design hierarchy...
+
+Reading file 'C:\Users\lkwangsi\Documents\github\sarProcessor\mpfs\fpga\hls_corner_turn\hls_output\rtl\hls_corner_turn_corner_turn.v'.
+Configuring synthesis tool...
+
+Saving and closing the project...
+
+The hls_corner_turn project was closed.
+TCL_END: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\setup_proj_libero.tcl
+
+The Execute Script command succeeded.
+Console Mode = TCL_BEGIN: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\synthesize_libero.tcl
+
+Reading file 'C:\Users\lkwangsi\Documents\github\sarProcessor\mpfs\fpga\hls_corner_turn\hls_output\rtl\hls_corner_turn_corner_turn.v'.
+The hls_corner_turn project was opened.
+INFO: The option "Abort flow if errors are found in SDC" is turned ON in Project Settings> Design flow page. The Synthesis tool will fail if errors are found in associated SDC files. Please uncheck the option to ignore the errors and continue running the tool
+
+Info: Active implementation is 'synthesis'
+Starting Synplify Pro ME...
+
+
+===============================================================================.
+
+
+
+Info: Global design data: 
+
+      Total globals:                       1 
+
+      Globals that cannot be demoted:      0 
+
+      Globals considered for demotion:     1 
+
+
+
+
+
+Info: List of globals considered for demotion: 
+
+    CLK    ASYN   DATA   Instance Name 
+
+    ---    ----   ----   ------------- 
+
+    4151   0      0      'I_1' 
+
+
+
+Info: Demotion information: 
+
+Info: [127205381]:  CMPPF_302: Added 0 row global instances.
+
+Info: [127205382]:  CMPPF_303: Deleted 0 global instances.
+
+
+
+===============================================================================.
+
+
+
+Info: [127205590]:  BLK014: Adding interface buffers. Port processed: 474, Added buffers: 427.
+
+Synthesis completed.
+Info: Successfully wrote HDL file 'C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/hls_corner_turn/hls_output/synthesis/hls_corner_turn/synthesis/corner_turn_top.v'
+
+TCL_END: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\synthesize_libero.tcl
+
+The Execute Script command succeeded.
+The hls_corner_turn project was closed.

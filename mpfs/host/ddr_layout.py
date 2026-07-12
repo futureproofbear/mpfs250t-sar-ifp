@@ -65,6 +65,9 @@ KRGRID_ADDR   = GEOM_BASE + 0x28000     # float32[Np] padded range query grid
 KCGRID_ADDR   = GEOM_BASE + 0x30000     # float32[Mp] padded cross query grid
 HAMR_ADDR     = GEOM_BASE + 0x38000     # int16[Np]   1-D range Hamming taper (Q15)
 HAMC_ADDR     = GEOM_BASE + 0x40000     # int16[Mp]   1-D cross Hamming taper (Q15)
+# GEOM_BASE + 0x48000 .. + 0x380000 is firmware-internal resample-coeff scratch
+# (single-line banks + chunked banks, see SAR_COEF*/SAR_COEFC* in ddr_sar_layout.h).
+# The host does NOT load it; keep host allocations clear of this range.
 
 DDR_TOP = DDR_BASE + 0x40000000      # 1 GiB ceiling (0xC0000000)
 

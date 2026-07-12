@@ -1,7 +1,7 @@
 /*******************************************************************************
  * ddr_sar_layout.h
  *
- * Bare-metal mirror of the host module sarProcessor/mpfs/host/ddr_layout.py.
+ * Bare-metal mirror of the host module mpfs250t-sar-ifp/mpfs/host/ddr_layout.py.
  * Defines the JTAG-batch SAR contract: DDR buffer addresses, the accelerator
  * AXI4-Lite register map, and the job descriptor the host bakes into DDR.
  *
@@ -68,6 +68,23 @@ extern "C" {
 #define SAR_GRID_MAX        (8192u)
 #define SAR_FRAME_BYTES     ((uint64_t)SAR_GRID_MAX * SAR_GRID_MAX * 4u)  /* 256 MiB */
 #define SAR_OUT_BYTES       ((uint64_t)SAR_GRID_MAX * SAR_GRID_MAX * 2u)  /* 128 MiB */
+
+/* Chunked resample coefficients (per-CHUNK L2 flush instead of per-line).
+ * The per-line whole-L2 flush -- each walks all 16 L2 ways, and it sits on the
+ * resample critical path -- dominated the stage. The sequencer now precomputes
+ * RESAMPLE_CHUNK lines of coeffs per fabric-arm batch and flushes ONCE per
+ * chunk. Two chunk banks, double-buffered: the fabric streams bank b while the
+ * MSS fills bank b^1, so the next chunk's coeff compute overlaps this chunk's
+ * kernel runs (as the per-line path already did). Each line slot is a fixed
+ * 48 KiB (32 KiB idx + 16 KiB wq) sized for the worst-case grid, so the slot
+ * stride is Np/Mp-agnostic. Firmware-internal DDR scratch (host does not load
+ * it; reserved in ddr_layout.py). Numerically identical to the per-line path. */
+#define RESAMPLE_CHUNK          (16u)
+#define SAR_COEFC_LINE_BYTES    ((uint64_t)SAR_GRID_MAX * 4u + (uint64_t)SAR_GRID_MAX * 2u) /* 48 KiB */
+#define SAR_COEFC_BASE          (SAR_GEOM_BASE + 0x100000ULL)   /* 1 MiB into geom, clear of the F32 scratch */
+#define SAR_COEFC_BANK(b)       (SAR_COEFC_BASE + (uint64_t)(b) * (uint64_t)RESAMPLE_CHUNK * SAR_COEFC_LINE_BYTES)
+#define SAR_COEFC_IDX(b, c)     (SAR_COEFC_BANK(b) + (uint64_t)(c) * SAR_COEFC_LINE_BYTES)   /* int32[<=Np] */
+#define SAR_COEFC_WQ(b, c)      (SAR_COEFC_IDX(b, c) + (uint64_t)SAR_GRID_MAX * 4u)          /* int16[<=Np] */
 
 /* ---- Accelerator AXI4-Lite control base (mapped via FIC) -----------------
  * PLACEHOLDER: set to the real fabric base from the Libero memory map once the

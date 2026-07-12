@@ -73,6 +73,40 @@ Current ~120 s is a bring-up baseline, not optimized. Biggest levers, in rough R
    (per-line float geometry on one hart + a per-line whole-L2 flush). Parallelize the coeff computation
    across harts, and/or make FIC0 cache-coherent (MSS config) to drop the per-line `flush_l2_cache`
    (each flush walks all 16 L2 ways). The per-line flush is a large hidden cost.
+   - **[Step A — IMPLEMENTED, pending silicon verification] Per-chunk L2 flush (firmware-only).**
+     `resample_2pass()` now precomputes `RESAMPLE_CHUNK` (=16) lines of coeffs per fabric-arm batch and
+     flushes ONCE per chunk instead of per line (16× fewer whole-L2 flushes), double-buffering the next
+     chunk's coeffs against the current chunk's kernel runs. Numerically identical (pure orchestration);
+     no bitstream rebuild. New DDR scratch `SAR_COEFC_*` (chunk banks) in `ddr_sar_layout.h`
+     (0xB020_0000, 1.5 MiB, reserved in `ddr_layout.py`). Compiles clean under the RISC-V toolchain;
+     addressing + chunk-loop bookkeeping validated board-free (`scratchpad/chunk_check.c` logic).
+     **Verify:** rebuild the SoftConsole app (firmware only), reprogram, run the full-pipeline iso-test;
+     confirm OUT correlation is UNCHANGED (T.rot180 vs golden) and read the resample stage time (SAR_PROG
+     heartbeat / per-stage timing) vs the ~32 s azimuth baseline. This measurement decides whether Step B
+     is worth the RTL rebuild: if the per-line flush was the dominant cost, resample should drop sharply
+     from ~32 s; if it barely moves, the cost is the single-hart coeff compute → do the multi-hart split.
+   - **[Step B — kernel written + validated, needs `libero-build` + board] Kernel self-sequences C
+     lines per arm.** HLS `resample_chunk` (`mpfs/fpga/hls_resample_chunk/resample_chunk.cpp`) loops all
+     `nlines` internally: the MSS arms it ONCE per chunk and the fabric streams the lines back-to-back
+     (one arm/poll per chunk instead of per line). Same on-chip line-buffer + local gather as the
+     per-line kernel; numeric contract bit-identical. Validated board-free: compiles under the RISC-V
+     toolchain, and a self-sequencing model equals the per-line reference across permuted/identity/
+     padded-stride/zero-fill cases (Python equivalence check). Only worth the bitstream rebuild if Step A
+     shows arm/poll still dominates after the flush is gone (unlikely — arm/poll is a few register writes
+     + a spin). Wiring the bitstream rebuild needs:
+     - Register map: 9 args → `HLS_ARG0..ARG8` at `0x0c..0x2c` in `sar_kernels.h`
+       (ARG0 in, ARG1 idx, ARG2 wq, ARG3 out, ARG4 out_off, ARG5 nlines, ARG6 nin, ARG7 nout,
+       ARG8 in_stride). SmartHLS auto-generates these control registers from the signature.
+     - Coeff layout: Step B packs coeffs CONTIGUOUSLY per line (idx[C·nout] int32, wq[C·nout] int16)
+       plus an `out_off[C]` int32 table — distinct from Step A's fixed 48 KiB slots; place both in the
+       reserved `SAR_COEFC_*` tables area. `out_off[l] = invord[l]·Np` (pass 1) or `l·Mp` (pass 2).
+     - Sequencer: replace the per-line inner arm loop with per-chunk fill (idx/wq/out_off for C lines) →
+       one `flush_l2_cache` → write the 9 arg regs → `sar_k_start` → `sar_k_wait`.
+     - Core register + assembly: `shls hw` the new core, register `resample_chunk_top`, and instantiate
+       it in `sartop_assembly.tcl` (mirrors the `resample_top`/`RES` instance). Build via `libero-build`
+       (timing MUST close — setup AND hold — before the bitstream is exported).
+     - Consideration (PolarFire): to later overlap line l+1's read with line l's write inside the kernel,
+       give `in` (read) and `out` (write) separate AXI IDs / `m_axi` ports so they don't stall each other.
 3. **Fix / replace the fabric FFT (~32 s → ~4 s/pass).** If the SmartHLS butterfly bug is resolved
    (Microchip support, a different FFT structure, or a hardened FFT IP), the FFT returns to fabric at
    II=1 throughput. Would also free the harts. Highest ceiling but highest risk/effort.

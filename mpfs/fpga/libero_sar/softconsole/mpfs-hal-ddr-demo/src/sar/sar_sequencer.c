@@ -167,32 +167,45 @@ static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins)
  *   leaving the resampled k-space in SCRATCH (range x cross).
  * The resample kernel runs one line per call; the MSS double-buffers the next
  * line's coefficients (bank b^1) while the current line (bank b) streams. */
+/* Chunked so the fabric is armed RESAMPLE_CHUNK lines between whole-L2 flushes.
+ * The per-line flush (each walks all 16 L2 ways) sat on the resample critical
+ * path and dominated the stage. Coeffs for the NEXT chunk are computed into the
+ * other chunk bank (double-buffered) while THIS chunk streams, then flushed once
+ * at the chunk boundary -- same compute/kernel overlap as the per-line path, but
+ * ~RESAMPLE_CHUNK-fewer flushes. Numerically identical (pure orchestration). */
 static int resample_2pass(const sar_geom_t *g, uint32_t spins)
 {
     float *f32 = (float *)(uintptr_t)SAR_COEF_LINE_F32;
     const int32_t *invord = (const int32_t *)(uintptr_t)SAR_INVORDER_ADDR;
     const uint32_t Np = g->Np, Mp = g->Mp;
-    int b = 0;
+    const uint32_t C = RESAMPLE_CHUNK;
+    int cb = 0;                       /* active chunk bank (fabric reads cb, MSS fills cb^1) */
 
-    /* PASS 1 (range) */
-    sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
-                                (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
-    for (uint32_t i = 0; i < g->M; i++) {
-        SAR_PROG(1u, i, g->M);
-        sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);            /* in  (N-wide) */
-        sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
-        /* FIC0 non-coherent: the idx/wq coeffs just computed by the MSS (bank b) live in
-         * L2, not DDR. Flush before the kernel reads them via FIC0, else it gathers with
-         * stale coeffs. (Per-line; whole-L2 flush is the only granularity this HAL has.) */
-        flush_l2_cache(1u);
-        sar_k_start(K_RESAMPLE);
-        if (i + 1u < g->M)
-            sar_coeffs_pass1(g, i + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
-                                             (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-        if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
-        b ^= 1;
+    /* PASS 1 (range): M lines, dst row permuted by invord[]. */
+    {   uint32_t n0 = (g->M < C) ? g->M : C;               /* prefill chunk 0 (no prior chunk to hide it) */
+        for (uint32_t c = 0; c < n0; c++)
+            sar_coeffs_pass1(g, c, f32, (int32_t *)(uintptr_t)SAR_COEFC_IDX(cb, c),
+                                        (int16_t *)(uintptr_t)SAR_COEFC_WQ(cb, c));
+        flush_l2_cache(1u);           /* chunk-0 coeffs L2 -> DDR before the fabric reads them via FIC0 */
+    }
+    for (uint32_t c0 = 0; c0 < g->M; c0 += C) {
+        uint32_t rem = g->M - c0;     uint32_t n  = (rem < C) ? rem : C;              /* lines this chunk */
+        uint32_t rem2 = (c0 + C < g->M) ? (g->M - (c0 + C)) : 0u;
+        uint32_t n2 = (rem2 < C) ? rem2 : C;                                          /* lines next chunk */
+        for (uint32_t c = 0; c < n; c++) {
+            uint32_t i = c0 + c;
+            SAR_PROG(1u, i, g->M);
+            sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);            /* in  (N-wide) */
+            sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEFC_IDX(cb, c));
+            sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEFC_WQ(cb, c));
+            sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+            sar_k_start(K_RESAMPLE);
+            if (c < n2)               /* fill the next chunk's line into the other bank while this one runs */
+                sar_coeffs_pass1(g, c0 + C + c, f32, (int32_t *)(uintptr_t)SAR_COEFC_IDX(cb ^ 1, c),
+                                                     (int16_t *)(uintptr_t)SAR_COEFC_WQ(cb ^ 1, c));
+            if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+        }
+        if (n2) { flush_l2_cache(1u); cb ^= 1; }   /* one flush per chunk boundary, then swap banks */
     }
     /* zero padded pulse rows (M..Mp-1) for clean FFT zero-padding (CPU clear; a
      * candidate for a fabric memset if this dominates runtime) */
@@ -208,23 +221,32 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) return 0;
 
-    /* PASS 2 (azimuth) */
-    sar_coeffs_pass2(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
-                                (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
-    b = 0;
-    for (uint32_t j = 0; j < Np; j++) {
-        SAR_PROG(2u, j, Np);
-        sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG     + j * Mp * 4u);   /* in  (Mp-wide, M valid) */
-        sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u);   /* out (Mp-wide) */
-        flush_l2_cache(1u);   /* flush just-computed coeffs L2 -> DDR (non-coherent FIC0) */
-        sar_k_start(K_RESAMPLE);
-        if (j + 1u < Np)
-            sar_coeffs_pass2(g, j + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
-                                             (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-        if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
-        b ^= 1;
+    /* PASS 2 (azimuth): Np lines, dst row j (contiguous). */
+    cb = 0;
+    {   uint32_t n0 = (Np < C) ? Np : C;
+        for (uint32_t c = 0; c < n0; c++)
+            sar_coeffs_pass2(g, c, f32, (int32_t *)(uintptr_t)SAR_COEFC_IDX(cb, c),
+                                        (int16_t *)(uintptr_t)SAR_COEFC_WQ(cb, c));
+        flush_l2_cache(1u);
+    }
+    for (uint32_t c0 = 0; c0 < Np; c0 += C) {
+        uint32_t rem = Np - c0;       uint32_t n  = (rem < C) ? rem : C;
+        uint32_t rem2 = (c0 + C < Np) ? (Np - (c0 + C)) : 0u;
+        uint32_t n2 = (rem2 < C) ? rem2 : C;
+        for (uint32_t c = 0; c < n; c++) {
+            uint32_t j = c0 + c;
+            SAR_PROG(2u, j, Np);
+            sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG     + j * Mp * 4u);   /* in  (Mp-wide, M valid) */
+            sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEFC_IDX(cb, c));
+            sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEFC_WQ(cb, c));
+            sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u);   /* out (Mp-wide) */
+            sar_k_start(K_RESAMPLE);
+            if (c < n2)
+                sar_coeffs_pass2(g, c0 + C + c, f32, (int32_t *)(uintptr_t)SAR_COEFC_IDX(cb ^ 1, c),
+                                                     (int16_t *)(uintptr_t)SAR_COEFC_WQ(cb ^ 1, c));
+            if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+        }
+        if (n2) { flush_l2_cache(1u); cb ^= 1; }
     }
     return 1;
 }

@@ -9,7 +9,7 @@ set mem inaccessible-by-default off
 set logging file C:/Users/lkwangsi/Tools/openocd-new/inject_value_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -24,7 +24,7 @@ set *(unsigned int*)0xB0059114 = 0
 printf ">>> fft_mode=%u (1=fabric)\n", *(unsigned int*)0xB0059110
 # --- load 8 known rows over SIG rows 0..7 (rest of SIG is stale; irrelevant to the per-row exp read) ---
 echo >>> loading inject_rows.bin (8 rows, 256 KB) -> SIG 0x88000000 ...\n
-restore C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small/inject_rows.bin binary 0x88000000
+restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/inject_rows.bin binary 0x88000000
 printf ">>> SIG row0[0]=0x%08x row7[0]=0x%08x\n", *(unsigned int*)0x88000000, *(unsigned int*)0x88038000
 call (void)flush_l2_cache(1)
 # --- FTES = fft_pass(SIG->SCRATCH) on the injected rows ---
@@ -50,7 +50,7 @@ if $done == 1
   printf ">>> sar_row_exp[0..7] = %u %u %u %u %u %u %u %u\n", sar_row_exp[0], sar_row_exp[1], sar_row_exp[2], sar_row_exp[3], sar_row_exp[4], sar_row_exp[5], sar_row_exp[6], sar_row_exp[7]
   printf ">>>                MODEL = 11 7 13 12 13 7 1 13  (uniform/zero readback => capture BROKEN)\n"
   call (void)flush_l2_cache(1)
-  dump binary memory C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small/scratch_inject.bin 0x98000000 (0x98000000 + 0x40000)
+  dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/scratch_inject.bin 0x98000000 (0x98000000 + 0x40000)
   echo >>> dump done\n
 end
 if $done == 0

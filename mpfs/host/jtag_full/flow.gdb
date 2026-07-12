@@ -7,11 +7,11 @@ set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
 
-set logging file C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/gdb_session.log
+set logging file C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/gdb_session.log
 set logging overwrite on
 set logging redirect off
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 echo \n>>> openocd up; attaching now\n
 
 target extended-remote localhost:3333

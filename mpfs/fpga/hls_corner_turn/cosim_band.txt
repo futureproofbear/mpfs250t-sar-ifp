@@ -58,7 +58,7 @@ Info: Outputting VHDL wrapper for top-level module: corner_turn_top
 Info: Printing RTL to file.
 Info: Outputting top-level module: corner_turn_top.
 Info: Exporting IP modules.
-Info: Generating HDL+ Tcl script to be imported in SmartDesign: C:\Users\lkwangsi\Documents\github\sarProcessor\mpfs\fpga\hls_corner_turn\hls_output\scripts\\libero\create_hdl_plus.tcl.
+Info: Generating HDL+ Tcl script to be imported in SmartDesign: C:\Users\lkwangsi\Documents\github\mpfs250t-sar-ifp\mpfs\fpga\hls_corner_turn\hls_output\scripts\\libero\create_hdl_plus.tcl.
 Info: Generated accelerator driver files are in hls_output/accelerator_drivers/
 Info:    (SHLS-2) Generating Co-simulation Software Wrapper.
 Info: Compiling Software...
@@ -68,7 +68,7 @@ Info:    (SHLS-2) Generating Co-simulation RTL testbench.
 Info: Running RTL simulation
 QuestaSim Pro Microchip Edition-64 vlog 2024.3 Compiler 2024.09 Sep 10 2024
 Start time: 10:13:23 on Jun 22,2026
-vlog -sv "+define+MEM_INIT_DIR="C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/hls_corner_turn/hls_output/rtl/mem_init/"" "+delay_mode_zero" C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/hls_corner_turn/hls_output/rtl/hls_corner_turn_corner_turn.v cosim_tb.sv 
+vlog -sv "+define+MEM_INIT_DIR="C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/hls_corner_turn/hls_output/rtl/mem_init/"" "+delay_mode_zero" C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/hls_corner_turn/hls_output/rtl/hls_corner_turn_corner_turn.v cosim_tb.sv 
 -- Compiling module corner_turn_top
 -- Compiling module corner_turn_hw_top
 -- Compiling module corner_turn_corner_turn

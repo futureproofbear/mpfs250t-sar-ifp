@@ -2,7 +2,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -15,7 +15,7 @@ monitor mpfs.hart1_u54_1 arp_halt
 thread 2
 
 echo >>> loading 32KB test pattern (const re=1000) -> cached SIG 0x88000000 ...\n
-restore C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small/fft_test_row.bin binary 0x88000000
+restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/fft_test_row.bin binary 0x88000000
 
 # ---- CRC #1: cached read (L2, before flush) -- expect 0xecbfabd8 (pattern) ----
 set *(unsigned int*)0xB0058004 = 0x88000000

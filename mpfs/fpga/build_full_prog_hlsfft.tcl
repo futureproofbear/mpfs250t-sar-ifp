@@ -2,7 +2,7 @@
 ## for the libero_hlsfft project. BOARD-FREE: stops after the programming file + export are generated;
 ## it does NOT run PROGRAMDEVICE (run program_hlsfft.tcl separately once the board is powered).
 ## Gates on the actual pinslacks/mindelay reports (ignores flaky run_tool return codes).
-set here {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 set pd "$here/libero_hlsfft"
 open_project -file "$pd/sar_accel.prjx"
 build_design_hierarchy

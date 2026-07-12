@@ -15,7 +15,7 @@ x/4xw 0x98008000
 echo >>> RAW SCRATCH row2 [bin0..3] (zero-input row):\n
 x/4xw 0x98010000
 echo >>> dump SCRATCH rows 0..2 (raw) -> scratch_scle.bin\n
-dump binary memory C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small/scratch_scle.bin 0x98000000 (0x98000000 + 0x18000)
+dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/scratch_scle.bin 0x98000000 (0x98000000 + 0x18000)
 echo >>> dump done; shutting openocd down cleanly\n
 monitor resume
 monitor shutdown

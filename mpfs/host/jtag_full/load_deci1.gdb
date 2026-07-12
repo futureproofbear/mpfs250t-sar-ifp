@@ -8,7 +8,7 @@ set mem inaccessible-by-default off
 set logging file C:/Users/lkwangsi/Tools/openocd-new/load_deci1_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -18,7 +18,7 @@ echo \n>>> booting firmware (for flush/CRC) ...\n
 monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
-cd C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_deci1
+cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_deci1
 echo >>> loading geometry tables ...\n
 restore f0.bin binary 0xB0100000
 restore df.bin binary 0xB0108000

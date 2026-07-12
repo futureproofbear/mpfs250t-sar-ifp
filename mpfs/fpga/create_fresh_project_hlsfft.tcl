@@ -5,7 +5,7 @@
 ##
 ## Run:  libero.exe SCRIPT:create_fresh_project_hlsfft.tcl LOGFILE:create_fresh_project_hlsfft.log
 
-set here {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 set proj "$here/libero_hlsfft"
 file delete -force $proj
 

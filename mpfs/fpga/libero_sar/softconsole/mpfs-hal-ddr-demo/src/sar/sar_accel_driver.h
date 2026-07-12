@@ -8,7 +8,7 @@
  * host can rescale the dumped OUT buffer.
  *
  * The accelerator itself (window + resample + 2-D FFT + corner-turn + detect)
- * is the FPGA fabric described in sarProcessor/mpfs/fpga + regmap.md. Until that
+ * is the FPGA fabric described in mpfs250t-sar-ifp/mpfs/fpga + regmap.md. Until that
  * bitstream exists (Milestone 1/2), only sar_job_load()/sar_job_check_sig() are
  * exercised (Milestone 0 loopback); the register functions are no-ops against a
  * fabric that is not yet present.

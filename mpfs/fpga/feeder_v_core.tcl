@@ -2,7 +2,7 @@
 # fft_feeder_v) as an HDL+ core with the SAME bus interfaces the SmartHLS core had, so it drops
 # into sartop_assembly.tcl UNCHANGED (FEED = fft_feeder_top; axi4initiator/axi4target/out_var).
 # Replaces the dead SmartHLS mem->stream feeder (runbook §8). Mirrors gearbox_idconv_cores.tcl.
-set here {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 
 catch { create_links -hdl_source "$here/fft_feeder_v.v" }
 catch { create_links -hdl_source "$here/fft_feeder_top.v" }

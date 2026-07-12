@@ -8,7 +8,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -20,7 +20,7 @@ shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(3
 monitor mpfs.hart1_u54_1 arp_halt
 
 echo \n>>> ===== TEST B: ONE transform, NON-ZERO input (ones32k @ SCRATCH) =====\n
-cd C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full
+cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full
 restore ones32k.bin binary 0x98000000
 printf ">>> SCRATCH[0..1]=%08x %08x  (expect non-zero)\n", *(unsigned int*)0x98000000, *(unsigned int*)0x98000004
 set *(unsigned int*)0x60005010 = 4096

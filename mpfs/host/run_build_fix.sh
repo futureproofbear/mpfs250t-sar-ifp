@@ -4,7 +4,7 @@
 # Verifies the regenerated wrapper actually dropped the ID truncation.
 set -u
 LIB="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
-ROOT="/c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga"
+ROOT="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga"
 TCL="$ROOT/build_dataplane_fix.tcl"
 LOG="/c/Users/lkwangsi/Tools/openocd-new/build_fix.log"
 SARTOP="$ROOT/libero_sar/component/work/SAR_TOP/SAR_TOP.v"

@@ -3,8 +3,8 @@
 # (reliable Microchip programmer -- NOT the buggy OpenOCD HID). Needs FlashPro
 # connected + board powered.
 SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
-BM1="/c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/bm1"
-NEWELF="/c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+BM1="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/bm1"
+NEWELF="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
 export SC_INSTALL_DIR="$SC"
 export FPGENPROG="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin64/fpgenprog.exe"
 JAVA="$SC/eclipse/jre/bin/java.exe"

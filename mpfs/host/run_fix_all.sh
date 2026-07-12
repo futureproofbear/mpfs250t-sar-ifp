@@ -5,8 +5,8 @@
 set -u
 LIB="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
 FPX="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/FPExpress.exe"
-ROOT="/c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga"
-HOST="/c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host"
+ROOT="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga"
+HOST="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host"
 SARTOP="$ROOT/libero_sar/component/work/SAR_TOP/SAR_TOP.v"
 JOB="$ROOT/libero_sar/export/SAR_TOP_idfix.job"
 BLOG="/c/Users/lkwangsi/Tools/openocd-new/build_fix.log"

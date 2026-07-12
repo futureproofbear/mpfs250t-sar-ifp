@@ -13,7 +13,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart1_u54_1 arp_halt
@@ -23,7 +23,7 @@ shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(3
 monitor mpfs.hart1_u54_1 arp_halt
 
 echo >>> load N known FFT input rows to SIG 0x88000000\n
-restore C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/corefft_vectors/corefft_iso_in.bin binary 0x88000000
+restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/corefft_vectors/corefft_iso_in.bin binary 0x88000000
 printf ">>> SIG[0..3] (row0 samples 0..3, expect (re<<16)|im): "
 x/4xw 0x88000000
 echo >>> pre-clear SCRATCH[0] + flush input L2->DDR (FIC0 non-coherent)\n
@@ -54,7 +54,7 @@ printf ">>> t=10s feeder busy(0=done)=%u  unloader busy(0=done)=%u\n", *(unsigne
 echo >>> RAW (pre-flush) SCRATCH row0 [0..7]:\n
 x/8xw 0x98000000
 echo >>> RAW (pre-flush) dump SCRATCH -> OUTBIN (may be stale-L2 but hang-proof)\n
-dump binary memory C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/corefft_vectors/corefft_iso_out.bin 0x98000000 (0x98000000 + 0x8000)
+dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/corefft_vectors/corefft_iso_out.bin 0x98000000 (0x98000000 + 0x8000)
 
 ## --- now attempt the coherent evict (LAST, because it may hang on a wedged fabric txn) ---
 echo >>> evict dst L2->DDR (flush_l2_cache -- HANGS if fabric AXI wedged; data already dumped above)\n
@@ -62,7 +62,7 @@ call (void) flush_l2_cache(1)
 echo >>> COHERENT SCRATCH row0 [0..7] (transformed bins):\n
 x/8xw 0x98000000
 echo >>> COHERENT dump SCRATCH -> OUTBIN (overwrites raw dump when flush succeeds)\n
-dump binary memory C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/corefft_vectors/corefft_iso_out.bin 0x98000000 (0x98000000 + 0x8000)
+dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/corefft_vectors/corefft_iso_out.bin 0x98000000 (0x98000000 + 0x8000)
 monitor resume
 monitor shutdown
 quit

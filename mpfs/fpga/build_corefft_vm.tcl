@@ -7,7 +7,7 @@
 # project-setup API fast (seconds-minutes) BEFORE committing to P&R.
 set STOP_AFTER_SETUP 0
 
-set ROOT    {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set ROOT    {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 set PROJDIR "$ROOT/libero_corefft_vm"
 set NL      "$ROOT/libero_sar/synthesis/SAR_TOP_NL.vm"
 set IOPDC   "$ROOT/libero_sar/constraint/io/sar_io.pdc"

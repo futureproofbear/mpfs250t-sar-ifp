@@ -8,7 +8,7 @@ set mem inaccessible-by-default off
 set logging file C:/Users/lkwangsi/Tools/openocd-new/cpudetect_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -18,7 +18,7 @@ echo \n>>> booting firmware ...\n
 monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
-cd C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small
+cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small
 source load.gdb
 set *(unsigned int*)0xB0059110 = 1
 set *(unsigned int*)0xB0059114 = 0
@@ -46,7 +46,7 @@ while $i < 120
 end
 if $done == 1
   echo >>> dumping OUT band [896:1152] (4 MB) -> out_bright.bin\n
-  dump binary memory C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small/out_bright.bin 0xA8E00000 0xA9200000
+  dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/out_bright.bin 0xA8E00000 0xA9200000
   echo >>> dump done\n
 end
 if $done == 0

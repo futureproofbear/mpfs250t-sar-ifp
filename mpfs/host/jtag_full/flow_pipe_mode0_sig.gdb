@@ -9,7 +9,7 @@ set mem inaccessible-by-default off
 set logging file C:/Users/lkwangsi/Tools/openocd-new/mode0_sig_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -19,7 +19,7 @@ echo \n>>> booting firmware ...\n
 monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
-cd C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small
+cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small
 source load.gdb
 set *(unsigned int*)0xB0059110 = 0
 printf ">>> fft_mode=%u (0=CPU FFT, known-good)\n", *(unsigned int*)0xB0059110
@@ -45,7 +45,7 @@ while $i < 100
 end
 if $done == 1
   echo >>> raw-dumping CPU-path SIG rows 1008..1071 (2MB) -> sig_point_cpu.bin\n
-  dump binary memory C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_stage_small/sig_point_cpu.bin 0x89F80000 (0x89F80000 + 0x200000)
+  dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/sig_point_cpu.bin 0x89F80000 (0x89F80000 + 0x200000)
   echo >>> dump done\n
 end
 if $done == 0

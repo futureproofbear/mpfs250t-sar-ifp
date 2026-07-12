@@ -1,7 +1,7 @@
 ## build_full_prog_ffv.tcl -- P&R the reconstructed libero_ffv (SAR_TOP with the Verilog
 ## feeder fft_feeder_v). Import constraints + derive the 62.5 MHz clocks, SYNTH -> P&R ->
 ## VERIFYTIMING -> gate on setup+hold -> export bitstream. NO PROGRAMDEVICE (board off).
-set here {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 set pd "$here/libero_ffv"
 open_project -file "$pd/sar_accel.prjx"
 build_design_hierarchy

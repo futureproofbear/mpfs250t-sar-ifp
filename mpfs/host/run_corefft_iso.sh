@@ -12,7 +12,7 @@ set -u
 PY="C:/ProgramData/Anaconda3-2025.12-1/python.exe"
 # Windows-format ROOT: python + the Windows-native gdb (restore/dump/ELF) need C:/ paths,
 # NOT MSYS /c/ (which they resolve inconsistently -> "No such file"). git-bash handles C:/ too.
-ROOT="C:/Users/lkwangsi/Documents/github/sarProcessor"
+ROOT="C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp"
 HOST="$ROOT/mpfs/host"
 GDBDIR="$HOST/jtag_full"
 VEC="$HOST/corefft_vectors"

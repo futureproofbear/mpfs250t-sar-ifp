@@ -1,6 +1,6 @@
 ## Full flow in ONE session: SYNTHESIZE -> PLACEROUTE -> VERIFYTIMING -> gate -> export.
 ## Ignores flaky run_tool return codes; gates on the actual pinslacks/mindelay reports.
-set here {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 set pd "$here/libero_tdest"
 open_project -file "$pd/sar_accel.prjx"
 build_design_hierarchy

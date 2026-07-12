@@ -6,9 +6,9 @@ set -u
 NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
 SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
-ELF="/c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+ELF="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
 LOG="/c/Users/lkwangsi/Tools/openocd-new/combined.log"
-cd /c/Users/lkwangsi/Documents/github/sarProcessor/mpfs/host/jtag_full
+cd /c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full
 
 cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
 : > "$LOG"

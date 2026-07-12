@@ -10,7 +10,7 @@
 #
 # Run:  <libero>/libero SCRIPT:build_timed.tcl   (or `script build_timed.tcl` in the Tcl console)
 
-set ROOT {C:/Users/lkwangsi/Documents/github/sarProcessor/mpfs/fpga}
+set ROOT {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
 set PROJ "$ROOT/libero_sar/sar_accel.prjx"
 open_project -file $PROJ
 build_design_hierarchy

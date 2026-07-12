@@ -8,7 +8,7 @@ set -u
 FILE="${1:?usage: run_crc_verify.sh FILE [BASE_HEX]}"
 BASE="${2:-0x88000000}"
 NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-S="/c/Users/lkwangsi/AppData/Local/Temp/claude/c--Users-lkwangsi-Documents-github-sarProcessor/e0b3625f-e54b-41fc-87f7-687d5fc95e4d/scratchpad"
+S="/c/Users/lkwangsi/AppData/Local/Temp/claude/c--Users-lkwangsi-Documents-github-mpfs250t-sar-ifp/e0b3625f-e54b-41fc-87f7-687d5fc95e4d/scratchpad"
 MBX=0xB0058000
 
 LEN=$(wc -c < "$FILE")

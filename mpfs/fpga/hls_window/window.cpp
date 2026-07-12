@@ -50,16 +50,22 @@ void window(uint32_t *in, int16_t *hamr, int16_t *hamc, uint32_t *out) {
         hamc_c[k] = hamc[k];
     }
 
+    // Per-row combined taper, HOISTED off the pixel path. hamr[j]*hamc[k] is DATA-INDEPENDENT and
+    // hamr[j] is loop-invariant across the row, so compute cw[k]=(hamr[j]*hamc[k])>>15 once per row.
+    // This breaks the chained multiply (hamr*hamc -> *I) that was the ~14 ns critical path (WIN):
+    // the pixel loop is now a SINGLE multiply (I*cw, Q*cw). Bit-identical (cw is the same Q15 taper).
+    static int16_t cw[W_WIDTH];
     for (int j = 0; j < H_ROWS; j++) {
-        int16_t hr = hamr_c[j];                 // loop-invariant across the row
+        int16_t hr = hamr_c[j];
         uint64_t base = (uint64_t)j * W_WIDTH;  // i = base + k, stays sequential
-#pragma HLS loop pipeline
+#pragma HLS loop pipeline II(1)
+        for (int k = 0; k < W_WIDTH; k++)
+            cw[k] = (int16_t)(((int32_t)hr * hamc_c[k]) >> 15);   // Q15 2-D taper, once per row
+#pragma HLS loop pipeline II(1)
         for (int k = 0; k < W_WIDTH; k++) {
-            int16_t hc = hamc_c[k];
-            int16_t w  = (int16_t)(((int32_t)hr * hc) >> 15);   // Q15 2-D taper
             uint32_t x = in[base + k];
-            int16_t re = (int16_t)(((int32_t)hi16(x) * w) >> 15);
-            int16_t im = (int16_t)(((int32_t)lo16(x) * w) >> 15);
+            int16_t re = (int16_t)(((int32_t)hi16(x) * cw[k]) >> 15);   // single multiply, no chain
+            int16_t im = (int16_t)(((int32_t)lo16(x) * cw[k]) >> 15);
             out[base + k] = pk(re, im);
         }
     }

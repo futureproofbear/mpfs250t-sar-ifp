@@ -129,6 +129,69 @@ def pow2(n: int) -> int:
     return p
 
 
+# --------------------------------------------------------------------------- #
+# Input-dimension handling limit + per-axis adaptive FFT-length selection.
+#
+# Datasets vary widely (Umbra CPHD NumSamples median ~22k, NumVectors median
+# ~18k), so the gridded frame is chosen PER DATASET from the (decimated) dims:
+#   * data that fits the native fabric CoreFFT (grid <= FFT_NATIVE = 8192) uses
+#     the proven 8192 path -- unchanged, shipping today;
+#   * larger data (up to HANDLING_LIMIT = 16384 per axis) needs the decomposed
+#     16384-pt FFT + a 1 GiB-per-buffer DDR layout + 64-bit fabric addressing,
+#     which is NOT YET BUILT (see the T3 scaling notes) -- the checker flags it;
+#   * anything above HANDLING_LIMIT is rejected: decimate more.
+# NumVectors -> azimuth (rows), NumSamples -> range (cols).
+# --------------------------------------------------------------------------- #
+FFT_NATIVE     = 8192       # native fabric CoreFFT point count (proven/shipping path)
+HANDLING_LIMIT = 16384      # max supported gridded dimension per axis (hard ceiling)
+
+
+def _ceil_div(a: int, b: int) -> int:
+    return (a + b - 1) // b
+
+
+def adaptive_fft_len(dim: int, axis: str = "") -> int:
+    """Smallest supported FFT/grid length that holds `dim` samples on one axis:
+    FFT_NATIVE (8192) when the data fits it, else HANDLING_LIMIT (16384).
+    Raises ValueError if `dim` exceeds HANDLING_LIMIT."""
+    g = pow2(dim)
+    if g <= FFT_NATIVE:
+        return FFT_NATIVE                      # <=8192 data -> native 8192 CoreFFT
+    if g <= HANDLING_LIMIT:
+        return HANDLING_LIMIT                   # 8193..16384 -> decomposed 16384 FFT (see needs_16384_path)
+    raise ValueError(
+        f"{axis or 'axis'} gridded dimension {dim} (pow2 {g}) exceeds the handling "
+        f"limit {HANDLING_LIMIT}; increase decimation so this axis grids to "
+        f"<= {HANDLING_LIMIT} (min decimation {_ceil_div(dim, HANDLING_LIMIT)}x).")
+
+
+def plan_frame(num_vectors: int, num_samples: int,
+               deci_pulse: int = 1, deci_sample: int = 1) -> dict:
+    """Check + plan the working frame from raw CPHD dims. Applies decimation,
+    validates each axis against HANDLING_LIMIT, and picks the per-axis FFT length
+    (8192 native or 16384). Returns a plan dict; raises ValueError if the
+    (decimated) data exceeds the handling limit on either axis."""
+    M = _ceil_div(num_vectors, max(1, deci_pulse))    # azimuth rows  (NumVectors)
+    N = _ceil_div(num_samples, max(1, deci_sample))   # range  cols   (NumSamples)
+    fft_a = adaptive_fft_len(M, "azimuth (NumVectors)")
+    fft_r = adaptive_fft_len(N, "range (NumSamples)")
+    needs_16k = max(fft_a, fft_r) > FFT_NATIVE
+    return {
+        "M": M, "N": N, "fft_a": fft_a, "fft_r": fft_r,
+        "grid": max(fft_a, fft_r),
+        "native_8192": not needs_16k,       # True -> the shipping 8192 pipeline handles it as-is
+        "needs_16384_path": needs_16k,      # True -> requires the not-yet-built 16384 datapath
+    }
+
+
+def check_input_dims(num_vectors: int, num_samples: int,
+                     deci_pulse: int = 1, deci_sample: int = 1) -> dict:
+    """Guard: raise unless the (decimated) CPHD dims are within the handling limit.
+    Returns the plan on success. Thin wrapper over plan_frame for call sites that
+    just want a pass/fail gate before staging a job."""
+    return plan_frame(num_vectors, num_samples, deci_pulse, deci_sample)
+
+
 def assert_fits():
     """Sanity-check that the working set stays under the 1 GB ceiling."""
     top = max(SIG_ADDR + FRAME_BYTES, SCRATCH_ADDR + FRAME_BYTES,

@@ -69,22 +69,39 @@ Current ~120 s is a bring-up baseline, not optimized. Biggest levers, in rough R
 1. **Multi-hart CPU FFT (~4×).** The FFT is single-hart U54. Split the 8192 rows across the 4 U54 harts →
    each FFT pass ~8 s instead of ~32 s. Saves ~48 s → pipeline ~72 s. Straightforward (rows are
    independent; needs per-hart working buffers + a barrier + L2 flush after). **Highest ROI.**
-2. **Multi-hart / faster resample (~32 s → ~8 s).** The azimuth resample is MSS-coefficient-bound
-   (per-line float geometry on one hart + a per-line whole-L2 flush). Parallelize the coeff computation
-   across harts, and/or make FIC0 cache-coherent (MSS config) to drop the per-line `flush_l2_cache`
-   (each flush walks all 16 L2 ways). The per-line flush is a large hidden cost.
-   - **[Step A — IMPLEMENTED, pending silicon verification] Per-chunk L2 flush (firmware-only).**
+2. **Faster resample — it is FABRIC-GATHER-KERNEL-BOUND (measured), not coefficient-bound.**
+   On-silicon mcycle profiling of the azimuth pass (counters in `resample_2pass`, JTAG-read @0xB0059120)
+   gives the per-line time split: **kernel-wait 78 % / coeff-compute 20 % / flush 2 %.** So the earlier
+   "MSS-coefficient-bound" belief is REFUTED. The CPU spends 78 % of resample spinning in `sar_k_wait`
+   for the fabric gather kernel; the coeff compute (20 %) is already double-buffered behind it, and the
+   flush is 2 % (Step A removed most of that). Consequence: coefficient optimizations (multi-hart coeff
+   split, reciprocal-hoist, fabric coeff-gen, CORDIC) are dead by Amdahl (~0 % of resample). The lever
+   is the **fabric gather kernel throughput** (`hls_resample/resample.cpp`). ROOT CAUSE (pass-1 probe +
+   SmartHLS report): pass-1 (reads ~540) vs pass-2 (reads 8193) kernel-wait/line = 1.69M vs 2.01M cyc =
+   only 1.19× despite 15× more read → read is ~1.3% of the time, NOT read-bound (so runtime-`nin`/Step-B
+   is useless). Cost is per-output: ~21 fabric-cyc/output vs II=1 ideal. The SmartHLS report shows the
+   gather loop scheduled **II=2** (single-read-port `resample_buf` serializes `buf[j]`+`buf[j+1]`) and
+   in/idx/wq/out **sharing one m_axi port**; silicon's ~21/output is ~10× past that (the shared port
+   serializing idx-read+wq-read+out-write per output at DDR latency — another report-vs-silicon gap).
+   FIX (kernel redesign + bitstream rebuild, value-verify on silicon): (1) stage idx+wq into LSRAM
+   (burst up front like `in`) → zero per-output DDR reads; (2) pair/partition `buf` (cyclic factor 2)
+   → `buf[j]`,`buf[j+1]` in one cycle → II→1; (3) dedicate `out` to its own AXI ID. Est ~10–20× on the
+   kernel → resample ~28 s → ~2–3 s → pipeline ~144 s → ~110 s, after which the fabric FFT / corner-turn
+   stages become the top cost (the pipeline uses the fabric CoreFFT chain, not CPU FFT).
+   - **[Step A — IMPLEMENTED + VERIFIED ON SILICON] Per-chunk L2 flush (firmware-only).**
      `resample_2pass()` now precomputes `RESAMPLE_CHUNK` (=16) lines of coeffs per fabric-arm batch and
      flushes ONCE per chunk instead of per line (16× fewer whole-L2 flushes), double-buffering the next
      chunk's coeffs against the current chunk's kernel runs. Numerically identical (pure orchestration);
      no bitstream rebuild. New DDR scratch `SAR_COEFC_*` (chunk banks) in `ddr_sar_layout.h`
-     (0xB020_0000, 1.5 MiB, reserved in `ddr_layout.py`). Compiles clean under the RISC-V toolchain;
-     addressing + chunk-loop bookkeeping validated board-free (`scratchpad/chunk_check.c` logic).
-     **Verify:** rebuild the SoftConsole app (firmware only), reprogram, run the full-pipeline iso-test;
-     confirm OUT correlation is UNCHANGED (T.rot180 vs golden) and read the resample stage time (SAR_PROG
-     heartbeat / per-stage timing) vs the ~32 s azimuth baseline. This measurement decides whether Step B
-     is worth the RTL rebuild: if the per-line flush was the dominant cost, resample should drop sharply
-     from ~32 s; if it barely moves, the cost is the single-hart coeff compute → do the multi-hart split.
+     (0xB020_0000, 1.5 MiB, reserved in `ddr_layout.py`).
+     **Silicon result (2026-07-12, small scene, new fw programmed to eNVM, full `sar_form_image`):**
+     RETURN=0, OUT correlation **0.9923** (T.rot180 vs golden) — image correct, numerically identical.
+     BUT resample was only ~28–32 s (range 705 lines ≤4 s + azimuth 8192 lines ~28 s), ~3.4 ms/line vs
+     the ~3.9 ms/line baseline — a **~10–15 % (~4 s) improvement, NOT a multiplier**. So the per-line
+     whole-L2 flush was NOT the dominant cost (the "large hidden cost" belief above is refuted by
+     measurement): azimuth resample is bound by the single-hart per-line coefficient geometry compute.
+     **The real latency win is the multi-hart coefficient split (item 1 above), not flush batching and
+     not Step B's kernel rebuild.** Step A stays (a clean ~10 % win, zero cost/risk) but is not the lever.
    - **[Step B — kernel written + validated, needs `libero-build` + board] Kernel self-sequences C
      lines per arm.** HLS `resample_chunk` (`mpfs/fpga/hls_resample_chunk/resample_chunk.cpp`) loops all
      `nlines` internally: the MSS arms it ONCE per chunk and the fabric streams the lines back-to-back
@@ -124,6 +141,31 @@ Current ~120 s is a bring-up baseline, not optimized. Biggest levers, in rough R
   across the two passes (smaller range-FFT output → smaller azimuth L1 norm → azimuth out_shift auto-drops).
   De-saturate by lowering that register from firmware (cheap) or adjusting detect (fabric). Cosmetic —
   correlation is on the unsaturated pixels.
+
+## HLS trust harness & batch-confidence
+
+SmartHLS is treated as an untrusted, behavioural-only tool (documented record: twiddle drop,
+detect sign-extension, II=2→21). The harness constrains its inputs, gates its outputs, and
+**collects the report-vs-silicon statistics it cannot model**. Load the `hls-trust-harness`
+skill for the full flow; the pieces:
+
+- **Gate 0 — anti-pattern pre-screen:** `python mpfs/host/hls_antipattern_lint.py` checks source
+  against the living catalog `docs/fpga/SMARTHLS_ANTIPATTERNS.md` (proven mis-synthesis shapes).
+- **Gate 1 — II report gate:** `python mpfs/host/hls_report_lint.py` fails the build if SmartHLS
+  scheduled a worse II than the source pragma requested (the silent degradation), `--selftest`
+  proves the FAIL path.
+- **Class-B ledger:** `docs/fpga/hls_silicon_stats.jsonl` (+ rollup `HLS_SILICON_STATS.md`),
+  written with `python mpfs/host/hls_stats.py` — six phenomena SmartHLS can't see: `axi_ii_lie`
+  (effective II vs scheduled, the II=1 lie), `ddr_latency`, `l2_coherency`, `fic_axi_id`,
+  `es_errata` (ER0219), `corefft_rearm`. `eff-ii` derives the lie ratio from an iso-test's
+  busy-cycles ÷ elements — no new RTL.
+
+**Batch-confidence protocol.** A silicon commit stays to one logical change UNLESS every batched
+change is (a) proven **additive** by the validated cost model (no Amdahl reordering among the set),
+(b) **value-gated board-free** (Gates 0–2 + phase-exact check), and (c) **runtime-toggleable with
+per-stage counters** so one bitstream yields N independent measurements and a regression is still
+bisectable. Absent all three, sequence the changes and measure between. Gates 0–1 and the ledger
+are the per-change eligibility test that feeds this decision.
 
 ## Key references
 - `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md` — the JTAG single-kernel isolation harness, coherent-DDR-read

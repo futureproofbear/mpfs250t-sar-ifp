@@ -4,6 +4,35 @@ Reliable, repeatable procedures for isolating SAR kernels on silicon, coherent D
 SmartHLS validation, and the HLS-FFT fabric rebuild. Written after a long 2026-07-04 session
 that re-derived these too many times. **Follow this before improvising.**
 
+## 0. Verification / debugging test menu (what to run, and when)
+
+Pick the narrowest test that covers the change. Board-free first; escalate to silicon only when needed.
+After ANY fabric rebuild, re-verify by VALUE (corr), not just RETURN=0 — SmartHLS schedule ≠ silicon.
+
+Board-free (no JTAG; run first):
+- **Bit-accurate emulator** — `python silicon_emulator.py` — mirrors the whole fixed-point datapath end
+  to end; == float golden (corr 1.0). The reference for isolating a hardware bug (diff board vs this).
+- **SmartHLS cosim + schedule** — `shls sw` (kernel `main()` self-test, numeric PASS) then `shls hw`
+  (per-loop II report). Run BEFORE committing to a bitstream build. See §5.
+- **Phase-sensitive FFT** — `python corefft_phase_compare.py [N]` — catches conjugation / sign / bin-order
+  errors that magnitude correlation cannot. See §9.
+- **Model-on-real-scene** — `real_board_scene_test.py` / `real_data_model_test.py` — CPU-vs-fabric BFP
+  model on the actual board scene (algorithm sound vs implementation bug).
+
+On silicon (JTAG; observe §1 hygiene):
+- **Full pipeline (acceptance)** — `bash run_pipe_small.sh` → expect **RETURN=0**; then dump the OUT band
+  (`run_dump_bright.sh`) and correlate all 8 dihedral orientations vs golden (`compare_out_band.py`),
+  expect **corr ≈ 0.99** in `transpose+rot180` (the T.rot180 orientation the golden spec allows).
+- **CoreFFT 8-case iso-test** — `bash run_corefft_iso.sh` — isolates the fabric FFT chain with 8 known
+  8192-pt rows: **impulse / impulse_k / dc / random / tone / twotone / twotone_hidr / dc_smalltone**
+  (impulse-family corr=1.0, tone-family corr≥0.99998, incl. two 60 dB dynamic-range cases). Use for
+  debugging or to re-prove the FFT survived a whole-SAR_TOP P&R even when only another kernel changed.
+  `CASES=impulse bash run_corefft_iso.sh` runs one row as a fast smoke test (full suite ≈ 16 min). See §8.
+- **Single-kernel iso-tests** — poke one kernel, read DDR back (§4): `resample_iso.gdb` (const-1000
+  identity gather → SCRATCH[0]=0x03e80000), `detect_iso.gdb`, `fft_iso_test.gdb`.
+- **Timing attribution** — the resample mcycle counters at `0xB0059120` (`run_read_prof.sh`) split the
+  azimuth pass into coeff-compute / kernel-wait / flush (numerically inert; strip before shipping).
+
 ## 1. JTAG hygiene (DO NOT skip)
 - **NEVER `taskkill /F` openocd/gdb** — wedges the FlashPro6 DM, needs board power-cycle.
   Clean shutdown: `python -c "import socket,time; s=socket.create_connection(('localhost',4444),5); time.sleep(.5); s.sendall(b'shutdown\n'); time.sleep(1.5); s.close()"` (openocd telnet port 4444), THEN kill the orphaned gdb (safe once openocd exited).

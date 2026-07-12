@@ -33,7 +33,8 @@ quirk, not your RTL/firmware.
   (`(int16_t)(x>>16)` read unsigned → detect saturated ~50%); SmartDebug design-DB must match the
   programmed bitstream; Libero silently programs timing-failing bitstreams + HDL-core caching; FlashPro6
   USB-HID wedge behaviour; CoreFFT in-place SLOWCLK ≤ CLK/8 + MEMBUF overwrite hazard + the gearbox
-  READ_OUTP/DATAO-latency trap; FIC_0 4-bit-ID truncation; FIC0 non-coherence.
+  READ_OUTP/DATAO-latency trap; FIC_0 4-bit-ID truncation; FIC0 non-coherence; boot-mode-0 = the only
+  JTAG-haltable state; and the on-target CRC32 mailbox for fast JTAG-load verification.
 - **`references/silicon-debug-methodology.md`** — HOW to debug the datapath without chasing phantoms:
   value-level (not correlation) testing; build a bit-accurate silicon-MIRROR (`silicon_emulator.py`) and
   match it to golden before comparing to silicon; the golden-ORIENTATION gremlin (board = fft2.T +

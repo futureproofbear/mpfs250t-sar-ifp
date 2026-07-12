@@ -68,6 +68,33 @@ debugging time; check here before assuming your design is at fault. Detail + evi
 - Wall-clock timing in firmware: `readmtime()` reads CLINT MTIME at **1 MHz** (`LIBERO_SETTING_MSS_RTC_TOGGLE_CLK`)
   → 1 tick = 1 µs. `sar_form_image` stamps `sar_stage_ts[0..6]`; host diffs for per-stage µs.
 
+## Boot mode / JTAG halt-ability
+- **The board will NOT halt for JTAG debug unless it is in boot mode 0** (all MSS cores → WFI on
+  power-up, "will not boot until debugged"). In the default/unset boot state OpenOCD `reset halt` fails
+  ("unable to halt hart 0", `dmstatus=0x00030c82`) — the cores run wild. This is NOT an MSS-config
+  problem. Set boot mode 0 (no rebuild) then **power-cycle**:
+  `java -jar <SC>/extras/mpfs/mpfsBootmodeProgrammer.jar --bootmode 0 --die MPFS250T_ES --package FCVG484`
+  (env `SC_INSTALL_DIR=<SoftConsole>`, `FPGENPROG=<Libero>/Designer/bin64/fpgenprog.exe`; run from a
+  fresh empty dir; kill any openocd/fpgenprog/java holding the FP6 first — it can take retries to grab it).
+- Boot mode 1 = boot the app/HSS from eNVM at 0x20220000. Use boot mode 1 with an **app that cooperates
+  with a JTAG halt** for the iso-test flow (an HSS build won't halt → "Target not halted").
+- Caveat (open): after boot-mode-0 + power-cycle, only a U54 stayed reliably readable; the E51 WFIs and
+  read `dmstatus=0x0`, and the SMP halt-group setup failed under SoftConsole-2022.2 OpenOCD. The
+  SoftConsole IDE debug launch (validated multi-hart reset-init sequence) catches the E51 when headless
+  `reset halt` can't. [[mpfs-boot-mode-0-for-debug]]
+
+## On-target CRC verify (fast JTAG-load integrity check)
+- Verifying a JTAG-loaded DDR region by dump-back + host `cmp` DOUBLES every slow transfer and wedges the
+  HID if interrupted. Instead use a **firmware CRC32 mailbox**: hart1 watches a DDR mailbox (in this
+  build at `0xB0058000`, 6×u32: `+0 cmd, +4 base, +8 len, +C result, +10 status, +14 seq`); host writes
+  `base`/`len`/`cmd=0x43524333` ('CRC3'), RESUMES hart1, firmware computes a **zlib-compatible CRC32**
+  (IEEE-802.3, poly `0xEDB88320`, init/xorout 0xFFFFFFFF = Python `zlib.crc32`) over `[base,base+len)` at
+  ~75 MB/s, writes `result` + `status=0xC0FFEE03`, clears `cmd`. Host halts, reads `result`/`status`.
+- Coherency is free here because it is single-hart: the host loads data + mailbox via hart1's own progbuf
+  stores while halted, so on resume hart1 sees a coherent view (no flush). Host tool `run_crc_verify.sh
+  FILE [BASE_HEX]` compares on-target CRC to host `zlib.crc32(FILE)`. Verifies MB in seconds vs the
+  ~111 s/MB load. [[on-target-crc-verify-mailbox]]
+
 ## FlashPro6 (FP6) over J33
 - **JTAG bulk-load ceiling ~84 kbit/s** (~111 s/MB), latency-bound by the USB-HID, not bandwidth. 15 MHz
   TCK corrupts the DM (use 4 MHz). 97 MB ≈ 2.7 h → chunk + on-target CRC. [[jtag-bulk-load-rate-ceiling]]

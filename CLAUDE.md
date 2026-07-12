@@ -63,3 +63,33 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
+
+---
+
+## Engineering practices (project discipline)
+
+Project-specific rules earned on this SAR-on-silicon work. They complement the generic guidance above.
+
+- **Read the reference before designing/fixing.** Read the relevant IP User Guide section (exact
+  operating mode + handshake) AND the golden testbench BEFORE committing to a design or a fix — not
+  after it fails on hardware. Check what the golden TB does NOT exercise. (Cost real time on the FFT
+  integration: the golden TB only ran one transform, never the re-arm path.)
+- **Verify timing MET before functional silicon debug.** Confirm setup AND hold closed in place-and-route
+  before treating any on-silicon misbehaviour as a logic/firmware bug — timing violations mimic
+  functional bugs perfectly, and the toolchain will program a timing-failing bitstream silently.
+  "Stage completes" ≠ "data correct" ≠ "timing met".
+- **Prefer value-level testing over correlation.** Correlation/magnitude is scale-, phase-, and
+  orientation-invariant and hides real bugs. Feed known inputs, diff actual complex sample values
+  against a bit-accurate model, and find the correct golden orientation before declaring a divergence.
+- **Headless first; check recoverability before destructive ops.** Reach for scripted/CLI paths over
+  the GUI. Before any destructive or hard-to-reverse operation (delete, overwrite, reconfigure), verify
+  the target is recoverable (in git / backed up), prefer in-place edits and work on copies. Fix your own
+  messes headless rather than handing cleanup to the user.
+- **Capture and UPDATE runbooks the same session.** Store reusable procedures/gotchas in the runbook
+  docs (`docs/fpga/*RUNBOOK*.md`, `SAR_PIPELINE_STATUS.md`, `SAR_TOP_RECOVERY.md`, …) and write a proven
+  procedure or new gotcha back into the relevant runbook in the SAME turn it is established — with the
+  exact command, expected output, and the failure mode it avoids — so it survives into new sessions.
+- **Environment:** no PowerShell (a standing preference and GPO-blocked here) — use `cmd`/git-bash;
+  `wmic` and `winget` are unavailable, prefer `reg query`/`pnputil`/`mode`.
+- **Prose style:** use **bold** sparingly — reserve it for a few key labels or the single headline
+  result per document; keep body prose and equations plain.

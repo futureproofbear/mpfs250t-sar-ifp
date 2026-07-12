@@ -1,6 +1,6 @@
 # HANDOFF
 
-A clean-handoff summary for the next researcher. This is target-neutral: it describes the SAR
+A clean-handoff summary for a new user. This is target-neutral: it describes the SAR
 image-formation design and its verified state so the work can be continued (or retargeted) from the
 repo alone. Implementation-specific detail (the FPGA/toolchain realization) is called out where it
 applies; the design and verification method are general.

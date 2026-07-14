@@ -1,5 +1,13 @@
 # SAR Pipeline — Silicon Status & Latency Roadmap (checkpoint 2026-07-04)
 
+> **▶ 2026-07-14 update (newest).** The pipeline now runs from an **on-board eMMC-resident scene** — no
+> host JTAG scene load. `sar_form_image` ran end-to-end on the Centerfield scene this cycle
+> (**SAR_SEQ_OK**, no stage timeout) with a coherent focused image confirmed via an ROI crop. Repo is now
+> **standalone `mpfs250t-sar-ifp`**. Per-stage timing for this scene is captured automatically on the next
+> board run (the PIPE runner now reads `sar_stage_ts`); the 2026-07-04 per-stage table below is the prior
+> decimated-scene measurement. Full current status:
+> [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) + [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC.
+
 ## Status: ✅ VALIDATED END-TO-END ON SILICON
 
 The full PFA (polar-format) SAR pipeline runs on the PolarFire SoC **MPFS250T_ES** (Icicle-style board,

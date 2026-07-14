@@ -1,5 +1,13 @@
 # SAR on PolarFire SoC — Implementation Progress Report
 
+> **▶ 2026-07-14 status (newest — supersedes older status in this file for repo layout + eMMC).**
+> This repo is now **standalone `mpfs250t-sar-ifp`** (builds without a sibling `sarProcessor`), and the
+> **on-board eMMC pipeline (M1–M3) is proven on silicon** — a CPHD scene is stored on the eMMC, loaded +
+> focused on-board (`sar_form_image` → SAR_SEQ_OK; focused image confirmed via ROI crop), and the output
+> persisted back to the card, retiring the recurring ~3 h JTAG scene load. Authoritative current status:
+> [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3.
+> The 2026-06/07 status below is retained as history.
+
 **Scope:** GUI-free SAR image formation (Polar Format Algorithm) on the Microchip
 PolarFire SoC Icicle Kit (MPFS250T-FCVG484E), JTAG-only, bare-metal RISC-V + FPGA
 fabric, with the irregular work off-loaded to a host PC.

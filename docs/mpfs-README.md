@@ -1,5 +1,10 @@
 # MPFS port — embedded SAR focuser for the PolarFire SoC Icicle Kit
 
+> **▶ 2026-07-14:** repo now **standalone `mpfs250t-sar-ifp`**; the on-board **eMMC pipeline (M1–M3) is
+> proven on silicon** — scene stored on eMMC, loaded + focused on-board, output persisted (retires the
+> ~3 h JTAG scene load). Current status:
+> [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC.
+
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
 > gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md)
 > "CURRENT STATUS". The `CoreAXI4DMAController 2.2.107` and the "DMA control slave" referenced below are

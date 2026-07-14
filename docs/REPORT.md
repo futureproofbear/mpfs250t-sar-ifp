@@ -1,5 +1,13 @@
 # SAR Processor — Progress Report
 
+> **▶ 2026-07-14 status (newest — supersedes older status in this file for repo layout + eMMC).**
+> This repo is now **standalone `mpfs250t-sar-ifp`** (builds without a sibling `sarProcessor`), and the
+> **on-board eMMC pipeline (M1–M3) is proven on silicon** — a CPHD scene is stored on the eMMC, loaded +
+> focused on-board (`sar_form_image` → SAR_SEQ_OK; focused image confirmed via ROI crop), and the output
+> persisted back to the card, retiring the recurring ~3 h JTAG scene load. Authoritative current status:
+> [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3.
+> The 2026-06/07 status below is retained as history.
+
 **Project:** Lightweight SAR image formation from Umbra Complex Phase History Data (CPHD), with a PolarFire SoC (MPFS Icicle Kit) embedded port
 **Date:** 2026-06-16 (status updated 2026-06-30)
 **Status:** Algorithm complete and verified; CPU port works; FPGA fabric **built, programmed, and brought up on silicon** — data plane and DMA control slave both fixed and verified on the board (see [`fpga/SAR_BRINGUP_REPORT.md`](fpga/SAR_BRINGUP_REPORT.md)). **M3 full PFA pipeline root-caused to FPGA timing closure** (bitstream fails timing at 125 MHz on the single fabric clock); the **62.5 MHz fix is now PROVEN** — headless P&R closes timing completely (0 setup violations of 315,349 pins, 0 hold) — with a bootable bitstream still pending a SAR_TOP rebuild (see §5).

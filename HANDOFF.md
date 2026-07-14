@@ -1,5 +1,13 @@
 # HANDOFF
 
+> **▶ 2026-07-14 status (newest).** This repo is now **standalone `mpfs250t-sar-ifp`** (builds without a
+> sibling `sarProcessor`). The **on-board eMMC pipeline (M1–M3) is proven on silicon** — a CPHD scene is
+> stored on the board eMMC, loaded + focused entirely on-board (`sar_form_image` → SAR_SEQ_OK; focused image
+> confirmed via an ROI crop), and the output persisted back to the card, retiring the recurring ~3 h JTAG
+> scene load. Continue from here: [`docs/PROJECT_SOURCE_OF_TRUTH.md`](docs/PROJECT_SOURCE_OF_TRUTH.md) +
+> [`docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`](docs/fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC + the
+> `emmc-onboard-pipeline` skill. Next board task: reflash → LOAD → PIPE → SAVEOUT(commit-last) → VERIFY_OUT → ROIE.
+
 A clean-handoff summary for a new user. This is target-neutral: it describes the SAR
 image-formation design and its verified state so the work can be continued (or retargeted) from the
 repo alone. Implementation-specific detail (the FPGA/toolchain realization) is called out where it

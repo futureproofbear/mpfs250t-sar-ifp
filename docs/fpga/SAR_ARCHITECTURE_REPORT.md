@@ -1,5 +1,10 @@
 # SAR Processor on PolarFire SoC — Architecture & Detailed Design Report
 
+> **▶ 2026-07-14:** repo now **standalone `mpfs250t-sar-ifp`**; the on-board **eMMC pipeline (M1–M3) is
+> proven on silicon** (scene stored on eMMC, loaded + focused on-board, output persisted). This
+> architecture report remains the reference for the datapath; current project status:
+> [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) + [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC.
+
 *Milestone report, 2026-07-11. Reflects the CoreFFT-in-place fabric pipeline validated end-to-end on
 the MPFS250T_ES Icicle-class board (Centerfield + ship Umbra CPHD scenes).*
 

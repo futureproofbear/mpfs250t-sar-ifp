@@ -1,5 +1,10 @@
 # SAR-on-PolarFire-SoC — On-Silicon Bring-Up Report
 
+> **▶ 2026-07-14:** repo now **standalone `mpfs250t-sar-ifp`**; the on-board **eMMC pipeline (M1–M3) is
+> proven on silicon** (scene stored on eMMC, loaded + focused on-board, output persisted — retiring the
+> ~3 h JTAG scene load). Current status:
+> [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) + [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC. Below is retained as bring-up history.
+
 Target: Microchip PolarFire SoC Icicle Kit, **MPFS250T_ES** (engineering sample, FCVG484).
 Goal: GUI-free Synthetic Aperture Radar image formation (Polar Format Algorithm) with the
 **FPGA fabric doing the heavy compute**, bare-metal RISC-V orchestrating, host PC doing

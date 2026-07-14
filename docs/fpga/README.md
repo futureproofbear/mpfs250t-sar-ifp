@@ -1,5 +1,9 @@
 # FPGA accelerator (PolarFire SoC fabric)
 
+> **▶ 2026-07-14:** repo now **standalone `mpfs250t-sar-ifp`**; on-board **eMMC pipeline (M1–M3) proven on
+> silicon**. Current status: [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) +
+> [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC.
+
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
 > gearbox output skid FIFO; see [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md)
 > "CURRENT STATUS". The `CoreAXI4DMAController 2.2.107` listed below is stale — it deadlocked on the

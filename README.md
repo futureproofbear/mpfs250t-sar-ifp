@@ -1,4 +1,14 @@
-# sarProcessor
+# sarProcessor  ·  repo `mpfs250t-sar-ifp`
+
+> **▶ 2026-07-14 status (newest — supersedes the status note below for repo layout + eMMC).**
+> This repo is now **standalone `mpfs250t-sar-ifp`** — it builds and runs on its own, no sibling
+> `sarProcessor` checkout needed. The **on-board eMMC pipeline (M1–M3) is proven on silicon**: a CPHD scene
+> is stored on the board eMMC, loaded eMMC→DDR (~63 s, retiring the ~3 h JTAG scene load) and focused
+> on-board (`sar_form_image` → SAR_SEQ_OK; focused image confirmed via an ROI crop), and the output is
+> persisted back to the card. Current status + recipe:
+> [`docs/PROJECT_SOURCE_OF_TRUTH.md`](docs/PROJECT_SOURCE_OF_TRUTH.md) and
+> [`docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`](docs/fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3. See also
+> [`docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md`](docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md) (AI-assisted workflow).
 
 SAR image formation from **Umbra CPHD** (compensated phase history data), in two
 implementations:

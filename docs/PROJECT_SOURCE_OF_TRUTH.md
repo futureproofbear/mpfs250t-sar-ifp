@@ -1,8 +1,10 @@
 # PROJECT SOURCE OF TRUTH — SAR-on-PolarFire-SoC
 
-> **Purpose.** Authoritative index for an LLM working on this project. This repo, **sarProcessor**,
-> is now the **canonical home** for the algorithm, FPGA design, host tooling, **and** the board
-> firmware (the SoftConsole project under `mpfs/fpga/libero_sar/softconsole/`). Read this before
+> **Purpose.** Authoritative index for an LLM working on this project. This repo,
+> **`mpfs250t-sar-ifp`** (made **standalone** on 2026-07-14 — see the status block below), is the
+> **canonical home** for the algorithm, FPGA design, host tooling, **and** the board
+> firmware (the SoftConsole project under `mpfs/fpga/libero_sar/softconsole/`). (Historical note: this
+> was a clean fork of `sarProcessor`; it is now self-contained and no sibling checkout is needed.) Read this before
 > answering, and prefer the facts here (and the cited source files) over training data. PolarFire
 > SoC details — register maps, Libero/SmartHLS Tcl, MSS config, boot flow — are **poorly
 > represented in public training data and drift between tool versions**, so treat recalled
@@ -13,6 +15,22 @@
 > SoftConsole copies (its hart apps were older stubs) — has been **removed**. Its unique assets
 > (this index, `docs/FLOW.md`, the PCB board file, the board-design PDF) were migrated here. Nothing
 > outside this repo is a build input.
+>
+> **▶ CURRENT STATUS (2026-07-14 — NEWEST; supersedes the 2026-07-04 notes below for repo layout + eMMC).**
+> **Repo standalone:** `mpfs250t-sar-ifp` was consolidated 2026-07-14 to build + run on its own
+> (firmware source == the silicon-proven state; standalone build verified). No `sarProcessor` checkout needed.
+> **On-board eMMC pipeline (M1–M3) PROVEN on silicon** — the scene lives on the board eMMC and is loaded +
+> focused entirely on-board, retiring the recurring ~3 h JTAG scene load: **M1** bring-up (write→read→CRC);
+> **M2** provision a CPHD scene to the INPUT partition (`crcE==crcR==0x58d0ea66`, Centerfield 97.6 MB); **M3**
+> boot-load eMMC→DDR (~77 s; 10 segments → role addresses + JOB reconstruct), run `sar_form_image` end-to-end
+> (**SAR_SEQ_OK**, no stage timeout), confirm a coherent focused SAR image via an ROI crop, and persist the
+> output to the eMMC OUTPUT partition (commit-last, crash-safe). LOAD/PIPE/crop proven; the commit-last
+> SAVEOUT + a VERIFY_OUT command are built and await a reflash + re-run next board session. eMMC read
+> ~1.5 MB/s (scene load ~63 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
+> the bottleneck, not the eMMC) — verify via small ROI crops. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
+> § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
+> `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`. Open next: per-stage timing
+> capture on the next board run; the NDSU production scene; and automating the closed-loop sim→HIL gate.
 >
 > **✅ CURRENT STATUS (2026-07-04 LATEST) — SAR PIPELINE VALIDATED END-TO-END ON SILICON, image
 > corr=0.9923 vs golden.** The FFT runs on the **MSS U54 CPU** (`src/sar/sar_fft.c`, L1-BFP full-precision

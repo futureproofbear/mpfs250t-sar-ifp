@@ -26,6 +26,15 @@ if [ -n "$DADDR" ]; then
   DUMPCMD="dump binary memory $DFILE_WIN $DADDR ($DADDR + $DBYTES)"
 fi
 
+# PIPE ('PIPE'=0x50495045): select the FABRIC CoreFFT chain (FFTMODE @0xB0059110 = 1) -- the
+# shipping FFT path (feeder->gearbox->CoreFFT->unloader). Without this the pipeline silently runs
+# the LEGACY CPU-FFT fallback (mode 0). Detect stays CPU (default; detect_mode @0xB0059118 != 2).
+FFTSET=""; FFTECHO=""
+if [ "$CMD" = "0x50495045" ]; then
+  FFTSET='set {unsigned int}0xB0059110 = 1'
+  FFTECHO='printf ">>> fft_mode=%u (1=fabric CoreFFT) detect_mode=%u\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118'
+fi
+
 cat > "$GDBSCRIPT" <<GDBEOF
 set pagination off
 set confirm off
@@ -36,6 +45,8 @@ target extended-remote localhost:3333
 monitor mpfs.hart1_u54_1 arp_halt
 thread 2
 printf ">>> hart1 pc = 0x%016lx\n", \$pc
+$FFTSET
+$FFTECHO
 set {unsigned int}0xB0058004 = $BASE
 set {unsigned int}0xB0058008 = $LEN
 set {unsigned int}0xB005800C = 0

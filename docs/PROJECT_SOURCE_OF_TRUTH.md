@@ -27,7 +27,14 @@
 > output to the eMMC OUTPUT partition (commit-last, crash-safe). LOAD/PIPE/crop proven; the commit-last
 > SAVEOUT + a VERIFY_OUT command are built and await a reflash + re-run next board session. eMMC read
 > ~1.5 MB/s (scene load ~63 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
-> the bottleneck, not the eMMC) — verify via small ROI crops. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
+> the bottleneck, not the eMMC) — verify via small ROI crops.
+> **FFT engine (corrected):** the range/azimuth FFTs run on the **fabric CoreFFT** chain
+> (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected at runtime by **`SAR_FFTMODE`
+> @`0xB0059110` = 1**, which the pipeline flow scripts (`flow_pipe_*.gdb`) set before PIPE. CPU
+> `sar_cpu_fft` (mode 0) is the **legacy fallback** — the 2026-07-04 note below that calls the FFT a
+> CPU path is superseded. (Caveat: the eMMC `run_m3_iso.sh` PIPE path did NOT set mode=1 until
+> 2026-07-14, so the eMMC-run PIPE this cycle likely used the CPU fallback; the runner now sets
+> mode=1, so the next board run exercises the fabric CoreFFT path.) Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`. Open next: per-stage timing
 > capture on the next board run; the NDSU production scene; and automating the closed-loop sim→HIL gate.

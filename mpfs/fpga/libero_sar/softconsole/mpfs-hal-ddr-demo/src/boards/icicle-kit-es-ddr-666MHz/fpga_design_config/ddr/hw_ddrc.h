@@ -669,8 +669,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_RFC)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_RFC    0x00000130UL
-    /* CFG_RFC                           [0:32]  RW value= 0x130 */
+#define LIBERO_SETTING_CFG_RFC    0x000000E0UL
+    /* CFG_RFC                           [0:32]  RW value= 0xE0 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_RTP)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -784,13 +784,13 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_REF_PER)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_REF_PER    0x00000A29UL
-    /* CFG_REF_PER                       [0:32]  RW value= 0xA29 */
+#define LIBERO_SETTING_CFG_REF_PER    0x00000C34UL
+    /* CFG_REF_PER                       [0:32]  RW value= 0xC34 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_STARTUP_DELAY)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_STARTUP_DELAY    0x00020850UL
-    /* CFG_STARTUP_DELAY                 [0:32]  RW value= 0x20850 */
+#define LIBERO_SETTING_CFG_STARTUP_DELAY    0x00027100UL
+    /* CFG_STARTUP_DELAY                 [0:32]  RW value= 0x27100 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_MEM_COLBITS)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -999,13 +999,13 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_ZQ_CAL_PER)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_ZQ_CAL_PER    0x00020850UL
-    /* CFG_ZQ_CAL_PER                    [0:32]  RW value= 0x20850 */
+#define LIBERO_SETTING_CFG_ZQ_CAL_PER    0x00027100UL
+    /* CFG_ZQ_CAL_PER                    [0:32]  RW value= 0x27100 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_AUTO_ZQ_CAL_EN)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_AUTO_ZQ_CAL_EN    0x00000000UL
-    /* CFG_AUTO_ZQ_CAL_EN                [0:32]  RW value= 0x0 */
+#define LIBERO_SETTING_CFG_AUTO_ZQ_CAL_EN    0x00000001UL
+    /* CFG_AUTO_ZQ_CAL_EN                [0:32]  RW value= 0x1 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_MEMORY_TYPE)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -1079,8 +1079,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_INIT_DURATION)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_INIT_DURATION    0x00000534UL
-    /* CFG_INIT_DURATION                 [0:32]  RW value= 0x534 */
+#define LIBERO_SETTING_CFG_INIT_DURATION    0x00000640UL
+    /* CFG_INIT_DURATION                 [0:32]  RW value= 0x640 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_ZQINIT_CAL_DURATION)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -1099,8 +1099,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_ZQ_CAL_R_DURATION)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_ZQ_CAL_R_DURATION    0x00000022UL
-    /* CFG_ZQ_CAL_R_DURATION             [0:32]  RW value= 0x22 */
+#define LIBERO_SETTING_CFG_ZQ_CAL_R_DURATION    0x00000028UL
+    /* CFG_ZQ_CAL_R_DURATION             [0:32]  RW value= 0x28 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_MRR)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -1209,13 +1209,13 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_CA_ODT)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_CA_ODT    0x00000002UL
-    /* CFG_CA_ODT                        [0:32]  RW value= 0x2 */
+#define LIBERO_SETTING_CFG_CA_ODT    0x00000004UL
+    /* CFG_CA_ODT                        [0:32]  RW value= 0x4 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_ZQLATCH_DURATION)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_ZQLATCH_DURATION    0x00000014UL
-    /* CFG_ZQLATCH_DURATION              [0:32]  RW value= 0x14 */
+#define LIBERO_SETTING_CFG_ZQLATCH_DURATION    0x00000018UL
+    /* CFG_ZQLATCH_DURATION              [0:32]  RW value= 0x18 */
 #endif
 #if !defined (LIBERO_SETTING_INIT_CAL_SELECT)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -1329,8 +1329,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_CFG_ZQ_CAL_DURATION)
 /*IP Blk = MC_BASE2 Access=RW */
-#define LIBERO_SETTING_CFG_ZQ_CAL_DURATION    0x0000029AUL
-    /* CFG_ZQ_CAL_DURATION               [0:32]  RW value= 0x29A */
+#define LIBERO_SETTING_CFG_ZQ_CAL_DURATION    0x00000320UL
+    /* CFG_ZQ_CAL_DURATION               [0:32]  RW value= 0x320 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_MRRI)
 /*IP Blk = MC_BASE2 Access=RW */
@@ -1400,7 +1400,7 @@ extern  "C" {
 #if !defined (LIBERO_SETTING_CFG_IDLE_TIME_TO_SELF_REFRESH)
 /*IP Blk = MC_BASE2 Access=RW */
 #define LIBERO_SETTING_CFG_IDLE_TIME_TO_SELF_REFRESH    0x00000000UL
-    /* CFG_IDLE_TIME_TO_SELF_REFRESH     [0:32]  RW value= 0x00000000 */
+    /* CFG_IDLE_TIME_TO_SELF_REFRESH     [0:32]  RW value= 0x0 */
 #endif
 #if !defined (LIBERO_SETTING_CFG_IDLE_TIME_TO_POWER_DOWN)
 /*IP Blk = MC_BASE2 Access=RW */

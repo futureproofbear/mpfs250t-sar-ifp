@@ -51,6 +51,31 @@ extern  "C" {
     /* STREAM_ENABLE                     [3:1]   RO */
     /* RESERVED1                         [4:28]  RO */
 #endif
+#if !defined (LIBERO_SETTING_CONFIGURED_PERIPHERALS)
+/*MSS peripherals configured in this instance of MSS Configurator generated
+output. 1 implies it has been configured, 0 it has not been configured. */
+#define LIBERO_SETTING_CONFIGURED_PERIPHERALS    0x00000103UL
+    /* EMMC                              [0:1]   RW value= 0x1 */
+    /* SD_SDIO                           [1:1]   RW value= 0x1 */
+    /* USB                               [2:1]   RW value= 0x0 */
+    /* MAC0                              [3:1]   RW value= 0x0 */
+    /* MAC1                              [4:1]   RW value= 0x0 */
+    /* QSPI                              [5:1]   RW value= 0x0 */
+    /* SPI0                              [6:1]   RW value= 0x0 */
+    /* SPI1                              [7:1]   RW value= 0x0 */
+    /* MMUART0                           [8:1]   RW value= 0x1 */
+    /* MMUART1                           [9:1]   RW value= 0x0 */
+    /* MMUART2                           [10:1]  RW value= 0x0 */
+    /* MMUART3                           [11:1]  RW value= 0x0 */
+    /* MMUART4                           [12:1]  RW value= 0x0 */
+    /* I2C0                              [13:1]  RW value= 0x0 */
+    /* I2C1                              [14:1]  RW value= 0x0 */
+    /* CAN0                              [15:1]  RW value= 0x0 */
+    /* CAN1                              [16:1]  RW value= 0x0 */
+    /* GPIO0                             [17:1]  RW value= 0x0 */
+    /* GPIO1                             [18:1]  RW value= 0x0 */
+    /* GPIO2                             [19:1]  RW value= 0x0 */
+#endif
 
 #ifdef __cplusplus
 }

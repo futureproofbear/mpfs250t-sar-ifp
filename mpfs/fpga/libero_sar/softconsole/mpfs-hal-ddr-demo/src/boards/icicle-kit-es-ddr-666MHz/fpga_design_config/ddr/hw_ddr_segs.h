@@ -41,8 +41,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_SEG0_1)
 /*Cached access at 0x10_0000_000 */
-#define LIBERO_SETTING_SEG0_1    0x80000000UL
-    /* ADDRESS_OFFSET                    [0:15]  RW value= 0x0 */
+#define LIBERO_SETTING_SEG0_1    0x80007030UL
+    /* ADDRESS_OFFSET                    [0:15]  RW value= 0x7030 */
     /* RESERVED                          [15:16] RW value= 0x0 */
     /* LOCKED                            [31:1]  RW value= 0x1 */
 #endif
@@ -104,8 +104,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_SEG1_2)
 /*Non-Cached access at 0x00_c000_0000 */
-#define LIBERO_SETTING_SEG1_2    0x80007F70UL
-    /* ADDRESS_OFFSET                    [0:15]  RW value= 0x7F70 */
+#define LIBERO_SETTING_SEG1_2    0x80007FB0UL
+    /* ADDRESS_OFFSET                    [0:15]  RW value= 0x7FB0 */
     /* RESERVED                          [15:16] RW value= 0x0 */
     /* LOCKED                            [31:1]  RW value= 0x1 */
 #endif
@@ -118,8 +118,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_SEG1_4)
 /*Non-Cached WCB access at 0x00_d000_0000 */
-#define LIBERO_SETTING_SEG1_4    0x80007F60UL
-    /* ADDRESS_OFFSET                    [0:15]  RW value= 0x7F60 */
+#define LIBERO_SETTING_SEG1_4    0x80007FA0UL
+    /* ADDRESS_OFFSET                    [0:15]  RW value= 0x7FA0 */
     /* RESERVED                          [15:16] RW value= 0x0 */
     /* LOCKED                            [31:1]  RW value= 0x1 */
 #endif

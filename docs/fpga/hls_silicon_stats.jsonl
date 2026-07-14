@@ -1,0 +1,8 @@
+{"build": "hls_resample", "metric": "scheduled_ii", "note": "for_loop_resample_cpp_49_5 MII=1", "phenomenon": "axi_ii_lie", "scheduled": 1, "source": "hls_report_lint", "ts": "2026-07-12", "unit": "cyc/elem", "value": 1}
+{"build": "hls_resample", "metric": "scheduled_ii", "note": "for_loop_resample_cpp_47_5 MII=1", "phenomenon": "axi_ii_lie", "scheduled": 1, "source": "hls_report_lint", "ts": "2026-07-12", "unit": "cyc/elem", "value": 1}
+{"build": "hls_resample", "metric": "scheduled_ii", "note": "for_loop_resample_cpp_45_5 MII=1", "phenomenon": "axi_ii_lie", "scheduled": 1, "source": "hls_report_lint", "ts": "2026-07-12", "unit": "cyc/elem", "value": 1}
+{"build": "hls_resample", "metric": "scheduled_ii", "note": "for_loop_resample_cpp_43_5 MII=1", "phenomenon": "axi_ii_lie", "scheduled": 1, "source": "hls_report_lint", "ts": "2026-07-12", "unit": "cyc/elem", "value": 1}
+{"build": "resample-ddr", "lie_ratio": 10.0, "metric": "eff_ii", "note": "idx/wq read from DDR in inner loop (pre-fix)", "phenomenon": "axi_ii_lie", "scheduled": 2.0, "source": "profiling", "ts": "2026-07-12", "unit": "cyc/elem", "value": 20.0}
+{"build": "resample", "metric": "flush_frac", "note": "per-chunk L2 flush ~2% of latency, not the bottleneck", "phenomenon": "l2_coherency", "source": "profiling", "ts": "2026-07-12", "unit": "frac", "value": 0.02}
+{"build": "k_fft", "metric": "observation", "note": "golden TB ran one transform, never exercised the re-arm path", "phenomenon": "corefft_rearm", "source": "golden_tb_review", "ts": "2026-07-12"}
+{"build": "mpfs250t_es", "metric": "observation", "note": "ER0219; see skill", "phenomenon": "es_errata", "source": "mpfs-platform-gotchas", "ts": "2026-07-12"}

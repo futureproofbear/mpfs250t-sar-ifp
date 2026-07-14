@@ -415,3 +415,127 @@ assertion) on `call flush_l2_cache` if the hart is mid-execution — guard flush
 
 See also `SAR_PIPELINE_STATUS.md` (status + latency roadmap), `SMARTDEBUG_RUNBOOK.md`,
 `LIBERO_HEADLESS_PLAYBOOK.md`, `SAR_PIPELINE_PROCESS.md`.
+
+## eMMC Milestone-1 iso-test (write -> read-back -> CRC) — PROVEN 2026-07-14
+
+Runs the on-board eMMC self-test (`sar_emmc_selftest`) over JTAG and reads the verdict.
+`bash mpfs/host/run_emmc_iso.sh` -> drives `jtag_full/emmc_selftest_iso.gdb`. PASS looks like:
+`verdict=0 init=0 write=5 read=5 crcE==crcR memcmp=1`, and `SRS04 (OCR)` nonzero.
+
+### Prereqs (the full eMMC recipe — all committed)
+1. **MSS**: `mss_nodll/ICICLE_MSS.cfg` has eMMC enabled (EMMC/EMMC_DATA_7_4=MSSIO_B4,
+   EMMC_SD_SWITCHING=ENABLED_EMMC, SD=MSSIO_B4 + SD_VOLT pins, Bank4=1.8V). Regen `.cxz`
+   with `pfsoc_mss -GENERATE ... -EXPORT_HDL:true`. Regenerate the firmware
+   `fpga_design_config` from the as-built `ICICLE_MSS_mss_cfg.xml` via
+   `src/platform/soc_config_generator/mpfs_configuration_generator.py` (adds
+   `CONFIGURED_PERIPHERALS=0x103` = the SDMMC clock/de-reset enable) and vendor it into
+   `.../src/boards/icicle-kit-es-ddr-666MHz/fpga_design_config`.
+2. **Fabric (the key fix)**: `sartop_assembly.tcl` ties `SDIO_SW_SEL0/SEL1/EN_N = 0`
+   (pins D7/C7/B7, Bank1 LVCMOS33 in `constraints/sar_io.pdc`) -> mux U44/U29 = COM-NC =
+   eMMC. `build_full_prog_ffv.tcl` imports `constraints/sar_io.pdc`. Rebuild ffv bitstream
+   (create_fresh_project_ffv -> remove_det -> reconfig_ccc62p5 -> build_full_prog_ffv),
+   program with `program_ffv.tcl`.
+3. **Firmware** (`-DSAR_EMMC_ENABLE`): `sar_emmc.c` does mss_config_clk_rst(MSS_PERIPH_EMMC)
+   + 8-bit/LEGACY/1.8V init + bounded watchdogs (send_mmc_cmd + HRS0). `mss_mmc` + `mss_gpio`
+   un-excluded in `.cproject` and added to the generated makefiles. Build (`make all`),
+   flash (`run_program.sh`).
+
+### JTAG gotchas (why the iso-test is shaped this way)
+- **Use the mailbox, NOT `p sar_emmc_selftest(...)`** — the gdb inferior-call crashes under
+  openocd `-rtos hwthread` SMP ("failed to get register 33"). The script writes MBX_CMD_EMMC
+  (0x454D4D43) to the mailbox @0xB0058000 (base=+4=LBA), resumes, waits, reads back.
+- **Never read SDHCI regs (0x20008xxx) before the self-test runs** — clock-gated until
+  MSS_PERIPH_EMMC is enabled; an unclocked read dead-buses/wedges hart1 (power-cycle only).
+  The script gates the SRS04 read on mailbox `status==0xC0FFEE03`.
+- **Attach in place; do NOT `monitor reset halt`** — power-on eNVM boot already lands hart1
+  in its u54_1() mailbox loop; a JTAG reset won't reliably re-boot the U54 on this ES silicon.
+  If a run ever wedges hart1 (unhaltable, dmstatus allrunning), only a **power-cycle** clears it.
+- openocd launched with `-c "telnet_port 4444"`; teardown via `monitor shutdown` (or a telnet
+  `shutdown`) — never SIGTERM/taskkill openocd (wedges the FP6 DM -> needs USB replug).
+
+## eMMC Milestone-2 provisioning (bulk scene write to INPUT partition) — PROVEN 2026-07-14
+
+Writes a host-packed `SARI` image to the eMMC INPUT partition (LBA `0x80000`), reads it back
+and CRC-verifies, TIMING the write for a real throughput number. Firmware: `sar_emmc_provision()`
+via mailbox `MBX_CMD_EMMC_PROV` (`0x45505256` 'EPRV'); record @ `0xB005D000`.
+
+### Why SYNCHRONOUS single-block (not SDMA)
+hart1 runs with `MSTATUS_MIE` cleared (`u54_1.c`). `MSS_MMC_sdma_write()` returns `IN_PROGRESS`
+and its completion is ISR-driven (`mmc_main_plic_IRQHandler` updates `g_mmc_trs_status.state` +
+services the 512 KB SDMA boundary) — with interrupts off that ISR never fires, so `get_transfer_status`
+spins forever = un-haltable hang. The single-block primitive is fully synchronous, so it CANNOT
+hang. (To use SDMA later, either enable the MMC PLIC IRQ on hart1, or "pump" `mmc_main_plic_IRQHandler`
+in a bounded poll loop — it already handles the boundary re-arm + state update.)
+
+### Measured rates (Centerfield 97.6 MB image, 190,534 × 512 B, LEGACY/25 MHz/8-bit)
+- **WRITE 0.132 MB/s** (~3.9 ms/block, dominated by per-CMD24 program/busy) -> 97.6 MB ≈ 738 s (~12 min).
+- **READ  1.544 MB/s** -> 97.6 MB ≈ 63 s. This is the payoff: a boot-time eMMC->DDR load replaces
+  the ~3 h JTAG scene load (~170x). Both scale linearly; verified identical at 1 MiB and full 97.6 MB.
+
+### Procedure (host-only pack, then two board legs)
+1. **Pack** (host, board-free): `python mpfs/host/emmc_pack.py --stage <jtag_stage_deci1> --out
+   mpfs/host/emmc_input.img`. Self-verifies all blob/segment CRCs + that the JOB reconstructs from
+   each TOC entry. Note the host image CRC: `python -c "import zlib;print(hex(zlib.crc32(open('emmc_input.img','rb').read())&0xffffffff))"`.
+   Stage dir must be CURRENT-format (10 role bins: sig,f0,df,pr,tans,invorder,krgrid,kcgrid,hamr,hamc)
+   — NOT the stale pre-resample `jtag_stage/` (sig,kr,kc,tanphi,win). `jtag_stage_deci1` = Centerfield.
+2. **Rate/integrity probe (optional, no data load)**: `bash mpfs/host/run_emmc_prov_iso.sh [SPAN] [SLEEP_MS] [SRC]`
+   provisions a span of RESIDENT DDR (firmware CRCs the source right before writing, so
+   source-vs-readback is self-consistent WITHOUT any JTAG load). Use to measure MB/s + prove the
+   full 190,534-block path before committing the ~3 h restore. PASS = `verdict=0`, `crcE==crcR`.
+3. **M2d-2a restore** (~3 h, one-time): `bash mpfs/host/run_emmc_restore.sh` -> JTAG `restore`s
+   `emmc_input.img` into DDR `0x88000000`, then an on-hart CRC32 (mailbox 'CRC3') checks the DDR
+   image against the host CRC in SECONDS (catches a corrupt load before the ~12 min write). DDR
+   persists across JTAG sessions — **do NOT power-cycle** after this.
+4. **M2d-2b provision**: `bash mpfs/host/run_emmc_prov_iso.sh 97553408 1100000 0x88000000` ->
+   PASS = `verdict=0` and `crcE==crcR==<host image CRC>` (full host->DDR->eMMC->back proof).
+
+### Gotchas earned here
+- **gdb `restore` needs a WINDOWS path** (`C:/...`), not a git-bash `/c/...` path. MSYS translates
+  `/c/...` for .exe *arguments* (so `-batch $ELF` works) but NOT for paths *inside* the .gdb script
+  — `restore /c/...` fails "No such file or directory". `run_emmc_restore.sh` uses `cygpath -m`.
+- Prov record @ `0xB005D000`: +0x00 magic(0xE3C0FF20) +0x10 crcE +0x14 crcR +0x18 byte_len
+  +0x1C nblocks +0x20 dest_lba +0x24 fail_blk +0x28 write_us(u64) +0x30 read_us +0x38 write_cycles
+  +0x40 verdict. Read-back staging = SCRATCH (`0x98000000`), source = SIG (`0x88000000`).
+- Same JTAG hygiene as Milestone-1 (mailbox trigger, attach-in-place, telnet-4444 shutdown, never
+  taskkill). No SDHCI-register reads in the prov path, so no dead-bus gate needed.
+- **`MBX_CMD_CRC32` result is not L2-flushed** — its handler writes `mbx->result` with only a
+  fence, so a gdb PHYSICAL read gets a stale value (seen: 0x00000000 after a good restore, CRC was
+  actually correct). Until fixed (add `flush_l2_cache` to that handler), verify a restore with a
+  DDR peek instead (`run_ddr_peek.sh` — SARI magic 0x53415249 at the load addr). The EPRV
+  provisioner flushes its OWN record, so its crcE/crcR are trustworthy.
+- **PROVEN 2026-07-14**: real Centerfield image (97.6 MB) provisioned end-to-end —
+  crcE==crcR==0x58d0ea66 (host CRC), write 747.6 s / read 63.1 s, verdict=0.
+
+## eMMC Milestone-3 boot-load + focus + output persistence — PROVEN 2026-07-14
+
+Run a scene straight from the card (no host JTAG data load), then persist the result on the
+card. Firmware `sar_emmc_load` / `sar_emmc_save_out` / `sar_emmc_roi` / `sar_emmc_verify_out`;
+generic runner `mpfs/host/run_m3_iso.sh CMD BASE LEN SLEEP_MS REC_ADDR [DUMPADDR BYTES FILE]`.
+
+Sequence (mailbox cmds; records in the 0xB005Exxx block):
+1. **LOAD** `ELOD` 0x454C4F44, .base=scene idx (0). eMMC INPUT -> DDR: scatters the 10 blob
+   segments to `sar_emmc_role_addr` + rebuilds the JOB. rec@0xB005E000: verdict, nseg(=10),
+   sig_crc_exp==sig_crc_got, M/N. ~77 s. PROVEN: sig_crc 0x89fa12dc, M=5634 N=4319.
+2. **PIPE** `MBX_CMD_PIPE` -> `sar_form_image`, result=stage status (0=OK). PROVEN status 0.
+3. **ROI** `EROI` 0x45524F49 (from DDR) / **ROIE** `EROE` 0x45524F45 (from SARO image).
+   .base=(r0<<16)|r1  .len=(c0<<16)|c1. Gathers OUT[r0:r1,c0:c1] uint16 -> SCRATCH
+   (0x98000000); dump it with gdb `dump binary memory`; render with `render_crop.py`.
+   rec@0xB005E200 (crc of crop). PROVEN: center 1024x1024 = coherent focused SAR image.
+4. **SAVEOUT** `ESAV` 0x45534156, .base=scene_id .len=run_seq. Full OUT (8192x8192 uint16,
+   128 MB) -> SARO (LBA 0x880000). ~16 min. rec@0xB005E100 (out_crc, io_status).
+5. **VERIFY_OUT** `EVOU` 0x45564F55. Reads the SARO superblock + whole image, recompute CRC
+   vs TOC out_crc. rec@0xB005E300 (out_crc_exp==out_crc_got). Detects a torn SAVEOUT (ROI's
+   partial read cannot).
+
+### Crash-safety (SAVEOUT ordering — earned the hard way)
+SAVEOUT is **INVALIDATE (magic->0) -> write IMAGE -> COMMIT superblock LAST**. The superblock
+is the sole "image valid" record, so it is written last as the (near-atomic) commit. A power
+loss during the ~16 min image write leaves an INVALID superblock -> readers reject the torn
+image, rather than trusting a half-written one. (First cut wrote superblock-first = a torn
+image looked committed AND ROI wouldn't notice; fixed same day + added VERIFY_OUT.) A SAVEOUT
+interrupted by power-off leaves INPUT intact and is fully recoverable by re-running LOAD/PIPE/
+SAVEOUT. Never power-cycle between a load and its dependent test unless the data is on the card.
+
+### Reminder
+Host<->PC dump is STILL ~3 h regardless of eMMC (FP6 JTAG ~9 KB/s is the bottleneck) — eMMC
+only accelerates on-board transfers. Verify via small ROI crops, keep the full image on the card.

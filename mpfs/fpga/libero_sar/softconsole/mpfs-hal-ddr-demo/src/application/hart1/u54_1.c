@@ -18,6 +18,9 @@
 #include "../../sar/ddr_sar_layout.h"   /* SAR_*_ADDR, SAR_COEF_IDX/WQ, SAR_GRID_MAX */
 #include "../../sar/sar_kernels.h"      /* K_* (incl K_FFT_UNLOADER), HLS_*, sar_reg_w/r, sar_k_* */
 #include "../../sar/sar_sequencer.h"    /* sar_form_image() -- full PFA pipeline (M3) */
+#ifdef SAR_EMMC_ENABLE
+#include "../../sar/sar_emmc.h"         /* sar_emmc_selftest() -- Milestone-1 eMMC round trip */
+#endif
 
 #define MSS_SYSREG_BASE  0x20002000u    /* always-responsive MSS regs (no fabric dependency) */
 #define SUBBLK_CLOCK_CR  (MSS_SYSREG_BASE + 0x84u)  /* bit24-27 = FIC0-3 clock enable */
@@ -51,6 +54,26 @@
                                         /*          sar_seq_status_t (0=OK, else failing stage)  */
 #define MBX_CMD_FFTHOLD  0x46484C44u    /* 'FHLD' : arm DMA + start FFT feeder, do NOT wait --   */
                                         /*          holds the stream stall live for SmartDebug   */
+#define MBX_CMD_EMMC     0x454D4D43u    /* 'EMMC' : Milestone-1 eMMC write/read/CRC round trip.  */
+                                        /*          .base = scratch LBA (0 = default OUT region); */
+                                        /*          .result = verdict (0=PASS); details latched   */
+                                        /*          at SAR_EMMC_RESULT_ADDR. Needs -DSAR_EMMC_ENABLE. */
+#define MBX_CMD_EMMC_PROV 0x45505256u   /* 'EPRV' : Milestone-2 provision -- bulk-write a packed  */
+                                        /*          'SARI' image from DDR to the INPUT partition. */
+                                        /*          .base = DDR src addr (host-restored image);   */
+                                        /*          .len  = image bytes (block-multiple; probe a  */
+                                        /*          small span first for rate). Dest LBA fixed =   */
+                                        /*          SAR_EMMC_IN_LBA. .result = verdict; timed       */
+                                        /*          record at SAR_EMMC_PROV_RESULT_ADDR.           */
+#define MBX_CMD_EMMC_LOAD 0x454C4F44u   /* 'ELOD' : M3 boot-load INPUT eMMC->DDR (segs->role addrs */
+                                        /*          + JOB). .base = scene index (0). record@LOAD.  */
+#define MBX_CMD_EMMC_SAVE 0x45534156u   /* 'ESAV' : M3 write full OUT (DDR) -> SARO. .base=scene_id */
+                                        /*          .len=run_seq. rows=cols=8192. record@SAVE.     */
+#define MBX_CMD_EMMC_ROI  0x45524F49u   /* 'EROI' : M3 crop OUT[r0:r1,c0:c1] from DDR -> stage.    */
+#define MBX_CMD_EMMC_ROIE 0x45524F45u   /* 'EROE' : same, but read OUT rows from SARO (later run). */
+                                        /*          .base=(r0<<16)|r1  .len=(c0<<16)|c1. rec@ROI.  */
+#define MBX_CMD_EMMC_VOUT 0x45564F55u   /* 'EVOU' : full-image integrity check of persisted OUT     */
+                                        /*          (recompute CRC vs SARO TOC). rec@VERIFY.        */
 #define MBX_DONE_MAGIC   0xC0FFEE03u    /* hart sets .status to this when .result is valid */
 typedef struct {
     volatile uint32_t cmd;      /* host writes a command; hart clears to 0 to ack */
@@ -192,8 +215,12 @@ static void m2_run_tests(void)
      * (0x60005000) is UNUSED (the fft_unloader is gone; the fft_kernel on SLAVE4 replaces the
      * whole feeder+unloader chain). Do NOT probe 0x60005000 -- with no slave connected the CIC
      * routes the read to a dead target and it HANGS the AXI un-haltably (wedges JTAG examine). */
-    const uint32_t slv[5] = { K_CORNER_TURN, K_WINDOW, K_DETECT, K_RESAMPLE, K_FFT };
-    for (uint32_t i = 0u; i < 5u; i++) {
+    /* DET removed from fabric (CPU detect ships) -> K_DETECT (SLAVE2, 0x60002000) is now a DEAD
+     * target: the CIC routes a read there to nothing and it HANGS the AXI un-haltably (same trap as
+     * the SLAVE5 note above; m2_safe_r cannot catch a non-responding target -> wedges JTAG examine at
+     * boot). MUST drop K_DETECT from the decode probe now that the instance is gone. */
+    const uint32_t slv[4] = { K_CORNER_TURN, K_WINDOW, K_RESAMPLE, K_FFT };
+    for (uint32_t i = 0u; i < 4u; i++) {
         v = m2_safe_r(slv[i] + HLS_START, &flt);
         m2_rec(0x10u + i, slv[i] + HLS_START, v, 0u,
                flt ? M2_FAULT : (v == 0u ? M2_PASS : M2_FAIL));
@@ -315,7 +342,80 @@ void u54_1(void)
             __asm volatile ("fence rw, rw");
             mbx->cmd    = 0u;                 /* ack: ready for the next command */
             __asm volatile ("fence rw, rw");
-        } else if (mbx->cmd == MBX_CMD_PIPE) {
+        }
+#ifdef SAR_EMMC_ENABLE
+        else if (mbx->cmd == MBX_CMD_EMMC) {
+            /* Milestone-1: init eMMC + single-block write/read/CRC round trip.
+             * .base reinterpreted as the scratch LBA (0 -> default OUT region);
+             * .result = verdict, full record at SAR_EMMC_RESULT_ADDR. */
+            __asm volatile ("fence rw, rw");
+            mbx->result = sar_emmc_selftest(mbx->base ? mbx->base : SAR_EMMC_SCRATCH_LBA);
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC;
+            mbx->seq    = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd    = 0u;
+            __asm volatile ("fence rw, rw");
+        }
+        else if (mbx->cmd == MBX_CMD_EMMC_PROV) {
+            /* Milestone-2: bulk-provision a packed 'SARI' image (host-restored to
+             * .base in DDR, .len bytes) to the INPUT partition, read back + CRC
+             * verify, timing the write. Dest is the fixed INPUT base LBA. */
+            __asm volatile ("fence rw, rw");
+            mbx->result = sar_emmc_provision(mbx->base, mbx->len,
+                                             (uint32_t)SAR_EMMC_IN_LBA);
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC;
+            mbx->seq    = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd    = 0u;
+            __asm volatile ("fence rw, rw");
+        }
+        else if (mbx->cmd == MBX_CMD_EMMC_LOAD) {
+            /* M3: load the scene from eMMC INPUT into the pipeline DDR layout + JOB. */
+            __asm volatile ("fence rw, rw");
+            mbx->result = sar_emmc_load(mbx->base);
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC; mbx->seq = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd = 0u;
+            __asm volatile ("fence rw, rw");
+        }
+        else if (mbx->cmd == MBX_CMD_EMMC_SAVE) {
+            /* M3: persist the full OUT image (8192x8192 uint16) to eMMC SARO. */
+            __asm volatile ("fence rw, rw");
+            mbx->result = sar_emmc_save_out((uint32_t)SAR_GRID_MAX, (uint32_t)SAR_GRID_MAX,
+                                            mbx->base, mbx->len);
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC; mbx->seq = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd = 0u;
+            __asm volatile ("fence rw, rw");
+        }
+        else if (mbx->cmd == MBX_CMD_EMMC_ROI || mbx->cmd == MBX_CMD_EMMC_ROIE) {
+            /* M3: gather OUT[r0:r1,c0:c1] -> SAR_EMMC_ROI_STAGE_ADDR for a fast JTAG dump. */
+            uint32_t from_emmc = (mbx->cmd == MBX_CMD_EMMC_ROIE) ? 1u : 0u;
+            __asm volatile ("fence rw, rw");
+            mbx->result = sar_emmc_roi(mbx->base >> 16, mbx->base & 0xFFFFu,
+                                       mbx->len >> 16, mbx->len & 0xFFFFu, from_emmc);
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC; mbx->seq = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd = 0u;
+            __asm volatile ("fence rw, rw");
+        }
+        else if (mbx->cmd == MBX_CMD_EMMC_VOUT) {
+            /* M3: full-image integrity check of the persisted OUT (torn-write detect). */
+            __asm volatile ("fence rw, rw");
+            mbx->result = sar_emmc_verify_out();
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC; mbx->seq = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd = 0u;
+            __asm volatile ("fence rw, rw");
+        }
+#endif
+        else if (mbx->cmd == MBX_CMD_PIPE) {
             /* Full PFA pipeline over the JTAG-loaded scene+JOB. Bounded per-stage
              * waits inside sar_form_image mean a stuck kernel yields a TIMEOUT
              * status, never an un-haltable lock-up. .result = stage code. */

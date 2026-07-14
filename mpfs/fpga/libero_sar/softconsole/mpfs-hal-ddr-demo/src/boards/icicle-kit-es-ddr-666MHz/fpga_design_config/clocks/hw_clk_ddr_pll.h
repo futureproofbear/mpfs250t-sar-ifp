@@ -69,20 +69,20 @@ a single broadcast write from the SCB master. */
 #endif
 #if !defined (LIBERO_SETTING_DDR_PLL_REF_FB)
 /*PLL reference and feedback registers */
-#define LIBERO_SETTING_DDR_PLL_REF_FB    0x00000100UL
+#define LIBERO_SETTING_DDR_PLL_REF_FB    0x00000500UL
     /* FSE_B                             [0:1]   RW value= 0x0 */
     /* FBCK_SEL                          [1:2]   RW value= 0x0 */
     /* FOUTFB_SELMUX_EN                  [3:1]   RW value= 0x0 */
     /* RESERVE12                         [4:4]   RSVD */
-    /* RFDIV                             [8:6]   RW value= 0x1 */
+    /* RFDIV                             [8:6]   RW value= 0x5 */
     /* RESERVE13                         [14:2]  RSVD */
     /* RESERVE14                         [16:12] RSVD */
     /* RESERVE15                         [28:4]  RSVD */
 #endif
 #if !defined (LIBERO_SETTING_DDR_PLL_FRACN)
 /*PLL fractional register */
-#define LIBERO_SETTING_DDR_PLL_FRACN    0x00000001UL
-    /* FRACN_EN                          [0:1]   RW value= 0x1 */
+#define LIBERO_SETTING_DDR_PLL_FRACN    0x00000000UL
+    /* FRACN_EN                          [0:1]   RW value= 0x0 */
     /* FRACN_DAC_EN                      [1:1]   RW value= 0x0 */
     /* RESERVE16                         [2:6]   RSVD */
     /* RESERVE17                         [8:24]  RSVD */
@@ -155,9 +155,9 @@ a single broadcast write from the SCB master. */
 #endif
 #if !defined (LIBERO_SETTING_DDR_SSCG_REG_0)
 /*SSCG registers 0 */
-#define LIBERO_SETTING_DDR_SSCG_REG_0    0x13F7CEC0UL
+#define LIBERO_SETTING_DDR_SSCG_REG_0    0x00000000UL
     /* DIVVAL                            [0:6]   RW value= 0x0 */
-    /* FRACIN                            [6:24]  RW value= 0x4FDF3B */
+    /* FRACIN                            [6:24]  RW value= 0x0 */
     /* RESERVE00                         [30:2]  RSVD */
 #endif
 #if !defined (LIBERO_SETTING_DDR_SSCG_REG_1)
@@ -170,8 +170,8 @@ a single broadcast write from the SCB master. */
 #endif
 #if !defined (LIBERO_SETTING_DDR_SSCG_REG_2)
 /*SSCG registers 2 */
-#define LIBERO_SETTING_DDR_SSCG_REG_2    0x00000015UL
-    /* INTIN                             [0:12]  RW value= 0x15 */
+#define LIBERO_SETTING_DDR_SSCG_REG_2    0x00000080UL
+    /* INTIN                             [0:12]  RW value= 0x80 */
     /* INTMOD                            [12:12] RO */
     /* RESERVE02                         [24:8]  RSVD */
 #endif

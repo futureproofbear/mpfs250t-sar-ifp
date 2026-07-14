@@ -8,6 +8,12 @@ LIBERO="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
 export LM_LICENSE_FILE='C:\Users\lkwangsi\Documents\github\polarfire-soc\License.dat'
 run() { "$LIBERO" "SCRIPT:$1" "LOGFILE:$2" >/dev/null 2>&1; }
 
+echo "[$(date +%H:%M:%S)] STAGE 0/3: HLS pre-build gate (anti-pattern + II report firebreak)"
+if ! bash "$FPGA/hls_gate.sh" hls_resample; then
+  echo "[$(date +%H:%M:%S)] STAGE 0 ABORTED build -- fix the HLS gate failure above, re-run 'shls hw'."; exit 1
+fi
+echo "[$(date +%H:%M:%S)] STAGE 0 OK"
+
 echo "[$(date +%H:%M:%S)] STAGE 1/3: create_fresh_project_hlsfft (cores + MSS + HDL+ + assembly)"
 run create_fresh_project_hlsfft.tcl create_fresh_project_hlsfft.log
 if ! grep -q "FRESH_HLSFFT_PROJECT_DONE" create_fresh_project_hlsfft.log 2>/dev/null; then

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * ddr_sar_layout.h
  *
- * Bare-metal mirror of the host module mpfs250t-sar-ifp/mpfs/host/ddr_layout.py.
+ * Bare-metal mirror of the host module sarProcessor/mpfs/host/ddr_layout.py.
  * Defines the JTAG-batch SAR contract: DDR buffer addresses, the accelerator
  * AXI4-Lite register map, and the job descriptor the host bakes into DDR.
  *
@@ -69,23 +69,6 @@ extern "C" {
 #define SAR_FRAME_BYTES     ((uint64_t)SAR_GRID_MAX * SAR_GRID_MAX * 4u)  /* 256 MiB */
 #define SAR_OUT_BYTES       ((uint64_t)SAR_GRID_MAX * SAR_GRID_MAX * 2u)  /* 128 MiB */
 
-/* Chunked resample coefficients (per-CHUNK L2 flush instead of per-line).
- * The per-line whole-L2 flush -- each walks all 16 L2 ways, and it sits on the
- * resample critical path -- dominated the stage. The sequencer now precomputes
- * RESAMPLE_CHUNK lines of coeffs per fabric-arm batch and flushes ONCE per
- * chunk. Two chunk banks, double-buffered: the fabric streams bank b while the
- * MSS fills bank b^1, so the next chunk's coeff compute overlaps this chunk's
- * kernel runs (as the per-line path already did). Each line slot is a fixed
- * 48 KiB (32 KiB idx + 16 KiB wq) sized for the worst-case grid, so the slot
- * stride is Np/Mp-agnostic. Firmware-internal DDR scratch (host does not load
- * it; reserved in ddr_layout.py). Numerically identical to the per-line path. */
-#define RESAMPLE_CHUNK          (16u)
-#define SAR_COEFC_LINE_BYTES    ((uint64_t)SAR_GRID_MAX * 4u + (uint64_t)SAR_GRID_MAX * 2u) /* 48 KiB */
-#define SAR_COEFC_BASE          (SAR_GEOM_BASE + 0x100000ULL)   /* 1 MiB into geom, clear of the F32 scratch */
-#define SAR_COEFC_BANK(b)       (SAR_COEFC_BASE + (uint64_t)(b) * (uint64_t)RESAMPLE_CHUNK * SAR_COEFC_LINE_BYTES)
-#define SAR_COEFC_IDX(b, c)     (SAR_COEFC_BANK(b) + (uint64_t)(c) * SAR_COEFC_LINE_BYTES)   /* int32[<=Np] */
-#define SAR_COEFC_WQ(b, c)      (SAR_COEFC_IDX(b, c) + (uint64_t)SAR_GRID_MAX * 4u)          /* int16[<=Np] */
-
 /* ---- Accelerator AXI4-Lite control base (mapped via FIC) -----------------
  * PLACEHOLDER: set to the real fabric base from the Libero memory map once the
  * accelerator is instantiated (FIC0 commonly maps at 0x6000_0000 on MPFS).   */
@@ -142,6 +125,127 @@ typedef struct __attribute__((packed)) {
     uint64_t out_addr;
     uint64_t scratch_addr;
 } sar_job_t;
+
+/* ---- eMMC persistent layout (fixed-LBA regions + per-region superblock/TOC) --
+ * eMMC is NOT the boot medium (the app boots from eNVM), so the whole device is
+ * free for data. Two fixed logical regions, each versioned:
+ *   INPUT  'SARI' -- staged scene blobs (SIG + tables + geom), write-once / RO.
+ *   OUTPUT 'SARO' -- processed images, the only region firmware writes at runtime.
+ * A low RESERVED region stays clear so a future eMMC boot/GPT can never collide.
+ *
+ * JOB IS NOT PERSISTED: the INPUT TOC stores the job-SEMANTIC fields and firmware
+ * rebuilds sar_job_t in DDR at boot from them, so the volatile JOB layout can
+ * keep changing during fabric/firmware iteration without reprovisioning the card
+ * -- only a TOC-layout change bumps SAR_EMMC_VERSION and forces a reprovision.
+ * Mirror of ddr_layout.py -- keep in lock-step. */
+#define SAR_EMMC_BLK            (512u)
+#define SAR_EMMC_RESERVED_LBA   (0x00000ULL)
+#define SAR_EMMC_RESERVED_BLKS  (0x80000ULL)   /* 256 MiB (data never touches below IN) */
+#define SAR_EMMC_IN_LBA         (0x80000ULL)   /* 256 MiB  : INPUT base */
+#define SAR_EMMC_IN_BLKS        (0x800000ULL)  /* 4 GiB */
+#define SAR_EMMC_OUT_LBA        (0x880000ULL)  /* 4.25 GiB : OUTPUT base */
+#define SAR_EMMC_OUT_BLKS       (0x600000ULL)  /* 3 GiB */
+#define SAR_EMMC_END_LBA        (SAR_EMMC_OUT_LBA + SAR_EMMC_OUT_BLKS) /* device >= this (7.25 GiB) */
+
+#define SAR_EMMC_IN_MAGIC       (0x53415249u)  /* 'SARI' */
+#define SAR_EMMC_OUT_MAGIC      (0x5341524Fu)  /* 'SARO' */
+#define SAR_EMMC_VERSION        (1u)           /* bump on ANY TOC-layout change */
+#define SAR_EMMC_MAX_SCENES     (64u)          /* TOC capacity per region */
+#define SAR_EMMC_NAME_LEN       (32u)
+
+/* INPUT TOC entry (88 B). The job-semantic fields feed sar_job_t at boot;
+ * sar_job_t itself is never stored on the card. */
+typedef struct __attribute__((packed)) {
+    uint32_t valid;              /* 0 = empty slot */
+    uint32_t scene_id;
+    uint64_t lba;                /* absolute device LBA of the scene blob */
+    uint64_t byte_len;           /* full blob length (SIG + tables + geom) */
+    uint32_t blob_crc;           /* CRC32 of the whole blob (read-back check) */
+    uint32_t M, N, fft_r, fft_a; /* -> sar_job_t */
+    int32_t  bfp_in_exp;         /* -> sar_job_t */
+    uint32_t sig_len;            /* -> sar_job_t (SIG sub-length within blob) */
+    uint32_t sig_crc;            /* -> sar_job_t (SIG loopback CRC) */
+    char     name[SAR_EMMC_NAME_LEN];  /* scene code (e.g. capture folder) */
+} sar_emmc_in_entry_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;              /* SAR_EMMC_IN_MAGIC */
+    uint32_t version;            /* SAR_EMMC_VERSION */
+    uint32_t count;              /* used TOC entries */
+    uint32_t reserved;
+    sar_emmc_in_entry_t toc[SAR_EMMC_MAX_SCENES];
+} sar_emmc_in_super_t;
+
+/* OUTPUT TOC entry (48 B): one per processing run. */
+typedef struct __attribute__((packed)) {
+    uint32_t valid;
+    uint32_t scene_id;           /* INPUT scene that produced this */
+    uint32_t run_seq;            /* monotonic run counter */
+    uint32_t out_dtype;          /* SAR_OUT_DTYPE_* */
+    uint64_t lba;                /* absolute device LBA of the image */
+    uint64_t byte_len;
+    uint32_t rows, cols;
+    uint32_t out_crc;
+    uint32_t reserved;
+} sar_emmc_out_entry_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;              /* SAR_EMMC_OUT_MAGIC */
+    uint32_t version;            /* SAR_EMMC_VERSION */
+    uint32_t count;
+    uint32_t reserved;
+    sar_emmc_out_entry_t toc[SAR_EMMC_MAX_SCENES];
+} sar_emmc_out_super_t;
+
+/* ---- INPUT scene blob: self-describing container of DDR segments -------------
+ * One blob per scene (SIG + the 9 geometry arrays). Firmware reads the header +
+ * segment table, then DMAs each segment from eMMC straight to its DDR buffer,
+ * resolving the address from the segment ROLE via sar_emmc_role_addr() -- the raw
+ * DDR address is NOT stored, so the DDR layout can change without reprovisioning.
+ * Payloads are 512-aligned in the blob (block-aligned LBA for direct DMA).
+ * Mirror of ddr_layout.py -- keep in lock-step. */
+#define SAR_EMMC_BLOB_MAGIC     (0x53415242u)  /* 'SARB' */
+#define SAR_EMMC_BLOB_VERSION   (1u)
+
+typedef enum {
+    SAR_SEG_SIG = 0, SAR_SEG_F0, SAR_SEG_DF, SAR_SEG_PR, SAR_SEG_TANS,
+    SAR_SEG_INVORDER, SAR_SEG_KRGRID, SAR_SEG_KCGRID, SAR_SEG_HAMR, SAR_SEG_HAMC,
+    SAR_SEG_COUNT
+} sar_emmc_role_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t role;               /* sar_emmc_role_t */
+    uint32_t blob_off;           /* byte offset in blob (512-aligned) */
+    uint32_t byte_len;
+    uint32_t crc;                /* CRC32 of the segment payload */
+} sar_emmc_seg_t;
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;              /* SAR_EMMC_BLOB_MAGIC */
+    uint32_t version;            /* SAR_EMMC_BLOB_VERSION */
+    uint32_t seg_count;
+    uint32_t total_len;          /* blob length in bytes (block-aligned) */
+    /* sar_emmc_seg_t seg[seg_count] follows */
+} sar_emmc_blob_hdr_t;
+
+/* role -> DDR base address (mirror of EMMC_ROLE_ADDR in ddr_layout.py). */
+static inline uint64_t sar_emmc_role_addr(uint32_t role)
+{
+    switch (role) {
+    case SAR_SEG_SIG:      return SAR_SIG_ADDR;
+    case SAR_SEG_F0:       return SAR_F0_ADDR;
+    case SAR_SEG_DF:       return SAR_DF_ADDR;
+    case SAR_SEG_PR:       return SAR_PR_ADDR;
+    case SAR_SEG_TANS:     return SAR_TANS_ADDR;
+    case SAR_SEG_INVORDER: return SAR_INVORDER_ADDR;
+    case SAR_SEG_KRGRID:   return SAR_KRGRID_ADDR;
+    case SAR_SEG_KCGRID:   return SAR_KCGRID_ADDR;
+    case SAR_SEG_HAMR:     return SAR_HAMR_ADDR;
+    case SAR_SEG_HAMC:     return SAR_HAMC_ADDR;
+    default:               return 0;
+    }
+}
+
 
 #ifdef __cplusplus
 }

@@ -200,6 +200,144 @@ def assert_fits():
     assert SIG_ADDR >= DDR_BASE + APP_RESERVED, "SIG overlaps the app region"
 
 
+# --------------------------------------------------------------------------- #
+# eMMC persistent layout (fixed-LBA regions + per-region superblock/TOC).
+#
+# eMMC is NOT the boot medium (the app boots from eNVM), so the whole device is
+# free for data. Two fixed logical regions, each with a versioned superblock +
+# table-of-contents:
+#   * INPUT  ('SARI') -- staged scene blobs (SIG + tables + geom); write-once,
+#                        read-only at runtime.
+#   * OUTPUT ('SARO') -- processed result images; the only region firmware writes
+#                        while running.
+# A low RESERVED region stays clear so a future eMMC bootloader/GPT can never
+# collide with data.
+#
+# JOB IS NOT PERSISTED. The INPUT TOC stores the JOB-SEMANTIC fields; firmware
+# reconstructs the (volatile) sar_job_t in DDR at boot via job_from_in_entry().
+# So the JOB struct can keep changing during fabric/firmware iteration without
+# reprovisioning the card -- only a TOC-layout change bumps EMMC_VERSION and
+# forces a reprovision. Mirrors ddr_sar_layout.h -- keep in lock-step.
+# --------------------------------------------------------------------------- #
+EMMC_BLK           = 512
+EMMC_RESERVED_LBA  = 0x00000            # boot / GPT / HSS headroom
+EMMC_RESERVED_BLKS = 0x80000            # 256 MiB (data never touches below IN_LBA)
+EMMC_IN_LBA        = 0x80000            # 256 MiB  : INPUT region base
+EMMC_IN_BLKS       = 0x800000           # 4 GiB
+EMMC_OUT_LBA       = 0x880000           # 4.25 GiB : OUTPUT region base
+EMMC_OUT_BLKS      = 0x600000           # 3 GiB
+EMMC_END_LBA       = EMMC_OUT_LBA + EMMC_OUT_BLKS   # device must be >= this (7.25 GiB)
+
+EMMC_IN_MAGIC   = 0x53415249            # 'SARI'
+EMMC_OUT_MAGIC  = 0x5341524F            # 'SARO'
+EMMC_VERSION    = 1                     # bump on ANY TOC-layout change
+EMMC_MAX_SCENES = 64                    # TOC capacity per region
+EMMC_NAME_LEN   = 32
+
+# struct formats (little-endian, packed == the C structs in ddr_sar_layout.h)
+EMMC_SUPER_HDR_FMT = "<IIII"            # magic, version, count, reserved
+EMMC_IN_ENTRY_FMT  = "<IIQQIIIIIiII32s" # sar_emmc_in_entry_t  (88 B)
+EMMC_OUT_ENTRY_FMT = "<IIIIQQIIII"      # sar_emmc_out_entry_t (48 B)
+
+
+def pack_in_entry(scene_id, lba, byte_len, blob_crc, M, N, fft_r, fft_a,
+                  bfp_in_exp, sig_len, sig_crc, name):
+    """Pack one INPUT TOC entry (valid=1). `name` is the scene code."""
+    import struct
+    nm = name.encode()[:EMMC_NAME_LEN].ljust(EMMC_NAME_LEN, b"\0")
+    return struct.pack(EMMC_IN_ENTRY_FMT, 1, scene_id, lba, byte_len, blob_crc,
+                       M, N, fft_r, fft_a, bfp_in_exp, sig_len, sig_crc, nm)
+
+
+def job_from_in_entry(entry_fields, out_dtype):
+    """Reconstruct the DDR JOB descriptor from an INPUT TOC entry.
+
+    `entry_fields` is the tuple ``struct.unpack(EMMC_IN_ENTRY_FMT, ...)`` yields.
+    This is the split that lets the JOB struct change without reprovisioning:
+    the persisted contract is the TOC entry; the volatile sar_job_t is built here
+    (out_dtype is a per-run choice, not an input property, so it is passed in)."""
+    (_valid, _sid, _lba, _blen, _bcrc, M, N, fft_r, fft_a,
+     bfp_in_exp, sig_len, sig_crc, _name) = entry_fields
+    return pack_job(M, N, fft_r, fft_a, out_dtype, bfp_in_exp, sig_len, sig_crc)
+
+
+def assert_emmc_fits(device_bytes=None):
+    """Sanity-check the eMMC region math: ordered, non-overlapping regions, and
+    struct formats matching the C sizes; optionally that it fits the device."""
+    import struct
+    assert EMMC_RESERVED_LBA + EMMC_RESERVED_BLKS <= EMMC_IN_LBA, "RESERVED overlaps INPUT"
+    assert EMMC_IN_LBA + EMMC_IN_BLKS <= EMMC_OUT_LBA, "INPUT overlaps OUTPUT"
+    assert struct.calcsize(EMMC_IN_ENTRY_FMT) == 88, "INPUT entry size drift vs C"
+    assert struct.calcsize(EMMC_OUT_ENTRY_FMT) == 48, "OUTPUT entry size drift vs C"
+    if device_bytes is not None:
+        assert EMMC_END_LBA * EMMC_BLK <= device_bytes, (
+            f"eMMC layout needs {EMMC_END_LBA * EMMC_BLK} B > device {device_bytes} B")
+
+
+# --- INPUT scene blob: a self-describing container of DDR segments -------------
+# One blob per scene = SIG + the 9 small geometry arrays (the exact bytes
+# serialize_inputs.py stages; job.bin is NOT included -- JOB is reconstructed from
+# the TOC). Firmware reads the header + segment table, then DMAs each segment from
+# eMMC straight to its DDR buffer, resolving the address from the segment ROLE (not
+# a stored address) -- the same decouple as job_from_in_entry: persist the role,
+# resolve the volatile DDR address at boot. Segment payloads are 512-aligned in the
+# blob so each maps to a block-aligned LBA for direct DMA. Mirror of ddr_sar_layout.h.
+EMMC_BLOB_MAGIC   = 0x53415242          # 'SARB'
+EMMC_BLOB_VERSION = 1
+EMMC_BLOB_HDR_FMT = "<IIII"             # magic, version, seg_count, total_len (bytes)
+EMMC_SEG_FMT      = "<IIII"             # role, blob_off (bytes, 512-aligned), byte_len, crc32
+
+# segment role ids (blob segment -> DDR buffer). Order = serialize_inputs staging.
+EMMC_ROLE = {"sig": 0, "f0": 1, "df": 2, "pr": 3, "tans": 4, "invorder": 5,
+             "krgrid": 6, "kcgrid": 7, "hamr": 8, "hamc": 9}
+# role id -> DDR base address firmware copies the segment to (mirror of the C map).
+EMMC_ROLE_ADDR = {
+    0: SIG_ADDR, 1: F0_ADDR, 2: DF_ADDR, 3: PR_ADDR, 4: TANS_ADDR, 5: INVORDER_ADDR,
+    6: KRGRID_ADDR, 7: KCGRID_ADDR, 8: HAMR_ADDR, 9: HAMC_ADDR,
+}
+
+
+def _blkup(n):
+    """Round n up to a whole eMMC block."""
+    return (n + EMMC_BLK - 1) // EMMC_BLK * EMMC_BLK
+
+
+def pack_blob(segs):
+    """Pack an INPUT scene blob from ordered ``segs`` = [(role_id, payload_bytes)].
+    Returns the blob bytes (block-aligned length). Segment payloads start at a
+    512-aligned offset so their LBA is block-aligned for direct DMA to DDR."""
+    import struct
+    off0 = _blkup(struct.calcsize(EMMC_BLOB_HDR_FMT)
+                  + struct.calcsize(EMMC_SEG_FMT) * len(segs))
+    table, body, off = [], bytearray(), off0
+    for role, pay in segs:
+        table.append((role, off, len(pay), crc32(pay)))
+        body += pay + b"\0" * ((-len(pay)) % EMMC_BLK)
+        off = off0 + len(body)
+    out = bytearray(struct.pack(EMMC_BLOB_HDR_FMT,
+                                EMMC_BLOB_MAGIC, EMMC_BLOB_VERSION, len(segs), off))
+    for e in table:
+        out += struct.pack(EMMC_SEG_FMT, *e)
+    out += b"\0" * (off0 - len(out))
+    out += body
+    return bytes(out)
+
+
+def pack_in_super(entry_bytes_list):
+    """Pack the INPUT superblock: header + the given TOC entries + empty slots,
+    padded to a whole block. ``entry_bytes_list`` items come from pack_in_entry()."""
+    import struct
+    assert len(entry_bytes_list) <= EMMC_MAX_SCENES, "too many scenes for the TOC"
+    esz = struct.calcsize(EMMC_IN_ENTRY_FMT)
+    out = bytearray(struct.pack(EMMC_SUPER_HDR_FMT,
+                                EMMC_IN_MAGIC, EMMC_VERSION, len(entry_bytes_list), 0))
+    for e in entry_bytes_list:
+        out += e
+    out += b"\0" * (esz * (EMMC_MAX_SCENES - len(entry_bytes_list)))
+    out += b"\0" * ((-len(out)) % EMMC_BLK)
+    return bytes(out)
+
+
 def crc32(buf: bytes) -> int:
     """IEEE 802.3 CRC-32, matching the board's ddr_packet_test reflected poly."""
     return zlib.crc32(buf) & 0xFFFFFFFF

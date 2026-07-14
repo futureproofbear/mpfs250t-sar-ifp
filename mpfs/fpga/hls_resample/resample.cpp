@@ -4,6 +4,18 @@
 // gathers and lerps. So this kernel is data-movement + 2 MACs, no division.
 //   out[i] = in[idx[i]]*(1-w) + in[idx[i]+1]*w,  w = wq[i]/32768
 // Edge samples (idx<0) zero-fill, matching np.interp(left=0,right=0).
+//
+// This is the REDESIGNED II=1 kernel (silicon-validated, corr 0.9923, ~2.3x resample): idx/wq are
+// burst-staged into on-chip LSRAM up front (like `in`) so the gather loop does ZERO per-output DDR
+// reads -- it touches DDR only for the sequential (burstable) `out` write. buf[j]/buf[j+1] read in
+// one cycle via PolarFire's two-port LSRAM -> gather loop II=1 (was II=2 + shared-m_axi-port
+// serialization in the pre-redesign version, which read idx[i]/wq[i] from DDR per output).
+//
+// NOTE (2026-07-13): the 2-D Hamming window is a SEPARATE K_WINDOW pass (SCRATCH->SCRATCH) after
+// resample pass 2 -- NOT fused here. A fused always-window variant was tried and REVERTED: it hit
+// TWO SmartHLS sim-passes/silicon-fails miscompiles (an apply_win runtime branch that synthesized
+// dead; then an always-multiply/int32-cw path that zeroed the gather). Value-level iso-tests caught
+// both. The fusion was a ~1-2% optimization; the separate window is the known-good path.
 //   shls sw / cosim
 #include <stdint.h>
 #include <stdio.h>
@@ -24,18 +36,10 @@ static inline int16_t lerp(int16_t a, int16_t b, int16_t w) {   // a + (b-a)*w, 
 void resample(uint32_t *in, int32_t *idx, int16_t *wq, uint32_t *out) {
 #pragma HLS function top
 #pragma HLS interface default type(axi_target)
-#pragma HLS interface argument(in)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_IN)  max_burst_len(64)
-#pragma HLS interface argument(idx) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(64)
-#pragma HLS interface argument(wq)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(64)
-#pragma HLS interface argument(out) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(64)
-    /* PERF (silicon-measured root cause): the gather loop was ~21 fabric-cyc/output on hardware
-     * (~10x past its scheduled II=2), NOT source-read-bound. Cause: idx[i]/wq[i] were read from DDR
-     * *per output*, sharing the one m_axi port with the out write -> arbitration + real DDR latency.
-     * FIX: burst-stage idx/wq into on-chip RAM up front (like `in` already is), so the gather loop
-     * touches DDR only for the sequential (burstable) out write. buf[j]/buf[j+1] read in one cycle via
-     * PolarFire's native two-port LSRAM (HW report schedules the gather at II=1). Numeric contract
-     * unchanged (same gather + lerp + zero-fill). MUST value-verify on silicon -- SmartHLS scheduling
-     * has repeatedly diverged from silicon on this design. */
+#pragma HLS interface argument(in)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_IN)  max_burst_len(256)
+#pragma HLS interface argument(idx) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256)
+#pragma HLS interface argument(wq)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256)
+#pragma HLS interface argument(out) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256)
     static uint32_t buf[RS_IN];
     static int32_t  idxb[RS_OUT];
     static int16_t  wqb[RS_OUT];
@@ -52,7 +56,7 @@ void resample(uint32_t *in, int32_t *idx, int16_t *wq, uint32_t *out) {
         if (j < 0 || j >= RS_IN - 1) {
             o = 0;                                   // zero-fill out-of-range
         } else {
-            uint32_t a = buf[j], b = buf[j + 1];     // adjacent pair, different cyclic banks -> 1 cycle
+            uint32_t a = buf[j], b = buf[j + 1];     // adjacent pair, two-port LSRAM -> 1 cycle
             int16_t w = wqb[i];
             o = pk(lerp(hi16(a), hi16(b), w), lerp(lo16(a), lo16(b), w));
         }

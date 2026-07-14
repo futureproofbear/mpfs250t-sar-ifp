@@ -330,10 +330,21 @@ MSS_MMC_init
     MMC->HRS00 |= HRS0_SOFTWARE_RESET;
     mmc_delay(DELAY_COUNT);
 
-    do
+    /* SAR: bounded wait. The HRS0 software-reset bit only self-clears once the
+     * eMMC host controller is clocked and live; if the controller is not brought
+     * up (clock/IOMUX/voltage), this poll never returns and hangs the hart. Bound
+     * it so a dead controller returns MSS_MMC_INIT_FAILURE (-> ERR_INIT) instead. */
     {
-       reg = MMC->HRS00;
-    }while ((reg & HRS0_SOFTWARE_RESET) != MMC_CLEAR);
+        uint32_t sar_hrs0_wd = 0x02000000u;
+        do
+        {
+            reg = MMC->HRS00;
+        } while (((reg & HRS0_SOFTWARE_RESET) != MMC_CLEAR) && (--sar_hrs0_wd != 0u));
+        if ((reg & HRS0_SOFTWARE_RESET) != MMC_CLEAR)
+        {
+            return MSS_MMC_INIT_FAILURE;
+        }
+    }
 
     /* Set de-bounce time */
     MMC->HRS01 = DEBOUNCING_TIME;

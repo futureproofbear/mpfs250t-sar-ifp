@@ -44,13 +44,13 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_MSS_COREPLEX_CPU_CLK)
 /*CPU Clock rate in Hz */
-#define LIBERO_SETTING_MSS_COREPLEX_CPU_CLK    625000000
-    /* MSS_COREPLEX_CPU_CLK              [0:32]  RW value= 625000000 */
+#define LIBERO_SETTING_MSS_COREPLEX_CPU_CLK    600000000
+    /* MSS_COREPLEX_CPU_CLK              [0:32]  RW value= 600000000 */
 #endif
 #if !defined (LIBERO_SETTING_MSS_SYSTEM_CLK)
 /*System Clock rate in Hz static power. */
-#define LIBERO_SETTING_MSS_SYSTEM_CLK    625000000
-    /* MSS_SYSTEM_CLK                    [0:32]  RW value= 625000000 */
+#define LIBERO_SETTING_MSS_SYSTEM_CLK    600000000
+    /* MSS_SYSTEM_CLK                    [0:32]  RW value= 600000000 */
 #endif
 #if !defined (LIBERO_SETTING_MSS_RTC_TOGGLE_CLK)
 /*RTC toggle Clock rate in Hz static power. */
@@ -59,18 +59,18 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_MSS_AXI_CLK)
 /*AXI Clock rate in Hz static power. */
-#define LIBERO_SETTING_MSS_AXI_CLK    312000000
-    /* MSS_AXI_CLK                       [0:32]  RW value= 312000000 */
+#define LIBERO_SETTING_MSS_AXI_CLK    300000000
+    /* MSS_AXI_CLK                       [0:32]  RW value= 300000000 */
 #endif
 #if !defined (LIBERO_SETTING_MSS_APB_AHB_CLK)
 /*AXI Clock rate in Hz static power. */
-#define LIBERO_SETTING_MSS_APB_AHB_CLK    156000000
-    /* MSS_APB_AHB_CLK                   [0:32]  RW value= 156000000 */
+#define LIBERO_SETTING_MSS_APB_AHB_CLK    150000000
+    /* MSS_APB_AHB_CLK                   [0:32]  RW value= 150000000 */
 #endif
 #if !defined (LIBERO_SETTING_DDR_CLK)
 /*DDR clock rate in Hz (clk rate x 2) */
-#define LIBERO_SETTING_DDR_CLK    1332000000
-    /* DDR_CLK                           [0:32]  RW value= 1332000000 */
+#define LIBERO_SETTING_DDR_CLK    1600000000
+    /* DDR_CLK                           [0:32]  RW value= 1600000000 */
 #endif
 
 #ifdef __cplusplus

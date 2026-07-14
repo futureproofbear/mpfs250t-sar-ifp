@@ -34,12 +34,12 @@ extern  "C" {
 
 #if !defined (LIBERO_SETTING_MSS_PLL_CTRL)
 /*PLL control register */
-#define LIBERO_SETTING_MSS_PLL_CTRL    0x01000007UL
+#define LIBERO_SETTING_MSS_PLL_CTRL    0x01000017UL
     /* REG_POWERDOWN_B                   [0:1]   RW value= 0x1 */
     /* REG_RFDIV_EN                      [1:1]   RW value= 0x1 */
     /* REG_DIVQ0_EN                      [2:1]   RW value= 0x1 */
     /* REG_DIVQ1_EN                      [3:1]   RW value= 0x0 */
-    /* REG_DIVQ2_EN                      [4:1]   RW value= 0x0 */
+    /* REG_DIVQ2_EN                      [4:1]   RW value= 0x1 */
     /* REG_DIVQ3_EN                      [5:1]   RW value= 0x0 */
     /* REG_RFCLK_SEL                     [6:1]   RW value= 0x0 */
     /* RESETONLOCK                       [7:1]   RW value= 0x0 */
@@ -59,12 +59,12 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_MSS_PLL_REF_FB)
 /*PLL reference and feedback registers */
-#define LIBERO_SETTING_MSS_PLL_REF_FB    0x00000100UL
+#define LIBERO_SETTING_MSS_PLL_REF_FB    0x00000500UL
     /* FSE_B                             [0:1]   RW value= 0x0 */
     /* FBCK_SEL                          [1:2]   RW value= 0x0 */
     /* FOUTFB_SELMUX_EN                  [3:1]   RW value= 0x0 */
     /* RESERVE12                         [4:4]   RSVD */
-    /* RFDIV                             [8:6]   RW value= 0x1 */
+    /* RFDIV                             [8:6]   RW value= 0x5 */
     /* RESERVE13                         [14:2]  RSVD */
     /* RESERVE14                         [16:12] RSVD */
     /* RESERVE15                         [28:4]  RSVD */
@@ -93,11 +93,11 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_MSS_PLL_DIV_2_3)
 /*PLL 2/3 division registers */
-#define LIBERO_SETTING_MSS_PLL_DIV_2_3    0x01000100UL
+#define LIBERO_SETTING_MSS_PLL_DIV_2_3    0x01000300UL
     /* VCO2PH_SEL                        [0:3]   RO */
     /* DIV2_START                        [3:3]   RW value= 0x0 */
     /* RESERVE22                         [6:2]   RSVD */
-    /* POST2DIV                          [8:7]   RW value= 0x1 */
+    /* POST2DIV                          [8:7]   RW value= 0x3 */
     /* RESERVE23                         [15:1]  RSVD */
     /* VCO3PH_SEL                        [16:3]  RO */
     /* DIV3_START                        [19:3]  RW value= 0x0 */
@@ -160,8 +160,8 @@ extern  "C" {
 #endif
 #if !defined (LIBERO_SETTING_MSS_SSCG_REG_2)
 /*SSCG registers 2 */
-#define LIBERO_SETTING_MSS_SSCG_REG_2    0x00000014UL
-    /* INTIN                             [0:12]  RW value= 0x14 */
+#define LIBERO_SETTING_MSS_SSCG_REG_2    0x00000060UL
+    /* INTIN                             [0:12]  RW value= 0x60 */
     /* INTMOD                            [12:12] RO */
     /* RESERVE02                         [24:8]  RSVD */
 #endif

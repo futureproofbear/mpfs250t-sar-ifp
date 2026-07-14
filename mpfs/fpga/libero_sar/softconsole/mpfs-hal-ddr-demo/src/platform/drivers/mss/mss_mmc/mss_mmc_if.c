@@ -153,10 +153,20 @@ void send_mmc_cmd
     {
         /* only need to wait around if expecting no response */
         case CHECK_IF_CMD_SENT_POLL:
-            do
+            /* SAR: bounded wait. Without the guard this poll never returns when the
+             * eMMC interface is not operational (no card / MSSIO not muxed to eMMC),
+             * hanging MSS_MMC_init indefinitely. On watchdog expiry COMMAND_COMPLETE
+             * stays clear, so cif_send_cmd reports TRANSFER_IF_FAIL and MSS_MMC_init
+             * fails cleanly (-> ERR_INIT) instead of an un-returning call. A working
+             * eMMC completes in microseconds, far below this bound. */
             {
-                trans_status_isr = MMC->SRS12;
-            }while (((SRS12_COMMAND_COMPLETE | SRS12_ERROR_INTERRUPT) & trans_status_isr) == MMC_CLEAR);
+                uint32_t sar_cmd_wd = 0x10000000u;
+                do
+                {
+                    trans_status_isr = MMC->SRS12;
+                } while ((((SRS12_COMMAND_COMPLETE | SRS12_ERROR_INTERRUPT) & trans_status_isr) == MMC_CLEAR)
+                         && (--sar_cmd_wd != 0u));
+            }
             break;
         case CHECK_IF_CMD_SENT_INT:
             break;

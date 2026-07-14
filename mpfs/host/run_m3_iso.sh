@@ -52,6 +52,29 @@ printf ">>> mbx: cmd=0x%08x result=0x%08x status=0x%08x seq=%u\n", \
 echo >>> result record @REC (16 words):\n
 x/16xw $REC
 $DUMPCMD
+GDBEOF
+
+# PIPE ('PIPE'=0x50495045): also read the per-stage wall-clock from the sar_stage_ts
+# symbol (gdb resolves it from the ELF; it lives in L2 scratchpad, no L2 flush needed).
+# sar_stage_ts[0..6] = start/resample/window/rangeFFT/cornerturn/azimuthFFT/detect, MTIME 1 us/tick.
+if [ "$CMD" = "0x50495045" ]; then
+cat >> "$GDBSCRIPT" <<'STGEOF'
+echo >>> per-stage timing (sar_stage_ts, MTIME 1 us/tick):\n
+if sar_stage_ts[6] >= sar_stage_ts[0] && sar_stage_ts[0] != 0
+  printf ">>>   resample    = %12llu us\n", (unsigned long long)(sar_stage_ts[1]-sar_stage_ts[0])
+  printf ">>>   window      = %12llu us\n", (unsigned long long)(sar_stage_ts[2]-sar_stage_ts[1])
+  printf ">>>   range-FFT   = %12llu us\n", (unsigned long long)(sar_stage_ts[3]-sar_stage_ts[2])
+  printf ">>>   corner-turn = %12llu us\n", (unsigned long long)(sar_stage_ts[4]-sar_stage_ts[3])
+  printf ">>>   azimuth-FFT = %12llu us\n", (unsigned long long)(sar_stage_ts[5]-sar_stage_ts[4])
+  printf ">>>   detect      = %12llu us\n", (unsigned long long)(sar_stage_ts[6]-sar_stage_ts[5])
+  printf ">>>   TOTAL       = %12llu us\n", (unsigned long long)(sar_stage_ts[6]-sar_stage_ts[0])
+else
+  echo >>> stage timing not valid (pipeline did not complete this run)\n
+end
+STGEOF
+fi
+
+cat >> "$GDBSCRIPT" <<GDBEOF
 echo >>> teardown\n
 monitor resume
 monitor shutdown

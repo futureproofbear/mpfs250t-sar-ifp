@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 600" font-family="'Segoe UI', system-ui, -apple-system, Arial, sans-serif">
+  <defs>
+    <marker id="d" markerWidth="10" markerHeight="10" refX="5" refY="8" orient="0">
+      <path d="M1,1 L5,8 L9,1" fill="none" stroke="#475569" stroke-width="1.6"/>
+    </marker>
+    <marker id="l" markerWidth="10" markerHeight="10" refX="2" refY="5" orient="0">
+      <path d="M9,1 L2,5 L9,9" fill="none" stroke="#dc2626" stroke-width="1.6"/>
+    </marker>
+    <marker id="r" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="0">
+      <path d="M1,1 L8,5 L1,9" fill="none" stroke="#dc2626" stroke-width="1.6"/>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="700" height="600" fill="#ffffff"/>
+
+  <!-- vertical PASS arrows -->
+  <g stroke="#475569" stroke-width="1.6">
+    <line x1="230" y1="62"  x2="230" y2="82"  marker-end="url(#d)"/>
+    <line x1="230" y1="126" x2="230" y2="146" marker-end="url(#d)"/>
+    <line x1="230" y1="190" x2="230" y2="210" marker-end="url(#d)"/>
+    <line x1="230" y1="254" x2="230" y2="274" marker-end="url(#d)"/>
+    <line x1="230" y1="318" x2="230" y2="338" marker-end="url(#d)"/>
+    <line x1="230" y1="382" x2="230" y2="402" marker-end="url(#d)"/>
+    <line x1="230" y1="446" x2="230" y2="466" marker-end="url(#d)"/>
+  </g>
+
+  <!-- 1 start -->
+  <rect x="40" y="18" width="380" height="44" rx="9" fill="#ecfdf5" stroke="#10b981" stroke-width="1.8"/>
+  <text x="230" y="45" text-anchor="middle" font-size="13" font-weight="700" fill="#065f46">Deadlock detected on silicon</text>
+  <!-- 2 -->
+  <rect x="40" y="82" width="380" height="44" rx="9" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+  <text x="230" y="109" text-anchor="middle" font-size="12.5" fill="#0f172a">Skill &#183; capture JTAG telemetry &#8594; JSON state</text>
+  <!-- 3 -->
+  <rect x="40" y="146" width="380" height="44" rx="9" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+  <text x="230" y="173" text-anchor="middle" font-size="12.5" fill="#0f172a">Agents 1 + 2 &#183; structural root-cause diagnosis</text>
+  <!-- 4 -->
+  <rect x="40" y="210" width="380" height="44" rx="9" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.4"/>
+  <text x="230" y="237" text-anchor="middle" font-size="12.5" fill="#0f172a">Agent 3 &#183; synthesize localized repair patch</text>
+  <!-- 5 gate -->
+  <rect x="40" y="274" width="380" height="44" rx="9" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <text x="230" y="301" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0f172a">GATE &#183; local toolchain compile + lint</text>
+  <!-- 6 gate -->
+  <rect x="40" y="338" width="380" height="44" rx="9" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <text x="230" y="360" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0f172a">GATE 1 &#183; virtual sim &#8212; Cocotb / Verilator</text>
+  <text x="230" y="376" text-anchor="middle" font-size="10.5" fill="#92400e">must REPRODUCE the lockup, then pass under load</text>
+  <!-- 7 gate -->
+  <rect x="40" y="402" width="380" height="44" rx="9" fill="#fffbeb" stroke="#f59e0b" stroke-width="2"/>
+  <text x="230" y="424" text-anchor="middle" font-size="12.5" font-weight="600" fill="#0f172a">GATE 2 &#183; flash board + re-probe &#8212; HIL</text>
+  <text x="230" y="440" text-anchor="middle" font-size="10.5" fill="#92400e">TREADY stays high &#183; count past threshold &#183; deadlock cleared</text>
+  <!-- 8 stop -->
+  <rect x="40" y="466" width="380" height="46" rx="9" fill="#ecfdf5" stroke="#10b981" stroke-width="2.2"/>
+  <text x="230" y="494" text-anchor="middle" font-size="13.5" font-weight="700" fill="#065f46">Verified system fix</text>
+
+  <!-- FAIL feedback rail -->
+  <g stroke="#dc2626" stroke-width="1.5">
+    <line x1="420" y1="296" x2="560" y2="296" marker-end="url(#r)"/>
+    <line x1="420" y1="360" x2="560" y2="360" marker-end="url(#r)"/>
+    <line x1="420" y1="424" x2="560" y2="424" marker-end="url(#r)"/>
+    <line x1="560" y1="424" x2="560" y2="168"/>
+    <line x1="560" y1="168" x2="422" y2="168" marker-end="url(#l)"/>
+  </g>
+  <text x="566" y="300" font-size="11" font-weight="600" fill="#dc2626">FAIL</text>
+  <text x="576" y="250" font-size="10.5" fill="#b91c1c" transform="rotate(90 576 250)">append errors + telemetry &#8594; re-diagnose</text>
+
+  <!-- legend -->
+  <rect x="40" y="540" width="14" height="14" rx="3" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.6"/>
+  <text x="62" y="551" font-size="11" fill="#475569">validation gate &#8212; the AI cannot &#8220;deliver&#8221; until every gate passes</text>
+</svg>

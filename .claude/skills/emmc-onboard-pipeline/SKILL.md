@@ -125,6 +125,8 @@ bash run_program.sh                                        # ~4 min, fpgenprog
 bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # ~77 s
 
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK). LONG (resample ~10 min)
+#    For CMD 0x50495045 the runner ALSO prints per-stage timing from sar_stage_ts
+#    (start/resample/window/rangeFFT/cornerturn/azimuthFFT/detect, 1 us/tick).
 bash run_m3_iso.sh 0x50495045 0 0 1500000 0xB0058020       # background it (>10 min)
 
 # 3) crop-verify: gather center 1024x1024 from DDR OUT, dump, render

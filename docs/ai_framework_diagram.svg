@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 600" font-family="'Segoe UI', system-ui, -apple-system, Arial, sans-serif">
+  <defs>
+    <marker id="arrowDown" markerWidth="10" markerHeight="10" refX="5" refY="8" orient="0">
+      <path d="M1,1 L5,8 L9,1" fill="none" stroke="#475569" stroke-width="1.6"/>
+    </marker>
+    <marker id="arrowUp" markerWidth="10" markerHeight="10" refX="5" refY="2" orient="0">
+      <path d="M1,9 L5,2 L9,9" fill="none" stroke="#475569" stroke-width="1.6"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="860" height="600" fill="#ffffff"/>
+
+  <!-- HUMAN -->
+  <rect x="30" y="20" width="800" height="60" rx="10" fill="#eef2ff" stroke="#6366f1" stroke-width="1.6"/>
+  <text x="430" y="46" text-anchor="middle" font-size="17" font-weight="700" fill="#3730a3">HUMAN</text>
+  <text x="430" y="66" text-anchor="middle" font-size="13" fill="#4338ca">intent &#183; hardware actions &#183; approval gates &#183; judgement</text>
+
+  <!-- arrows between HUMAN and AI -->
+  <line x1="300" y1="82" x2="300" y2="150" stroke="#475569" stroke-width="1.6" marker-end="url(#arrowDown)"/>
+  <text x="312" y="120" font-size="11.5" fill="#64748b">decisions &#183; power &#183; physical board</text>
+  <line x1="600" y1="150" x2="600" y2="82" stroke="#475569" stroke-width="1.6" marker-end="url(#arrowUp)"/>
+  <text x="588" y="120" text-anchor="end" font-size="11.5" fill="#64748b">results &#183; direction</text>
+
+  <!-- AI AGENT container -->
+  <rect x="30" y="152" width="800" height="426" rx="12" fill="#f8fafc" stroke="#334155" stroke-width="1.8"/>
+  <text x="52" y="180" font-size="15" font-weight="700" fill="#334155">AI AGENT &#8212; Claude Code</text>
+  <text x="808" y="180" text-anchor="end" font-size="12" fill="#94a3b8">headless &#183; repeatable &#183; knowledge-heavy</text>
+
+  <!-- Layer 1: Knowledge -->
+  <rect x="52" y="196" width="756" height="82" rx="9" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.4"/>
+  <rect x="52" y="196" width="6" height="82" rx="3" fill="#0ea5e9"/>
+  <circle cx="94" cy="237" r="18" fill="#0ea5e9"/>
+  <text x="94" y="243" text-anchor="middle" font-size="17" font-weight="700" fill="#ffffff">1</text>
+  <text x="128" y="228" font-size="16" font-weight="700" fill="#0f172a">KNOWLEDGE LAYER</text>
+  <text x="128" y="249" font-size="13" fill="#334155">skills + runbooks + memory</text>
+  <text x="128" y="266" font-size="11.5" fill="#64748b">durable, repo-checked-in institutional memory &#8212; survives the session AND the engineer</text>
+
+  <!-- Layer 2: Execution -->
+  <rect x="52" y="290" width="756" height="82" rx="9" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.4"/>
+  <rect x="52" y="290" width="6" height="82" rx="3" fill="#10b981"/>
+  <circle cx="94" cy="331" r="18" fill="#10b981"/>
+  <text x="94" y="337" text-anchor="middle" font-size="17" font-weight="700" fill="#ffffff">2</text>
+  <text x="128" y="322" font-size="16" font-weight="700" fill="#0f172a">EXECUTION LAYER</text>
+  <text x="128" y="343" font-size="13" fill="#334155">hygiene-baked headless harnesses</text>
+  <text x="128" y="360" font-size="11.5" fill="#64748b">build &#183; flash &#183; JTAG &#183; probe &#8212; safety rules built in (never wedge the debugger, bounded waits)</text>
+
+  <!-- Layer 3: Verification -->
+  <rect x="52" y="384" width="756" height="82" rx="9" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.4"/>
+  <rect x="52" y="384" width="6" height="82" rx="3" fill="#f59e0b"/>
+  <circle cx="94" cy="425" r="18" fill="#f59e0b"/>
+  <text x="94" y="431" text-anchor="middle" font-size="17" font-weight="700" fill="#ffffff">3</text>
+  <text x="128" y="416" font-size="16" font-weight="700" fill="#0f172a">VERIFICATION LAYER</text>
+  <text x="128" y="437" font-size="13" fill="#334155">goal-driven, value-level, loop-until-proven</text>
+  <text x="128" y="454" font-size="11.5" fill="#64748b">bit-accurate mirrors &#183; adversarial checks &#8212; not correlation, not &#8220;it ran&#8221;</text>
+
+  <!-- Layer 4: Handoff -->
+  <rect x="52" y="478" width="756" height="82" rx="9" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.4"/>
+  <rect x="52" y="478" width="6" height="82" rx="3" fill="#8b5cf6"/>
+  <circle cx="94" cy="519" r="18" fill="#8b5cf6"/>
+  <text x="94" y="525" text-anchor="middle" font-size="17" font-weight="700" fill="#ffffff">4</text>
+  <text x="128" y="510" font-size="16" font-weight="700" fill="#0f172a">HANDOFF LAYER</text>
+  <text x="128" y="531" font-size="13" fill="#334155">self-contained baselines + skills</text>
+  <text x="128" y="548" font-size="11.5" fill="#64748b">a new engineer + a fresh AI session continue cold, from a cloned repo</text>
+</svg>

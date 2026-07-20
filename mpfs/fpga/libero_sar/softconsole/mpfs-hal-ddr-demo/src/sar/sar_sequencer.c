@@ -238,6 +238,16 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         uint64_t words = ((uint64_t)(Mp - g->M) * Np) / 2u;   /* 2 complex int16 / 64-bit */
         for (uint64_t w = 0; w < words; w++) z[w] = 0u;
     }
+    /* These are CACHED CPU writes and the corner-turn below reads DDR over the
+     * non-coherent FIC0, so they must be published. The region is ~84 MB against a
+     * 2 MiB L2, so most lines write-back-evict naturally as the loop advances -- but
+     * the final ~2 MiB (the highest pad rows) stays dirty and the corner-turn would
+     * read whatever DDR held before, i.e. the previous run's data, NOT zeros. That
+     * injects non-zero content into what the FFT expects to be zero-padding.
+     * Whole-L2 (not a targeted range) is deliberate: at 64 B/line a targeted flush of
+     * 84 MB would be ~1.3 M FLUSH64 stores, far worse than one way-walk. This runs
+     * once per pipeline, not per line. */
+    flush_l2_cache(1u);
 
     /* transpose SCRATCH(Mp x Np) -> SIG(Np x Mp) */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);

@@ -241,6 +241,14 @@ read: it does not snoop L2, so a value the CPU wrote but did not flush appears s
   JTAG read of it returns a stale value. The dedicated result records at `0xB005_Exxx` are written
   back and are trustworthy.
 
+A large CPU write is not self-publishing. Pass 1 zeroes the padded pulse rows — about 84 MB against
+a 2 MiB L2 — so most lines write-back-evict naturally as the loop advances and the region *looks*
+published. The final ~2 MiB stays dirty, so without an explicit flush the corner-turn reads the
+previous run's data in the highest pad rows instead of zeros, putting non-zero content where the FFT
+expects zero-padding. Whole-L2 is the right instrument here: at 64 B per line, targeting 84 MB would
+be ~1.3 M `FLUSH64` stores, far worse than one way-walk, and it runs once per pipeline rather than
+per line.
+
 The general rule: narrowing a flush is safe only after enumerating everything the wide flush was
 incidentally publishing. Cache maintenance that works by side effect is a latent dependency.
 

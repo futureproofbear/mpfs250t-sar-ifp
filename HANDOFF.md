@@ -34,20 +34,27 @@ PolarFire SoC MPFS250T_ES engineering-sample board, brought up JTAG-only.
 ## What is open / next
 The image is already correct; these are latency and quality items.
 
-Latency (measured 2026-07-20: **110.8 s** per frame, not yet optimized; per-stage timing in
+Latency (measured 2026-07-20: **88.1 s** per frame; per-stage timing in
 `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5, re-readable via `bash mpfs/host/run_stage_timing.sh`).
 The range/azimuth FFTs already run on the fabric CoreFFT engine (phase-exact, and `fft_mode=1` is
-verified at runtime, see What is proven) — the dominant cost is the **resample** stage
-(**53.6 s of 110.8 s, 48%**), then **detect (19.7 s, 18%, still on the MSS CPU)**:
-1. Resample is the top target, and one round is already banked: the fabric gather kernel was redesigned
-   (gather loop II 2→1, banked ~2.3×), taking resample 103.3 → 53.6 s. Stage-level measurement then
-   attributed the remainder to the kernel itself — **78% kernel-wait, 20% coefficient generation, 2% L2
-   flush** — so orchestration/coefficient work is no longer the lever. Next: the kernel's shared `m_axi`
-   port serialises the gather, so widen/split the interconnect; then stage a row/tile in on-chip SRAM and
-   double-buffer; then parallel lanes across DDR banks.
-2. Corner-turn is a DDR-hostile transpose — use a tiled block transpose through on-chip SRAM (bursts,
+verified at runtime, see What is proven). Two rounds of resample work are now banked: the fabric gather
+kernel redesign (gather loop II 2→1) took resample 103.3 → 53.6 s, and replacing the per-line whole-L2
+`flush_l2_cache()` in `resample_2pass()` with a targeted CCACHE `FLUSH64` writeback of only the
+coefficient banks took it 53.6 → 29.2 s, cutting the frame 110.8 → 88.1 s (−20.6%) with the output
+bits unchanged. That flush was ~45% of resample, not the ~2% previously documented here — the old
+figure came from an `mcycle` profile taken while an experimental per-chunk flush was active, and the
+number outlived the reverted code.
+
+With resample no longer dominant, the ranking has changed:
+1. **Detect (20.6 s, 23%) is now the largest structural target** and the only stage still on the CPU.
+   Moving it back to fabric is blocked on the SmartHLS sign-extension miscompile (see below); the
+   firmware-only alternative is splitting CPU detect across the 4 U54 harts.
+2. Resample (29.2 s) is still the largest single stage but is now bound by the fabric gather kernel
+   itself — its shared `m_axi` port serialises the gather, so widen/split the interconnect; then stage
+   a row/tile in on-chip SRAM and double-buffer; then parallel lanes across DDR banks.
+3. Corner-turn is a DDR-hostile transpose — use a tiled block transpose through on-chip SRAM (bursts,
    bank-interleaved) and/or fuse it into the azimuth-FFT read to delete a whole DDR round-trip.
-3. A cache-coherent fabric interconnect removes the per-stage cache flushes (pure orchestration cost).
+4. A cache-coherent fabric interconnect removes the remaining per-stage cache flushes.
 
 Deferred quality studies:
 - **FFT-size trade** — revisit the transform length vs resolution/throughput.

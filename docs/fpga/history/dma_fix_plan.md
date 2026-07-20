@@ -280,7 +280,7 @@ const + audits target TYPE) wired into `mpfs/host/run_build_safe.sh`; convention
 fw — record table @0xB0050000 is valid); (2) full DMA *transfer* verify (write descriptor + START, move
 data, confirm completion) — the control plane is now fully accessible for it.
 
-**→ SmartDebug procedure: [SMARTDEBUG_RUNBOOK.md](../SMARTDEBUG_RUNBOOK.md).** The AXI4-Lite target FSM
+**→ SmartDebug procedure: [SMARTDEBUG_RUNBOOK.md](SMARTDEBUG_RUNBOOK.md).** The AXI4-Lite target FSM
 (`currState`, 9-bit one-hot) responds to a read unconditionally in IDLE, so probing `currState`+`ARVALID`
 during the hung read deterministically isolates the cause (stuck FSM / request-not-arriving / clk-rst
 anomaly). H1 (internal address-match drop) and H2 (RAM-init lockout) ruled out in RTL (combinational

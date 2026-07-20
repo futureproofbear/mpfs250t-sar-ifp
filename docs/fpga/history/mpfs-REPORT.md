@@ -134,7 +134,7 @@ azimuth FFT.
     control + the DMA control slave (CIC slave-5 @ `0x60005000`).
   - **Done (2026-06-30):** crossbar wiring, AXI4-Lite control fan-out, DMA-stream↔CoreFFT
     adapter, and MSS/FIC integration are all complete — the design is built, programmed,
-    and brought up on silicon (see §5 and [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md)).
+    and brought up on silicon (see §5 and [`fpga/SAR_BRINGUP_REPORT.md`](SAR_BRINGUP_REPORT.md)).
 
 ### 3.5 Resource footprint on the MPFS250T (measured, per component)
 
@@ -261,7 +261,7 @@ on connector J33** (not FlashPro5/J11). Runtime: bare-metal RISC-V (U54_1) over 
    is a one-time chunked **background** load (run-to-completion, never killed) verified by on-target
    CRC.
 
-See [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md) for the full bring-up log and
+See [`fpga/SAR_BRINGUP_REPORT.md`](SAR_BRINGUP_REPORT.md) for the full bring-up log and
 [`fpga/FABRIC_INTERCONNECT_CONVENTIONS.md`](../FABRIC_INTERCONNECT_CONVENTIONS.md) for the
 interconnect lint gate / conventions.
 

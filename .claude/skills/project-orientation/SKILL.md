@@ -36,8 +36,10 @@ target-neutral (see `sar-pipeline-design`); the FPGA/toolchain specifics are sco
 ## What is PROVEN vs OPEN
 Proven (on silicon):
 - **Full autonomous on-board run (re-confirmed 2026-07-20):** scene loaded from the board's own eMMC
-  (78 s, `sig_crc 0x89fa12dc` verified) → focused in **110.8 s** (`SAR_SEQ_OK`, `fft_mode=1` FABRIC
+  (81.5 s, `sig_crc 0x89fa12dc` verified) → focused in **88.1 s** (`SAR_SEQ_OK`, `fft_mode=1` FABRIC
   CoreFFT confirmed at runtime) → ROI crop rendered to a coherent focused image. No host JTAG data load.
+  Reproducible: two consecutive runs at 88.04 s / 88.11 s, output byte-identical to the previous
+  88.1 s pre-flush-fix build had the same top-left 1024² ROI crc `0xd596c9eb`).
   Per-stage breakdown (single source of truth): `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5; re-read
   anytime with `bash mpfs/host/run_stage_timing.sh`.
 - Full pipeline runs end-to-end and forms a correctly focused image (corr 0.9923 vs the CPHD-derived
@@ -49,12 +51,14 @@ Proven (on silicon):
   a correct-signed CPU detect (see `sar-pipeline-design` + `mpfs-platform-gotchas`).
 
 Open / next (image is already correct; these are latency + hardening):
-- Latency reduction (110.8 s, not optimized). The FFT is already on fabric, and a stage-level
-  measurement showed resample is bound by the fabric gather kernel itself (78% kernel-wait / 20%
-  coefficient generation / 2% L2 flush) — so multi-hart CPU FFT and coefficient-side optimisations are
-  dead levers. The live ones: (1) the resample fabric kernel's interconnect — its shared `m_axi` port
-  serialises the gather; (2) detect at 19.7 s on the CPU — fix the fabric detect or multi-hart it;
-  (3) targeted coefficient-bank flush via CCACHE FLUSH64 (implemented, pending silicon measurement).
+- Latency reduction (88.1 s). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
+  FLUSH64 writeback is now DONE and measured (resample 53.6 → 29.2 s, frame 110.8 → 88.1 s, output bits
+  unchanged) — do not treat the per-line L2 flush as a pending lever, and disregard the old "2% L2
+  flush" split, which came from a profile of a since-reverted experiment. The live levers, in order:
+  (1) **detect at 20.6 s (23%) — now the largest structural target and the only stage still on the CPU**;
+  moving it to fabric is blocked on the SmartHLS sign-extension miscompile, so the firmware-only path is
+  splitting CPU detect across the 4 U54 harts; (2) the resample fabric kernel's interconnect — its shared
+  `m_axi` port serialises the gather; (3) the corner-turn's DDR round-trip.
 - Deferred quality studies: FFT-size trade and a higher-order (sinc) resample kernel vs the current
   two-tap linear interpolation.
 - Cosmetic: ~50 % OUT saturation (raise the detect/out-shift headroom).

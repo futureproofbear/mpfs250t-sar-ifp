@@ -11,7 +11,7 @@ description: >-
 
 Plans and interprets SmartDebug Active-Probe sessions for the SAR fabric. You cannot drive the
 GUI — produce an exact probe list for the user to add/read, then decode. See
-`docs/fpga/SMARTDEBUG_RUNBOOK.md`.
+`docs/fpga/history/SMARTDEBUG_RUNBOOK.md` (ARCHIVED — its DMA one-hot decodes describe a removed IP; this skill is authoritative).
 
 ## THE critical rule (cost a full round on 2026-07-09)
 The SmartDebug design database MUST match the bitstream programmed on the board. This repo has

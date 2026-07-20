@@ -19,7 +19,7 @@ Hard rules (from the runbook + memory):
 - ⛔ **PREFLIGHT — VALIDATE THE INPUT BEFORE YOU TRUST ANY RESULT.** DDR is volatile: a board
   power-cycle WIPES it. Before running any pipeline/correlation, confirm the input is actually
   present — `bash mpfs/host/run_ddr_peek.sh 0x88000000` must show the `SARI` magic `0x53415249`
-  (or re-run the eMMC `ELOD` LOAD, 78 s). Running on wiped DDR yields a plausible-but-bogus number:
+  (or re-run the eMMC `ELOD` LOAD, 81.5 s). Running on wiped DDR yields a plausible-but-bogus number:
   on 2026-07-13 this produced a fake "corr 0.72 regression" that was an invalid-input artifact, not
   a bug. Also confirm scene/golden/JOB dims match before believing a correlation.
 - ⛔ **A dark FABRIC mimics other faults.** If mailbox commands arm but never execute (result records

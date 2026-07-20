@@ -223,8 +223,8 @@ shutdown
 ### 5.1 Reads: use `mem2array` + `echo [format]`, NOT `mdw`
 `mdw` produced **no output** in this OpenOCD; `mem2array` works:
 ```tcl
-mem2array v 32 0x60005000 1
-echo [format ">>> DMA VER = 0x%08x" $v(0)]
+mem2array v 32 0x60004008 1
+echo [format ">>> fft_feeder START/busy = 0x%08x" $v(0)]
 mem2array r 32 0xB0050000 200          ;# bulk read (200 words); parse in a Tcl loop
 ```
 - Reading fabric control regs (`0x6000_n000`) works via the MSS→FIC0 path (control plane).
@@ -245,12 +245,7 @@ mem2array r 32 0xB0050000 200          ;# bulk read (200 words); parse in a Tcl 
 | SYSREG base | `0x20002000` | `BASE32_ADDR_MSS_SYSREG` |
 | `DLL_STATUS_SR` | `0x2000215C` | FIC0_LOCK=b0, FIC1=b1, FIC2=b2, FIC3=b4, FIC4=b5; UNLOCK sticky at b8+. **1=locked/bypassed-ready, 0=enabled-but-not-locked (BUG).** |
 | `PLL_STATUS_SR` | `0x2000214C` | CPU/DFI/SGMII lock bits (sanity: MSS PLL up). |
-| Fabric kernel ctrl | `0x6000_n000` | CT/WIN/DET/RES/FEED @ n=0..4; DMA-ctrl @ 0x60005000. |
-| CoreAXI4DMAController | `0x60005000` | VER@0x00 (0x00020064), START_OP@0x04, I0ST@0x10 (b0 CPLT, b1 DWERR, b2 DRERR, b3 INVDESC), I0MASK@0x14, I0CLR@0x18(W1C); internal desc0: CONFIG@0x60 (b15 DESCVALID, b14 DEST_DATA_READY, b13 SRC_DATA_VALID, b10 CHAIN), BYTECNT@0x64, SRCADDR@0x68, DSTADDR@0x6C. |
-
-The **DMA I0ST register is a great data-plane probe**: CPLT ⇒ path works, DWERR/DRERR ⇒ reachable
-but errors, INVDESC ⇒ bad descriptor, all-zero after "started" ⇒ **hung** (no response). Drove the
-isolation that proved the hang was in the shared `fabric→idconv→MSS FIC0_S→DDR` path, not any kernel.
+| Fabric kernel ctrl | `0x6000_n000` | CT/WIN/DET/RES/FEED @ n=0..4; `fft_unloader` @ 0x60005000. |
 
 ### 5.4 Booting for JTAG
 - Board only halts for JTAG in **boot mode 0** (WFI) unless the app cooperates; otherwise use the
@@ -356,14 +351,26 @@ random **gather** (`in[idx[i]]`) can't burst even with `max_burst_len` — pull 
 ---
 
 ### Key scripts in `mpfs/fpga/` (this project)
+Verified present as of 2026-07-20 (older notes referenced several scripts that no longer exist).
+
 | Script | Purpose |
 |---|---|
-| `build_sartop_330.tcl` | Full headless SAR_TOP SmartDesign assembly (AXIIC 3.0.130 topology). |
-| `recreate_all_root.tcl` | Re-create ALL 7 HDL+ cores in one session (+ `set_root`). |
-| `make_idconv_core2.tcl` | Create the `sar_axi_idconv` HDL+ core with S_AXI/M_AXI bifs. |
-| `build_final62b.tcl` | Gated P&R → timing → export (parses pinslacks/mindelay). |
-| `build_full_nodll.tcl` | Single-session synth→P&R→export, gates on reports. |
-| `build_freshvm_nodll.tcl` | VM-netlist flow (COMPILE, no Synplify) + DLL-bypassed MSS. |
-| `build_program.tcl` | `run_tool PROGRAMDEVICE` (FlashPro6). |
+| `create_fresh_project_ffv.tcl` | Create a clean Libero project + all IP/MSS/HDL+ cores, with the hand-written Verilog feeder (sources `feeder_v_core.tcl`) instead of the SmartHLS one. The current SAR_TOP starting point. |
+| `create_fresh_project.tcl` | Same, but with the SmartHLS feeder (the `libero_tdest` variant). |
+| `sartop_assembly.tcl` | The SAR_TOP SmartDesign assembly (instantiate + connect + interconnect wiring). |
+| `feeder_v_core.tcl` | Register `fft_feeder_top`/`fft_feeder_v` as an HDL+ core with the same bus interfaces the SmartHLS core had. |
+| `gearbox_idconv_cores.tcl` | Register `corefft_stream64_adapter` + `sar_axi_idconv` as HDL+ cores (the create_hdl_core/add_bif pattern of §2.2). |
+| `build_full_prog_ffv.tcl` | Single-session SYNTH → P&R → VERIFYTIMING → report gate → export, for the ffv project. |
+| `build_gbxfix_ffv.tcl` | Same flow, rebuilding with the FIXED gearbox (linked HDL source). |
+| `build_scaleexp_ffv.tcl` / `build_full_prog_fresh.tcl` | Sibling gated build flows (SCALE_EXP variant / `libero_tdest`). |
+| `build_corefft_vm.tcl` | VM-netlist recovery flow at 62.5 MHz (no Synplify) — see `SAR_TOP_RECOVERY.md`. |
+| `build_timed.tcl` | Build with a HARD timing gate (parses `pinslacks.txt`, aborts before bitstream). |
+| `build_corefft_bootable.tcl` | Add the HSS eNVM boot client + export a bootable job. DEPLOYMENT ONLY — HSS does not cooperate with JTAG halt. |
+| `finish_export.tcl` | Re-run only `export_prog_job` when a finished build failed solely on a missing export dir. |
+| `stage_constraints_tdest.tcl` / `reconstrain.tcl` | Import the hand-written constraints and (re)generate the top-level derived SDC. |
+| `PF_CCC_C0_62p5.tcl` | Regenerate the CCC at 62.5 / 7.8125 MHz. |
+| `program_ffv.tcl` / `program_tdest.tcl` | `run_tool PROGRAMDEVICE` on an already-built project (FlashPro6). |
+| `run_hlsfft_build.sh` / `create_fresh_project_hlsfft.tcl` / `build_full_prog_hlsfft.tcl` / `sartop_assembly_hlsfft.tcl` / `program_hlsfft.tcl` / `stage_constraints_hlsfft.tcl` | The abandoned HLS-FFT variant of the flow. Retained as scripts only; the shipping FFT is the fabric CoreFFT chain. |
+| `hls_gate.sh` / `lint_netlist.sh` / `trim_mss.py` | SmartHLS output gate, netlist lint, MSS trim helper. |
 | `mpfs/host/run_program.sh` | Flash app ELF via `mpfsBootmodeProgrammer` (boot mode 1). |
-| `efp6_*.cfg` | OpenOCD JTAG test/probe scripts (m2 dump, DMA test, DLL status, ctrl reads). |
+| `efp6_*.cfg` | OpenOCD JTAG test/probe scripts (m2 dump, rate tests, DLL status, ctrl reads). |

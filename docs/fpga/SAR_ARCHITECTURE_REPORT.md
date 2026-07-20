@@ -30,13 +30,13 @@ path at run time. This is the shipping configuration, proven end-to-end on silic
 | Step | Mechanism | Measured |
 |---|---|---:|
 | Scene resident on eMMC | `SARI` partition @ LBA `0x80000` (superblock + TOC + per-scene blob, 10 role segments) | one-time provision |
-| **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **78 s** |
-| **PIPE** focus | `sar_form_image`, fabric CoreFFT (`fft_mode=1`) | **110.8 s** (§5) |
+| **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **81.5 s** |
+| **PIPE** focus | `sar_form_image`, fabric CoreFFT (`fft_mode=1`) | **88.1 s** (§5) |
 | **SAVEOUT** DDR → eMMC | `ESAV`, commit-last ordering (crash-safe) | ~16 min |
 | Verify / inspect | `EVOU` full-image CRC; `EROI` crop + small JTAG dump | ~63 s / ~4 min |
 
 **Why this is the baseline, not an add-on:** the host JTAG link (FlashPro6) runs at ~9 KB/s, so pushing
-a 97 MB scene over it took **~3 h per run**. Moving the scene on-card retires that entirely (78 s), and
+a 97 MB scene over it took **~3 h per run**. Moving the scene on-card retires that entirely (81.5 s), and
 the geometry is reconstructed from the card's own self-describing TOC rather than trusted from volatile
 host state. The same link speed is why **outputs stay on-card** and only small ROI crops are dumped to
 the host — eMMC does not speed up host↔PC transfer, and a full 128 MB OUT dump is still ~3 h.
@@ -208,20 +208,37 @@ re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
-| Resample (2-pass keystone) | **53.6 s** | 48% | fabric gather, 5634 pulses (dominant) |
-| Detect | 19.7 s | 18% | **MSS CPU** (see §6) |
-| Azimuth FFT | 12.2 s | 11% | CoreFFT (fabric) |
-| Range FFT | 12.0 s | 11% | CoreFFT (fabric) |
-| Corner-turn | 7.3 s | 7% | fabric transpose |
-| Window | 6.0 s | 5% | fabric |
-| **Total** | **110.8 s** | | `SAR_SEQ_OK` |
+| Resample (2-pass keystone) | **29.2 s** | 33% | fabric gather, 5634 pulses (dominant) |
+| Detect | 20.6 s | 23% | **MSS CPU** (see §6) |
+| Azimuth FFT | 12.6 s | 14% | CoreFFT (fabric) |
+| Range FFT | 12.4 s | 14% | CoreFFT (fabric) |
+| Corner-turn | 7.3 s | 8% | fabric transpose |
+| Window | 6.0 s | 7% | fabric |
+| **Total** | **88.1 s** | | `SAR_SEQ_OK` |
 
-**~32% faster than the 2026-07-04 baseline below**, from the burst-256 + hoisted-window resample
-fabric (resample 103.3 → 53.6 s). Detect is now the #2 cost and still runs on the CPU — the largest
-remaining structural win is moving it back to fabric (blocked on the HLS sign-extension miscompile, §6).
+Reproducible across two consecutive runs (88.04 s and 88.11 s, 0.08% spread), image byte-identical
+between them and to the pre-change build (top-left 1024×1024 ROI crc `0xd596c9eb`).
 
-<sub>Prior baseline (2026-07-04, superseded): Resample 103.3 s · Window 5.1 s · Range FFT 13.2 s ·
-Corner-turn 8.2 s · Azimuth FFT 13.7 s · Detect 18.7 s · **Total ~162 s**.</sub>
+Getting here took two steps. The resample fabric kernel redesign (gather loop II 2→1, plus the
+hoisted window taper) took resample 103.3 → 53.6 s and the pipeline to 110.8 s. Replacing the
+per-line whole-L2 `flush_l2_cache()` with a targeted CCACHE `FLUSH64` writeback of just the
+coefficient banks then took resample 53.6 → 29.2 s for no change in output bits.
+
+That second step is worth recording precisely, because the project previously believed the flush was
+negligible. Removing 13,826 whole-L2 flushes saved 24.4 s, i.e. **1.76 ms per flush** — which matches
+the mechanism (the HAL flush is a way-by-way walk reading 131 KiB from the L2 zero device for each of
+16 ways, ≈268k dependent volatile loads, ≈1.6 ms). So the flush was ~45% of resample, not the 2% the
+docs claimed. The 2% figure came from an mcycle profile taken while an experimental per-chunk flush
+(16× fewer flushes) was active; that experiment was later reverted by a `git checkout`, but the
+number outlived the code it described. Measure the shipping path, not a branch.
+
+Detect is now the #1 structural target: at 20.6 s it is 23% of the run and the only stage still on
+the CPU, bypassed because of the HLS sign-extension miscompile (§6).
+
+<sub>Earlier baselines (superseded): 2026-07-20 pre-flush-fix — Resample 53.6 s · Detect 19.7 s ·
+Azimuth FFT 12.2 s · Range FFT 12.0 s · Corner-turn 7.3 s · Window 6.0 s · Total 110.8 s.
+2026-07-04 — Resample 103.3 s · Window 5.1 s · Range FFT 13.2 s · Corner-turn 8.2 s ·
+Azimuth FFT 13.7 s · Detect 18.7 s · Total ~162 s.</sub>
 
 *Note: this is @ 62.5 MHz fabric with an un-tiled resample and single-frame streaming — a throughput
 figure, not the optimized latency roadmap (dual-FIC ~3.2 GB/s, tiled corner-turn, double-buffering).*
@@ -335,7 +352,7 @@ plumbing rivals the compute kernels. All are live; only the fabric detect is byp
 - **Fabric FFT chain**: phase-exact vs bit-accurate golden (0.0° spread @ 256 & 8192); fabric == CPU FFT
   (corr 0.9999); zero-loss gearbox.
 - **Full pipeline on silicon**: corr **0.9923** vs the CPHD-derived golden; **runs
-  end-to-end at full deci-1 resolution** (RETURN=0, 110.8 s — §5), producing a correctly focused Centerfield
+  end-to-end at full deci-1 resolution** (RETURN=0, 88.1 s — §5), producing a correctly focused Centerfield
   image (river + fields resolved, matches the emulator).
 - **Bit-accurate silicon mirror** (`silicon_emulator.py`) == float golden (corr 1.0), used to isolate
   the detect bug and predict full-resolution output.

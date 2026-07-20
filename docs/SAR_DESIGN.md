@@ -36,16 +36,18 @@ a fused concurrent pipeline. Every stage is a DDR-to-DDR streaming pass, because
 complex) far exceeds on-chip SRAM; on-chip each stage holds only a row, a transpose tile, or AXI
 burst FIFOs.
 
-| # | Stage | Engine | In | Out | Time |
-|---|---|---|---|---|---|
-| 1 | Resample (range + transpose + azimuth) | fabric gather kernel + MSS coefficients | SIG | SCRATCH | 53.6 s |
-| 2 | Window (2-D Hamming) | fabric kernel | SCRATCH | SCRATCH | 6.0 s |
-| 3 | Range FFT | fabric CoreFFT | SCRATCH | SCRATCH | 12.0 s |
-| 4 | Corner-turn (transpose) | fabric kernel | SCRATCH | SIG | 7.3 s |
-| 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG | 12.2 s |
-| 6 | Detect (magnitude) | MSS U54 CPU | SIG | OUT | 19.7 s |
+| # | Stage | Engine | In | Out |
+|---|---|---|---|---|
+| 1 | Resample (range + transpose + azimuth) | fabric gather kernel + MSS coefficients | SIG | SCRATCH |
+| 2 | Window (2-D Hamming) | fabric kernel | SCRATCH | SCRATCH |
+| 3 | Range FFT | fabric CoreFFT | SCRATCH | SCRATCH |
+| 4 | Corner-turn (transpose) | fabric kernel | SCRATCH | SIG |
+| 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
+| 6 | Detect (magnitude) | MSS U54 CPU | SIG | OUT |
 
-Total 110.8 s. Orchestration is `sar_form_image()` in `src/sar/sar_sequencer.c`.
+Total 88.1 s; the per-stage breakdown is in
+[`fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5, which is the single numeric
+source of truth. Orchestration is `sar_form_image()` in `src/sar/sar_sequencer.c`.
 
 ### 2.0 Kernel-level decomposition
 
@@ -95,9 +97,13 @@ fabric kernel gathers line `i` from bank `b`, the CPU fills bank `b^1` for line 
 generation is float on the CPU (`sar_resample_coeffs.c`, mirrors the host `interp_coeffs()` at
 corr 1.0); the interpolation itself is fixed-point in fabric.
 
-Measured split per line: kernel-wait 78%, coefficient compute 20%, cache flush 2%. The stage is
-bound by fabric gather throughput, not by coefficient generation — the coefficient work is already
-hidden behind the kernel.
+Cache maintenance on this per-line path used to dominate the stage. Replacing the whole-L2
+`flush_l2_cache()` with the targeted coefficient-bank writeback of section 6 removed 13,826 whole-L2
+flushes and took the stage from 53.6 s to 29.2 s — 24.4 s, or about 1.76 ms per flush, which matches
+the way-by-way walk the HAL call performs. So the flush was roughly 45% of resample, not the ~2% an
+earlier profile reported; that profile was taken while an experimental per-chunk flush (16x fewer
+flushes) was active, and the figure outlived the reverted code. What remains is bound by fabric
+gather throughput, not by coefficient generation — the coefficient work is hidden behind the kernel.
 
 ### 2.2 Window
 
@@ -235,7 +241,7 @@ read: it does not snoop L2, so a value the CPU wrote but did not flush appears s
 - The progress word at `0xB005_9100` is published by the `SAR_PROG` macro itself, one cache line per
   update. This used to happen for free as a side effect of the per-line whole-L2 flush in
   `resample_2pass()`; once that flush was narrowed to the coefficient banks it had to become
-  explicit. Without it the progress counter appears frozen for the whole 53.6 s resample, which is
+  explicit. Without it the progress counter appears frozen for the whole 29.2 s resample, which is
   indistinguishable from a hung pipeline.
 - Known gap: `MBX_CMD_CRC32`'s handler writes `mbx->result` with only a fence and no writeback, so a
   JTAG read of it returns a stale value. The dedicated result records at `0xB005_Exxx` are written
@@ -273,7 +279,7 @@ sig_len, sig_crc) plus the SIG/OUT/SCRATCH bases — the pipeline reads geometry
 addresses, not from the JOB's legacy address fields.
 
 Measured rates (LEGACY mode, 25 MHz, 8-bit, single-block): read 1.5 MB/s, write 0.13 MB/s. Scene
-LOAD is 78 s; persisting the 128 MiB OUT image is about 16 min.
+LOAD is 81.5 s; persisting the 128 MiB OUT image is about 16 min.
 
 What eMMC does and does not solve: it eliminates the recurring 3 h JTAG input load, which is the
 win. It does not speed host transfer — dumping the full OUT image to the PC is still bound by the
@@ -332,8 +338,8 @@ problem, which is why the order is stated explicitly.
 | 1 | Program the fabric bitstream | Kernels, and the eMMC mux select, do not exist until it is live |
 | 2 | Flash the application to eNVM (`run_program.sh`) | Programming the fabric requires re-flashing the app afterwards |
 | 3 | Power-cycle | The freshly flashed app must actually boot |
-| 4 | `ELOD` — load the scene from eMMC (78 s) | DDR was wiped by step 3; SIG must be populated |
-| 5 | `PIPE` — run the pipeline (110.8 s) | Needs SIG and the geometry tables in DDR |
+| 4 | `ELOD` — load the scene from eMMC (81.5 s) | DDR was wiped by step 3; SIG must be populated |
+| 5 | `PIPE` — run the pipeline (88.1 s) | Needs SIG and the geometry tables in DDR |
 | 6 | `EROI` / `ESAV` — crop or persist the result | Needs OUT populated |
 
 Steps 4-6 may repeat freely without re-flashing, provided the board is not power-cycled between
@@ -402,7 +408,7 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 
 | Deviation | Reason |
 |---|---|
-| Detect runs on the CPU, not fabric | SmartHLS sign-extension miscompile; costs 19.7 s |
+| Detect runs on the CPU, not fabric | SmartHLS sign-extension miscompile; costs 20.6 s, now the largest structural target |
 | FFT feeder/unloader are hand-written Verilog | SmartHLS mem <-> stream kernels synthesize to dead RTL |
 | Window is a separate pass, not fused into resample | Two distinct SmartHLS miscompiles on fusion |
 | eMMC uses single-block transfers, not SDMA | Interrupts are off on hart1; SDMA would hang unhaltably |

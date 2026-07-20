@@ -11,9 +11,10 @@
 The full PFA (polar-format) SAR pipeline runs on the PolarFire SoC MPFS250T_ES (Icicle-style board,
 JTAG/FlashPro6) and produces the correct focused image, autonomously from the board's own eMMC:
 
-- Scene loads eMMC → DDR in **78 s** (`sig_crc 0x89fa12dc` verified), retiring the ~3 h JTAG input load.
-- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **110.8 s**, with `fft_mode=1`
-  (fabric CoreFFT) confirmed at runtime.
+- Scene loads eMMC → DDR in **81.5 s** (`sig_crc 0x89fa12dc` verified), retiring the ~3 h JTAG input load.
+- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **88.1 s**, with `fft_mode=1`
+  (fabric CoreFFT) confirmed at runtime. Reproducible across consecutive runs (88.04 / 88.11 s), with
+  the output image byte-identical between runs and to the previous build.
 - Correlation vs golden reference = **0.9923** (Centerfield decimated 705×540 scene, band rows
   896:1152, 1.05 M unsaturated pixels; a point-target crop hits 0.9962). The board image matches
   `golden_small_mag.npy` in the **`T.rot180`** orientation (`board == golden.T[::-1,::-1]`) — exactly
@@ -69,15 +70,28 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-110.8 s is a bring-up baseline, not optimised. Levers in measured-ROI order. **Resample (48%) and
-detect (18%) are two thirds of the runtime**; the FFTs are already on fabric and are no longer a lever.
+88.1 s is a bring-up baseline, not optimised. Levers in measured-ROI order. The ordering changed on
+2026-07-20: with resample down to 29.2 s, **detect (20.6 s, 23%) is now the largest structural
+target** and the only stage still running on the CPU. The FFTs are already on fabric and are not a
+lever. Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5.
 
-**1. Resample fabric-kernel interconnect — 53.6 s, the largest single cost.**
+**1. Detect — 20.6 s, and it is on the CPU.**
+The fabric detect kernel is bypassed because SmartHLS mis-synthesised its sign extension
+(`(int16_t)(x>>16)` read unsigned → ~50% saturation); the shipping path is a correct-signed CPU
+detect selected by `detect_mode` @`0xB0059118`. Two routes: fix or replace the fabric detect (largest
+win, needs a rebuild and a value-gate), or split the CPU detect across the 4 U54 harts (firmware-only,
+rows are independent, no bitstream risk). The multi-hart split is the best effort-to-payoff ratio
+available today.
+
+**2. Resample fabric-kernel interconnect — 29.2 s, still the single largest stage.**
 Measured on-silicon mcycle profiling of the azimuth pass (counters in `resample_2pass`, JTAG-read
-@`0xB0059120`) gives the per-line split: **kernel-wait 78% / coeff-compute 20% / flush 2%**. The CPU
+@`0xB0059120`) gives the per-line split: kernel-wait 78% / coeff-compute 20% / flush 2%. The CPU
 spends 78% of resample spinning in `sar_k_wait` for the fabric gather kernel, and the coeff compute is
 already double-buffered behind it. Consequence: *coefficient* optimisations (multi-hart coeff split,
 reciprocal-hoist, fabric coeff-gen, CORDIC) are dead by Amdahl.
+
+(That split describes the current low-flush build. It did *not* describe the per-line-flush build it
+was once quoted against — see "Correcting the record" below before citing it.)
 
 Root cause (pass-1 probe + SmartHLS report): pass-1 (reads ~540) vs pass-2 (reads 8193) kernel-wait/line
 = 1.69M vs 2.01M cyc = only 1.19× despite 15× more reads → read is ~1.3% of the time, so it is **not**
@@ -93,42 +107,43 @@ serialising `buf[j]`+`buf[j+1]`) with in/idx/wq/out **sharing one `m_axi` port**
   read and write don't stall each other, more outstanding transactions, or dual-FIC. Needs a bitstream
   rebuild; value-verify on silicon.
 
-**2. Detect — 19.7 s, now the #2 cost, and it is on the CPU.**
-The fabric detect kernel is bypassed because SmartHLS mis-synthesised its sign-extension
-(`(int16_t)(x>>16)` read unsigned → ~50% saturation); the shipping path is a correct-signed CPU detect
-selected by `detect_mode` @`0xB0059118`. Two routes: fix/replace the fabric detect (largest win, needs
-a rebuild + value-gate), or split the CPU detect across the 4 U54 harts (firmware-only, rows are
-independent). **This is the best effort-to-payoff ratio on the board today.**
+**3. Coherent fabric path.**
+A cache-coherent fabric-master configuration would eliminate the remaining pipeline flushes. Now
+largely priced out: the coefficient flush that motivated it has already been removed in firmware (see
+below), and what remains is a handful of once-per-stage flushes, not a per-line cost. Note the
+mechanism is the DDR address alias a fabric master drives (cached `0x8000_0000` vs non-cached
+`0xC000_0000`), not the FIC index — verify against the MSS User Guide before building.
 
-**3. Targeted coefficient-bank flush — firmware-only, pending silicon measurement.**
-`resample_2pass()` published its coefficient banks with the HAL's `flush_l2_cache()`, which is a
-way-by-way walk (for each of 16 ways it reads 131 KiB from the L2 zero device, ~268k volatile loads)
-that evicts the whole 2 MiB L2 to publish 48 KiB. Replaced with `flush_coef_bank_to_ddr()`, which
-writes only the covering lines to the CCACHE `FLUSH64` register (~768 stores, ~350× less work).
-
-> The bank is **not** 48 KiB contiguous: `idx` is Np·4 B at +0x0000 and `wq` is Np·2 B at +0x10000,
-> with a hole between. Flushing one 48 KiB run from the bank base covers `idx` plus half the hole and
-> misses `wq` entirely → the kernel gathers with stale weights → a still-focused but subtly wrong
-> image that a correlation check would likely not catch. Flush the two ranges separately.
-
-Expected gain, and why it is uncertain: an earlier experiment that cut flush *count* 16× (per-chunk
-batching) measured ~10–15% off a then-103 s resample, implying an absolute flush cost of ~11–16 s.
-That cost is per-line and unchanged, but resample is now 53.6 s after the kernel redesign, so the same
-absolute cost is now 20–30% of resample. That contradicts the 2% figure from the pass-2 profile above;
-the two measurements have not been reconciled. **Measure, don't argue** — a silicon run settles it.
-
-**4. Coherent fabric path — removes the flush entirely.**
-A cache-coherent fabric-master configuration would eliminate the resample coefficient flush and the
-per-stage pipeline flushes. Note the mechanism is the DDR address alias a fabric master drives (cached
-`0x8000_0000` vs non-cached `0xC000_0000`), not the FIC index — verify against the MSS User Guide
-before building. Bounded above by lever 3's measured value, so do lever 3 first and let it price this.
-
-**5. Corner-turn (7.3 s) and window (6.0 s).** Small absolute costs; not worth a rebuild alone. Note
-that fusing the window into the resample gather was attempted and is **SmartHLS-infeasible** — see
+**4. Corner-turn (7.3 s) and window (6.0 s).** Small absolute costs; not worth a rebuild alone. Note
+that fusing the window into the resample gather was attempted and is SmartHLS-infeasible — see
 [`SMARTHLS_ANTIPATTERNS.md`](SMARTHLS_ANTIPATTERNS.md).
 
-**Recommended next step:** lever 3 is already written and costs one reflash — measure it. Then lever 2
-(multi-hart CPU detect) as the largest firmware-only win.
+**Recommended next step:** multi-hart CPU detect (lever 1) — the largest firmware-only win, no
+bitstream risk.
+
+### Banked: targeted coefficient-bank flush (2026-07-20)
+
+`resample_2pass()` published its coefficient banks with the HAL's `flush_l2_cache()`, a way-by-way
+walk that reads 131 KiB from the L2 zero device for each of 16 ways (~268k dependent volatile loads)
+— evicting the whole 2 MiB L2 to publish 48 KiB, once per line. Replaced with
+`flush_coef_bank_to_ddr()`, which writes only the covering lines to the CCACHE `FLUSH64` register
+(~768 stores).
+
+Measured: resample 53.6 → 29.2 s, pipeline 110.8 → 88.1 s, output bits unchanged (ROI crc
+`0xd596c9eb` identical to the previous build). Removing 13,826 flushes saved 24.4 s = 1.76 ms per
+flush, which matches the ~1.6 ms the way-walk mechanism predicts.
+
+> The bank is not 48 KiB contiguous: `idx` is Np·4 B at +0x0000 and `wq` is Np·2 B at +0x10000, with a
+> hole between. Flushing one 48 KiB run from the bank base covers `idx` plus half the hole and misses
+> `wq` entirely → the kernel gathers with stale weights → a still-focused but subtly wrong image that
+> a correlation check would likely not catch. Flush the two ranges separately.
+
+**Correcting the record on "flush is 2%".** The 78/20/2 split above is accurate for a *low-flush*
+build — it was profiled while an experimental per-chunk flush (16× fewer flushes) was active, and it
+describes the current build well (29.2 s ≈ 22.8 s kernel-wait + 5.8 s coeff + 0.6 s flush). What it
+never described was the build that actually shipped, which had reverted to per-line flushes when the
+chunking experiment was rolled back. The number outlived the code it was measured on, and was then
+cited for eight days as a reason not to pursue the flush. Profile the shipping path, not a branch.
 
 ## Open items (image is correct regardless)
 - **~50% OUT saturation at 65535.** Traced to the detect path (`SAR_REG_BFP_SHIFT` @`0x6000001C`,

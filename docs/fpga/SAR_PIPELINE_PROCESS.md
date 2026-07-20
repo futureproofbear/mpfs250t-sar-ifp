@@ -1,8 +1,8 @@
 # SAR Pipeline — Full Process (host → board → host)
 
 > **✅ STATUS 2026-07-20 (LATEST — supersedes the HLS-FFT notes below):** Pipeline **VALIDATED
-> end-to-end on silicon, image corr=0.9923 vs golden**, total **110.8 s** per frame with the scene
-> loaded from the board's own eMMC in 78 s. The range/azimuth FFTs run on the **fabric CoreFFT** chain
+> end-to-end on silicon, image corr=0.9923 vs golden**, total **88.1 s** per frame with the scene
+> loaded from the board's own eMMC in 81.5 s. The range/azimuth FFTs run on the **fabric CoreFFT** chain
 > (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected by `SAR_FFTMODE` @`0xB0059110` = 1 and
 > confirmed at runtime; the CPU `sar_fft.c` is the mode-0 legacy fallback. (History: the HLS `K_FFT`
 > butterfly is unsynthesizable on SmartHLS 2025.2 — it drops the twiddle term → passthrough — which is
@@ -270,7 +270,7 @@ stuck kernel yields a TIMEOUT code, never an un-haltable lock-up.
   MSS is coupled to the SmartDesign flow and resists the pure headless netlist flow; verified recipe in
   [`SAR_TOP_RECOVERY.md`](SAR_TOP_RECOVERY.md). Firmware still valid: `PIPE`/`CRC` mailboxes, DMA
   external-stream-descriptor (STR0ADDR `0x460`/cfg `0xD`), bounded-wait harness. See
-  [`SMARTDEBUG_RUNBOOK.md`](SMARTDEBUG_RUNBOOK.md).
+  [`SMARTDEBUG_RUNBOOK.md`](history/SMARTDEBUG_RUNBOOK.md).
 - **Gaps to close:** (a) `SGN` (FFT direction) not in JOB — fixed direction for now, host handles
   conjugation; (b) `sar_form_image` reads `M,N` from JOB but kernels are hard-8192 — scenes must be
   ≤8192² and are zero-padded; (c) `fence` may need replacing with explicit L2 flush/invalidate; (d)

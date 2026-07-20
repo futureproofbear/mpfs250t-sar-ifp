@@ -22,11 +22,11 @@
 > **On-board eMMC pipeline (M1–M3) PROVEN on silicon** — the scene lives on the board eMMC and is loaded +
 > focused entirely on-board, retiring the recurring ~3 h JTAG scene load: **M1** bring-up (write→read→CRC);
 > **M2** provision a CPHD scene to the INPUT partition (`crcE==crcR==0x58d0ea66`, Centerfield 97.6 MB); **M3**
-> boot-load eMMC→DDR (78 s; 10 segments → role addresses + JOB reconstruct), run `sar_form_image` end-to-end
+> boot-load eMMC→DDR (81.5 s; 10 segments → role addresses + JOB reconstruct), run `sar_form_image` end-to-end
 > (**SAR_SEQ_OK**, no stage timeout), confirm a coherent focused SAR image via an ROI crop, and persist the
 > output to the eMMC OUTPUT partition (commit-last, crash-safe). LOAD/PIPE/crop proven; the commit-last
 > SAVEOUT + a VERIFY_OUT command are built and await a reflash + re-run next board session. eMMC read
-> ~1.5 MB/s (scene load 78 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
+> ~1.5 MB/s (scene load 81.5 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
 > the bottleneck, not the eMMC) — verify via small ROI crops.
 > **FFT engine (corrected):** the range/azimuth FFTs run on the **fabric CoreFFT** chain
 > (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected at runtime by **`SAR_FFTMODE`
@@ -36,7 +36,10 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
-> **Pipeline total: 110.8 s** (measured 2026-07-20) — the per-stage breakdown lives in exactly one place,
+> **Pipeline total: 88.1 s** (measured 2026-07-20; two consecutive runs 88.04 s / 88.11 s, and the
+> output image is byte-identical to the previous 110.8 s build — top-left 1024² ROI crc `0xd596c9eb`).
+> The −20.6% came from replacing the per-line whole-L2 flush in `resample_2pass()` with a targeted
+> CCACHE `FLUSH64` writeback of the coefficient banks only. The per-stage breakdown lives in exactly one place,
 > [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current design
 > (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
 > [`docs/SAR_DESIGN.md`](SAR_DESIGN.md). Open next: the NDSU production scene; and automating the
@@ -290,10 +293,10 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 - **FPGA docs — organised set (read before re-deriving):**
   - *Architecture & conventions (current):* `docs/fpga/AMBA_ARCHITECTURE.md` (definitive interconnect
     design), `docs/fpga/FABRIC_INTERCONNECT_CONVENTIONS.md` (silent-failure firebreaks +
-    `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/WIRING_GUIDE.md`, `docs/fpga/history/regmap.md`.
+    `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/history/WIRING_GUIDE.md`, `docs/fpga/history/regmap.md`.
   - *Status / active:* `docs/fpga/history/SAR_BRINGUP_REPORT.md` (full on-silicon bring-up + doc cross-check §9),
     `docs/fpga/history/dma_fix_plan.md` (DMA control-slave root-cause→fix, §7g RESOLVED),
-    `docs/fpga/SMARTDEBUG_RUNBOOK.md` (reusable active-probe runbook), `docs/BRINGUP.md`.
+    `docs/fpga/history/SMARTDEBUG_RUNBOOK.md` (reusable active-probe runbook), `docs/BRINGUP.md`.
   - *History (resolved journey — `docs/fpga/history/`):* `M1_cosim.md`, `M2_integration.md`,
     `dataplane_bringup_vplan.md`, `dataplane_fix_plan.md` (superseded), `fic0s_probe_plan.md`,
     `id_restore_integration.md`, `idconv_gui_steps.md`, `sim-README.md`.
@@ -363,7 +366,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 
 > ⚠ The list below is the 2026-07-01 snapshot and is **superseded** by the status blocks at the top of
 > this file: the full PFA pipeline now runs end-to-end on silicon at 62.5 MHz with timing MET
-> (110.8 s, corr 0.9923, scene loaded from on-board eMMC in 78 s), the DMA has been removed in favour of
+> (88.1 s, corr 0.9923, scene loaded from on-board eMMC in 81.5 s), the DMA has been removed in favour of
 > `fft_unloader`, and the fabric CoreFFT path is confirmed at runtime. It is kept for the root-cause
 > history (the timing-closure lesson), not as a to-do list.
 

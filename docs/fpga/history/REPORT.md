@@ -10,7 +10,7 @@
 
 **Project:** Lightweight SAR image formation from Umbra Complex Phase History Data (CPHD), with a PolarFire SoC (MPFS Icicle Kit) embedded port
 **Date:** 2026-06-16 (status updated 2026-06-30)
-**Status:** Algorithm complete and verified; CPU port works; FPGA fabric **built, programmed, and brought up on silicon** — data plane and DMA control slave both fixed and verified on the board (see [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md)). **M3 full PFA pipeline root-caused to FPGA timing closure** (bitstream fails timing at 125 MHz on the single fabric clock); the **62.5 MHz fix is now PROVEN** — headless P&R closes timing completely (0 setup violations of 315,349 pins, 0 hold) — with a bootable bitstream still pending a SAR_TOP rebuild (see §5).
+**Status:** Algorithm complete and verified; CPU port works; FPGA fabric **built, programmed, and brought up on silicon** — data plane and DMA control slave both fixed and verified on the board (see [`fpga/SAR_BRINGUP_REPORT.md`](SAR_BRINGUP_REPORT.md)). **M3 full PFA pipeline root-caused to FPGA timing closure** (bitstream fails timing at 125 MHz on the single fabric clock); the **62.5 MHz fix is now PROVEN** — headless P&R closes timing completely (0 setup violations of 315,349 pins, 0 hold) — with a bootable bitstream still pending a SAR_TOP rebuild (see §5).
 
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
 > gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md)
@@ -93,7 +93,7 @@ Location: [src/](src/)
 > and **CoreAXI4DMAController 2.2.107**, stitched over two **CoreAXI4Interconnect 3.0.130** crossbars
 > (data + control) to the MSS/FIC — built into a programmed bitstream and brought up on silicon. The
 > Linux/UIO/CMA `FpgaBackend` runtime model below was **abandoned** in favor of bare-metal RISC-V
-> (U54_1) over JTAG. See [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md),
+> (U54_1) over JTAG. See [`fpga/SAR_BRINGUP_REPORT.md`](SAR_BRINGUP_REPORT.md),
 > [`fpga/AMBA_ARCHITECTURE.md`](../AMBA_ARCHITECTURE.md).
 
 Location: [mpfs/](mpfs/)
@@ -134,7 +134,7 @@ Architecture — storage-to-storage batch processor with a CPU/FPGA partition:
 
 > **Status (2026-06-30):** Milestones 0-2 below are **done** — the original Linux-on-Icicle plan
 > was replaced by a JTAG-only, bare-metal RISC-V runtime (see [`mpfs-REPORT.md`](mpfs-REPORT.md) and
-> [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md)). The board is an **MPFS250T_ES
+> [`fpga/SAR_BRINGUP_REPORT.md`](SAR_BRINGUP_REPORT.md)). The board is an **MPFS250T_ES
 > (FCVG484)** programmed via the **embedded FlashPro6 on connector J33** (boot mode 1). What remains
 > open is only the full DMA *transfer* test (control verified; real descriptor + START data-move not
 > yet run). Bulk-data transport over JTAG is **slow but viable run-to-completion** — measured

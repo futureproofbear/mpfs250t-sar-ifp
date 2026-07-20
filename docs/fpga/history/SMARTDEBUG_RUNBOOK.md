@@ -4,7 +4,7 @@
 completes a read (`RVALID` never asserts → hart-1 hangs). The RTL is deterministic, so a single
 flip-flop — the target FSM state register `currState` — plus `ARVALID` resolves the root cause.
 
-> Companion to [dma_fix_plan.md](history/dma_fix_plan.md). Background: §7b/§7c/§7d there.
+> Companion to [dma_fix_plan.md](dma_fix_plan.md). Background: §7b/§7c/§7d there.
 
 ---
 
@@ -98,7 +98,7 @@ Attach: this runbook's measured `currState`, dma_fix_plan.md §7b–§7d (full r
 showed the **DMA armed but 0 bytes moved and the feeder still busy** ⇒ the gearbox gates the feeder
 with `s_axis_tready = in_phase & buf_ready`, so **CoreFFT `BUF_READY` is not asserting**. Determine
 whether that's because **twiddle-init never completed** (clocking/init root cause) or a **downstream
-handshake** bug. See [SAR_PIPELINE_PROCESS.md](SAR_PIPELINE_PROCESS.md) §10 and
+handshake** bug. See [SAR_PIPELINE_PROCESS.md](../SAR_PIPELINE_PROCESS.md) §10 and
 [m3 memory]. Instances (from `build_sartop.tcl`): `FFT` (COREFFT_C0), `GBX`
 (corefft_stream64_adapter), `FEED` (fft_feeder), `DMA`.
 

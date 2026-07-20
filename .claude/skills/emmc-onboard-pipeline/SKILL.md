@@ -55,7 +55,7 @@ is exactly why they burn so much time.
 
 ### Rule: DDR Is Volatile — Never Power-Cycle Between LOAD and PIPE
 - **TRIGGER**: Any power-cycle, or any run where you did not LOAD in this power cycle.
-- **ACTION**: Re-run LOAD (78 s from eMMC) before PIPE. Confirm `SARI` magic `0x53415249` at
+- **ACTION**: Re-run LOAD (81.5 s from eMMC) before PIPE. Confirm `SARI` magic `0x53415249` at
   `0x88000000` via `bash mpfs/host/run_ddr_peek.sh 0x88000000`.
 - **HALT**: A power-cycle WIPES DDR. Running PIPE on wiped DDR produces a plausible-but-bogus result
   (cost a fake "corr 0.72 regression" on 2026-07-13 that was an invalid-input artifact, not a bug).
@@ -82,7 +82,7 @@ is exactly why they burn so much time.
 
 The goal of this whole line of work: **stop paying the ~3 h JTAG scene load every run.** Put the
 CPHD scene on the board's soldered eMMC once, then at run-time the board loads it into DDR itself
-(78 s), focuses it (the SAR pipeline), and can persist the output image back to the eMMC so it
+(81.5 s), focuses it (the SAR pipeline), and can persist the output image back to the eMMC so it
 survives power-cycle. All of M1/M2/M3 below are PROVEN on silicon (2026-07-14) except the final
 re-run after a crash-safety fix (see "WHERE TO RESUME").
 
@@ -209,19 +209,17 @@ bash run_program.sh                                        # ~4 min, fpgenprog
 #    re-boot the U54 on this ES silicon -- only a power-cycle. Check the pc before trusting a run.
 
 # 1) LOAD scene from eMMC -> DDR (+ JOB). PASS: verdict 0, nseg=10, sig_crc_exp==got
-bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 78 s
+bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 81.5 s
 
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
 #    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
-#      resample 53.6 s | detect 19.7 s | azFFT 12.2 s | rangeFFT 12.0 s | cornerturn 7.3 s
-#      window 6.0 s  ->  TOTAL 110.8 s
-#    (An earlier note here claimed "resample ~10 min" -- WRONG by ~11x. Beats the 162 s in
-#     SAR_ARCHITECTURE_REPORT.md §5 by ~32%, from the burst-256 + hoisted-window fabric.)
+#      TOTAL 88.1 s, reproducible (88.04 / 88.11 s over two runs). Per-stage breakdown lives in
+#      exactly one place -- SAR_ARCHITECTURE_REPORT.md section 5 -- do not restate it here.
 #    A 300000 ms (5 min) budget is ample; the runner POLLS and returns as soon as it completes.
 #    For CMD 0x50495045 the runner sets FFTMODE @0xB0059110 = 1 (FABRIC CoreFFT chain -- the
 #    shipping FFT path; mode 0 = legacy CPU FFT), and prints per-stage timing from sar_stage_ts
 #    (start/resample/window/rangeFFT/cornerturn/azimuthFFT/detect, 1 us/tick).
-bash run_m3_iso.sh 0x50495045 0 0 300000 0xB0058020        # ~111 s; polls, exits on completion
+bash run_m3_iso.sh 0x50495045 0 0 300000 0xB0058020        # ~88 s; polls, exits on completion
 bash run_stage_timing.sh                                   # re-read per-stage timing anytime (no re-run)
 
 # 3) crop-verify: gather center 1024x1024 from DDR OUT, dump, render
@@ -254,7 +252,7 @@ bash run_emmc_prov_iso.sh 97553408 1100000 0x88000000   # write DDR->eMMC INPUT 
 ## Measured rates & what eMMC does / doesn't solve
 
 Single-block (LEGACY/25 MHz/8-bit): **write 0.13 MB/s** (~3.9 ms/block; per-CMD24 program/busy),
-**read 1.5 MB/s**. So: scene LOAD (eMMC→DDR) 78 s; SAVEOUT (128 MB) ~16 min; provision write ~12 min.
+**read 1.5 MB/s**. So: scene LOAD (eMMC→DDR) 81.5 s; SAVEOUT (128 MB) ~16 min; provision write ~12 min.
 
 - eMMC ELIMINATES the recurring ~3 h JTAG INPUT load (data lives on-board). This is the win.
 - eMMC does NOT speed host↔PC transfer. Dumping OUT to the PC is STILL ~3 h — the bottleneck is

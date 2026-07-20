@@ -1,7 +1,7 @@
 # SAR accelerator — final SmartDesign wiring guide (Libero GUI)
 
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
-> gearbox output skid FIFO; see [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md)
+> gearbox output skid FIFO; see [`../PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md)
 > "CURRENT STATUS". The `AXIDMA_C0` / `DMA-ctrl @0x6000_5000` and the "CoreFFT streaming path
 > (DMA ↔ adapter ↔ CoreFFT)" wiring below are superseded — the DMA was removed and the CoreFFT output
 > stream now feeds the `fft_unloader` HLS kernel (its own AXI4 write master to DDR); the gearbox holds

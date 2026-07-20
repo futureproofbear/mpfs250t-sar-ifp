@@ -1,93 +1,42 @@
-# FPGA accelerator (PolarFire SoC fabric)
+# docs/fpga — index
 
-> **▶ 2026-07-14:** repo now **standalone `mpfs250t-sar-ifp`**; on-board **eMMC pipeline (M1–M3) proven on
-> silicon**. Current status: [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) +
-> [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC.
+FPGA-side documentation for the SAR image former on PolarFire SoC MPFS250T_ES. This file is an
+index only; it deliberately carries no status claims of its own, because duplicated status is what
+made these documents drift in the first place.
 
-> **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
-> gearbox output skid FIFO; see [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md)
-> "CURRENT STATUS". The `CoreAXI4DMAController 2.2.107` listed below is stale — it deadlocked on the
-> 2nd back-to-back S2MM transaction and was replaced by the `fft_unloader` HLS kernel (AXI4-Stream slave
-> → AXI4 write master). Fabric-level change; firmware unchanged.
+Start at [`../SAR_DESIGN.md`](../SAR_DESIGN.md) for the detailed current design, or
+[`../../README.md`](../../README.md) for the project overview.
 
-> ⚠ **Status (2026-06-30):** the fabric design is **built, programmed and
-> silicon-verified** on the Icicle Kit (**MPFS250T_ES**, bare-metal RISC-V on
-> U54_1, **JTAG-only**; programmed via embedded **FlashPro6 on J33**). Built design
-> = the 5-kernel SmartHLS model + **CoreFFT 8.1.100** + **CoreAXI4DMAController
-> 2.2.107** on two **CoreAXI4Interconnect 3.0.130** instances; control plane, data
-> plane (`sar_axi_idconv.v`) and DMA control slave (CIC `TARGET5_TYPE=1`) all
-> verified on silicon (full DMA *transfer* test + bulk JTAG transport still open).
-> **The Linux / device-tree / UIO / CMA integration model described below is
-> SUPERSEDED.** The two standalone `.cpp` files below do remain unsynthesized
-> templates. See [`AMBA_ARCHITECTURE.md`](AMBA_ARCHITECTURE.md),
-> [`FABRIC_INTERCONNECT_CONVENTIONS.md`](FABRIC_INTERCONNECT_CONVENTIONS.md) and
-> [`SAR_BRINGUP_REPORT.md`](history/SAR_BRINGUP_REPORT.md).
+## Current
 
-Offloads the compute-dominant SAR focusing datapath from the U54 CPUs:
-**range resample → window → 2-D FFT (range FFT → corner-turn → azimuth FFT) →
-detect**. The CPU host drives it over AXI4-Lite (see [../regmap.md](history/regmap.md))
-and shares DDR buffers with it.
+| Document | What it is | Reach for it when |
+|---|---|---|
+| [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) | As-built block usage and measured per-stage timing. **§5 is the single numeric source of truth** for stage timings and the pipeline total | You need a performance number, or fabric resource usage |
+| [`SAR_PIPELINE_STATUS.md`](SAR_PIPELINE_STATUS.md) | Silicon status, engine history (why the FFT moved to the CPU and back to fabric), latency roadmap | You want to know what is proven and what to optimise next |
+| [`SAR_PIPELINE_PROCESS.md`](SAR_PIPELINE_PROCESS.md) | The PFA math and its cross-reference to the host-side golden Python | You are reasoning about the algorithm rather than the implementation |
+| [`AMBA_ARCHITECTURE.md`](AMBA_ARCHITECTURE.md) | Interconnect topology, AXI4-Lite control windows, master/slave map | You are wiring or debugging the fabric interconnect |
+| [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) | JTAG single-kernel isolation harness, DDR/control map, arg contracts, known-good values, coherent-read technique | **Read before any silicon debug.** Also the eMMC M1 prerequisite recipe |
+| [`LIBERO_HEADLESS_PLAYBOOK.md`](LIBERO_HEADLESS_PLAYBOOK.md) | Headless Libero: SmartDesign Tcl, MSS regen, interconnect reconfig, VM-netlist flow, the timing gate | You are rebuilding the fabric without the GUI |
+| [`FABRIC_INTERCONNECT_CONVENTIONS.md`](FABRIC_INTERCONNECT_CONVENTIONS.md) | The four interconnect conventions and the `lint_netlist.sh` / `run_build_safe.sh` build gate they enforce | Before adding a master or slave to the fabric |
+| [`SAR_TOP_RECOVERY.md`](SAR_TOP_RECOVERY.md) | The verified 62.5 MHz headless CCC recipe (PLL defparam values) and the never-`delete_component SAR_TOP` lesson | You are changing the fabric clock. `build_corefft_vm.tcl` depends on this |
+| [`SMARTHLS_ANTIPATTERNS.md`](SMARTHLS_ANTIPATTERNS.md) | Living catalog of proven SmartHLS mis-synthesis shapes. Read by `hls_antipattern_lint.py` | **Before writing or changing any HLS kernel** |
+| [`HLS_SILICON_STATS.md`](HLS_SILICON_STATS.md) | Rollup of `hls_silicon_stats.jsonl` — the report-vs-silicon phenomena SmartHLS cannot model | You are assessing whether to trust an HLS report |
 
-## Status — read this first
-The **built** fabric design (5-kernel SmartHLS model + CoreFFT + DMA on two
-CoreAXI4Interconnect instances) is silicon-verified — see the status note above.
-These two standalone HLS source files, however, are **unsynthesized starting
-templates**: they have **not** been compiled in SmartHLS, simulated, placed/routed,
-or run on hardware, and they are *not* what the built design uses:
-- `fft1d.cpp` — streaming radix-2 block-floating-point FFT (template)
-- `sar_accel_top.cpp` — top-level dataflow stitching the kernels (skeleton; the
-  corner-turn body is intentionally left as a stub)
+## Historical
 
-The built design already uses the **Microchip CoreFFT IP** (verified,
-characterized) rather than the hand-written `fft1d.cpp`; treat `sar_accel_top.cpp`
-as the dataflow spec, not as drop-in RTL.
+[`history/`](history/) holds superseded documents, kept for their root-cause narratives and because
+they record how decisions were reached. They are not maintained and describe hardware and flows that
+no longer exist — notably the `CoreAXI4DMAController` datamover (removed, replaced by
+`fft_unloader`), a 125/150 MHz fabric target (the design runs at 62.5 MHz, timing MET), and
+host-JTAG scene loading (superseded by the on-board eMMC load).
 
-## Datapath
-```
-signal[M,N] ──► resample(KR) ─► window× ─► 1-D FFT ─┐
-                                                    ▼
-                                           corner-turn (tiled BRAM)
-                                                    │
-detected[M,N] ◄─ detect|·| ◄─ 1-D FFT ◄─ resample(KC) ◄┘
-```
-FFT stages are the fabric CoreFFT chain `fft_feeder → gearbox → CoreFFT → fft_unloader`
-(no DMA — the `CoreAXI4DMAController` was removed); detect runs on the MSS CPU.
-- **A single native 8192-point FFT length.** The raw 5634 × 4319 sizes are odd, so
-  the host zero-pads to the 8192 grid. Padding also improves the focus (free
-  image-domain interpolation). 16384-point / multi-length FFT paths were dropped.
-- **Block floating point, 18-bit** fixed point → matches the 784 18×18 DSP
-  blocks and holds the ~50 dB scene dynamic range. `BFP_SHIFT` is reported back
-  so the host can scale consistently with the laptop reference.
-- **Parallelism**: one FFT core ≈ 24–40 DSPs of 784 → instantiate several and
-  process multiple lines concurrently.
+Do not cite anything in `history/` as current.
 
-## Build flow (Libero SoC + SmartHLS)
-1. **Generate twiddles**: produce `TW_RE[]`/`TW_IN[]` ROMs for the chosen NFFT.
-2. **HLS**: `shls` build of the kernels (or instantiate CoreFFT instead of
-   `fft1d`). Verify with C/RTL co-simulation against the CPU golden output
-   (`host` numpy backend) using the speckle-smoothed correlation check.
-3. **Libero**: build the fabric design — accelerator + the `fft_unloader` SmartHLS
-   datamover + AXI4-Lite control, connected to the SoC's AXI port (FIC, non-coherent).
-   Add the FFT cores' DSP/RAM.
-4. **Place/route/timing** at the fabric clock: **62.5 MHz, timing MET** (setup and hold).
-5. Export the bitstream and program the board via the embedded **FlashPro6 on
-   J33**. The U54_1 bare-metal firmware drives the kernels over the MSS FIC0
-   AXI4-Lite slaves (no Linux, no device-tree/UIO/CMA — JTAG-only).
+## Related material outside this directory
 
-## Host integration
-The fabric is driven by **bare-metal RISC-V firmware on U54_1**, which writes the
-AXI4-Lite control registers over MSS FIC0, sets the shared DDR buffer addresses
-(signal/KR/KC/tanphi/window), starts each kernel, polls done, and reads the
-detected image back. The scene is no longer staged by the host: it is loaded from
-the board's own eMMC into DDR in 78 s, and the focused output is persisted back to
-the card — the host reads only small ROI crops over JTAG (a full-image dump is still
-~3 h, FlashPro6-bound). The rest of the pipeline (parse, table prep, geocode,
-GeoTIFF) is unchanged host code in `host/sar_pipeline.py`. Pipeline total: 110.8 s —
-per-stage breakdown in [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5;
-detailed current design in [`../SAR_DESIGN.md`](../SAR_DESIGN.md).
-
-## Verification oracle
-The CPU reference (`--backend numpy`) is **pixel-identical to the laptop
-reference** `src/form_image_pfa.py`. Use its detected GeoTIFF as golden and
-compare the FPGA output with the same metric used during bring-up (smoothed
-correlation r → 1.0 modulo fixed-point, plus a point-target PSLR check).
+- [`../SAR_DESIGN.md`](../SAR_DESIGN.md) — detailed current design: dataflow, fixed-point contracts,
+  DDR map, cache coherency, boot sequence, control interface, diagrams.
+- [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) — authoritative index and
+  anti-hallucination rules.
+- `.claude/skills/` — operating rule cards that point into these documents. The skills carry the
+  hygiene rules; these documents carry the procedures, addresses and values.

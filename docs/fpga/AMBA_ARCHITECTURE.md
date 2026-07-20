@@ -2,7 +2,8 @@
 
 Definitive reference for the on-chip AMBA (AXI4 / AXI4-Lite / AXI4-Stream) architecture of the SAR
 fabric accelerator (`SAR_TOP` SmartDesign, Libero SoC 2025.2, MPFS250T_ES Icicle Kit). Canonical
-wiring source: [`mpfs/fpga/build_sartop.tcl`](../../mpfs/fpga/build_sartop.tcl) (+ the later `ID_FIX`
+wiring source: [`mpfs/fpga/build_full_prog_ffv.tcl`](../../mpfs/fpga/build_full_prog_ffv.tcl)
+(the earlier `build_sartop.tcl` no longer exists) (+ the later `ID_FIX`
 and AXI4-Lite-target edits — see [dma_fix_plan.md](history/dma_fix_plan.md), [id_restore_integration.md](history/id_restore_integration.md)).
 
 > **Update 2026-07-04:** the `DMA` (`AXIDMA_C0` / CoreAXI4DMAController) documented below as the

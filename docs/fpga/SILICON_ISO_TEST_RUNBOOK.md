@@ -114,7 +114,7 @@ The fabric kernels read/write DDR via FIC0; the hart/gdb see L2. To read what a 
   + `BUILD_HLSFFT_DONE`. (Libero silently programs timing-failing bitstreams — see [[always-check-timing-closure]].)
 - Program (board on): `libero.exe SCRIPT:program_hlsfft.tcl LOGFILE:...` → expect `PROGRAMDEVICE OK` +
   "Chain programming PASSED". Fabric-only change → firmware (eNVM) untouched, no reflash needed.
-- Prereqs: `LM_LICENSE_FILE=C:\Users\lkwangsi\Documents\github\polarfire-soc\License.dat`;
+- Prereqs: `LM_LICENSE_FILE=C:\Users\<you>\Documents\github\polarfire-soc\License.dat`;
   `libero.exe` at `C:/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/`. No stale synth (synbatch
   zombies corrupt synth → host reboot clears them).
 - **GOTCHA: a leftover `libero.exe` (from the previous program/build) holds a LOCK on `libero_hlsfft/`

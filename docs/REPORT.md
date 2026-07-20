@@ -284,7 +284,7 @@ The 2-D FFT is the only stage with non-trivial word growth. Captured block-expon
 
 ## 9. PolarFire SoC: device limits, architecture & data-transfer budget
 
-Assumed evaluation board: **PolarFire SoC Icicle Kit (MPFS250T-FCVG484E)**. (Targeting the Video/Discovery kit instead only rescales the DSP/LSRAM/DDR numbers.)
+Assumed evaluation board: **PolarFire SoC Icicle Kit (MPFS250T-FCVG484E)**.
 
 ### 9.1 Device & board limits
 

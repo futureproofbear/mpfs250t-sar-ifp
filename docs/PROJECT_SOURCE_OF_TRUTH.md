@@ -394,7 +394,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 ## 9. Cross-references
 - Deep bring-up + Microchip-doc cross-check: `docs/fpga/SAR_BRINGUP_REPORT.md`.
 - Persistent memory notes:
-  `~/.claude/projects/c--Users-lkwangsi-Documents-github-sarProcessor/memory/`
+  `~/.claude/projects/c--Users-<you>-Documents-github-sarProcessor/memory/`
   (`sar-polarfire-architecture`, `sar-onsilicon-fabric-dataplane`, `mpfs-boot-mode-0-for-debug`,
   `no-powershell-use-cmd`, `project-source-of-truth-index`).
 </content>

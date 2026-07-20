@@ -205,7 +205,7 @@ run_tool -name {PROGRAMDEVICE}          ;# programs Fabric+sNVM+eNVM directly vi
 
 Custom OpenOCD build (the stock SoftConsole one lacks the board cfg):
 ```bash
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
+NEW="/c/Users/<you>/Tools/openocd-new/xpack-openocd-0.12.0-4"
 "$NEW/bin/openocd.exe" -s "$NEW/openocd/scripts" -f efp6_<test>.cfg
 ```
 Board cfg boilerplate (`efp6_*.cfg`):

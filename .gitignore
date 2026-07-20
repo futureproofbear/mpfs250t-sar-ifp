@@ -181,3 +181,6 @@ docs/fpga/SAR_ARCHITECTURE_REPORT.pdf
 
 # machine-specific toolchain paths (never commit)
 config.local.yaml
+
+# gdb scripts generated at runtime by the run_*.sh harnesses
+mpfs/host/jtag_full/*.gen.gdb

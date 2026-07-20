@@ -16,6 +16,17 @@ recovery. Follow docs/fpga/SILICON_ISO_TEST_RUNBOOK.md §1 exactly.
 Hard rules (from the runbook + memory):
 - Prereqs: board powered on; fabric programmed; eNVM holds the debug APP (boot mode 1, or boot
   mode 0 WFI) so hart1 can halt — NEVER an HSS build (JTAG then can't halt).
+- ⛔ **PREFLIGHT — VALIDATE THE INPUT BEFORE YOU TRUST ANY RESULT.** DDR is volatile: a board
+  power-cycle WIPES it. Before running any pipeline/correlation, confirm the input is actually
+  present — `bash mpfs/host/run_ddr_peek.sh 0x88000000` must show the `SARI` magic `0x53415249`
+  (or re-run the eMMC `ELOD` LOAD, 78 s). Running on wiped DDR yields a plausible-but-bogus number:
+  on 2026-07-13 this produced a fake "corr 0.72 regression" that was an invalid-input artifact, not
+  a bug. Also confirm scene/golden/JOB dims match before believing a correlation.
+- ⛔ **A dark FABRIC mimics other faults.** If mailbox commands arm but never execute (result records
+  stay `0x00000000`/`0xdeadbeef`), or gdb says `unable to halt hart 1`, suspect (a) the app was not
+  re-flashed after a fabric program, or (b) no power-cycle after that re-flash — NOT a dead eMMC or a
+  wedged FlashPro6. Never "probe the fabric" by raw-reading `0x6000_xxxx`: on an unprogrammed fabric
+  that read never returns and freezes the hart. See the `emmc-onboard-pipeline` skill's critical rules.
 - NEVER `taskkill /F` openocd/gdb — it wedges the FlashPro6 DM. Clean shutdown is the gdb
   script's trailing `monitor resume` + `monitor shutdown`, or a telnet `shutdown` to openocd
   port 4444. NOTE: run_corefft_iso.sh's openocd currently has NO telnet 4444 (add

@@ -34,10 +34,11 @@ PolarFire SoC MPFS250T_ES engineering-sample board, brought up JTAG-only.
 ## What is open / next
 The image is already correct; these are latency and quality items.
 
-Latency (baseline is a bring-up ~160 s per frame, not optimized; per-stage timing in
-`docs/fpga/SAR_ARCHITECTURE_REPORT.md`). The range/azimuth FFTs already run on the fabric FFT engine
-(phase-exact, see What is proven) — the dominant cost is the **resample** stage (~103 s of ~162 s),
-then corner-turn:
+Latency (measured 2026-07-20: **110.8 s** per frame, not yet optimized; per-stage timing in
+`docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5, re-readable via `bash mpfs/host/run_stage_timing.sh`).
+The range/azimuth FFTs already run on the fabric CoreFFT engine (phase-exact, and `fft_mode=1` is
+verified at runtime, see What is proven) — the dominant cost is the **resample** stage
+(**53.6 s of 110.8 s, 48%**), then **detect (19.7 s, 18%, still on the MSS CPU)**:
 1. Resample is the top target. Diagnose FIRST whether it is bound by **control-plane serialization**
    (the kernel is armed once per line — ~16k processor→fabric arm/poll handshakes across both passes)
    or by **DDR random-access latency** — the effective rate (~1 MB/s) is ~100× below DDR bandwidth, so

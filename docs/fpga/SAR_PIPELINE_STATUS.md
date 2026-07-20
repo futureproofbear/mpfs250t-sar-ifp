@@ -1,11 +1,18 @@
 # SAR Pipeline — Silicon Status & Latency Roadmap (checkpoint 2026-07-04)
 
-> **▶ 2026-07-14 update (newest).** The pipeline now runs from an **on-board eMMC-resident scene** — no
-> host JTAG scene load. `sar_form_image` ran end-to-end on the Centerfield scene this cycle
-> (**SAR_SEQ_OK**, no stage timeout) with a coherent focused image confirmed via an ROI crop. Repo is now
-> **standalone `mpfs250t-sar-ifp`**. Per-stage timing for this scene is captured automatically on the next
-> board run (the PIPE runner now reads `sar_stage_ts`); the 2026-07-04 per-stage table below is the prior
-> decimated-scene measurement. Full current status:
+> **▶ 2026-07-20 update (newest) — full deci-1 per-stage timing now MEASURED.** The pipeline runs from
+> the **on-board eMMC-resident scene** (LOAD 78 s, `sig_crc 0x89fa12dc` verified) and focuses it in
+> **110.8 s** (`SAR_SEQ_OK`, `fft_mode=1` fabric CoreFFT confirmed at runtime), with a coherent focused
+> image confirmed via a top-left 1024×1024 ROI crop:
+>
+> | resample | detect | azFFT | rangeFFT | cornerturn | window | **TOTAL** |
+> |---:|---:|---:|---:|---:|---:|---:|
+> | **53.6 s** (48%) | 19.7 s (18%) | 12.2 s | 12.0 s | 7.3 s | 6.0 s | **110.8 s** |
+>
+> That is **~32% faster than the 162 s** in the prior baseline (resample 103.3 → 53.6 s, from burst-256
+> + hoisted-window). **Detect (CPU) is now the #2 cost.** Re-read anytime with
+> `bash mpfs/host/run_stage_timing.sh` (no re-run needed). The 2026-07-04 table below is a prior
+> decimated-scene measurement, kept for history. Full current status:
 > [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) + [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC.
 
 ## Status: ✅ VALIDATED END-TO-END ON SILICON

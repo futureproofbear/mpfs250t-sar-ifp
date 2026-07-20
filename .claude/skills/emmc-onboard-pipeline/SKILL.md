@@ -53,6 +53,24 @@ is exactly why they burn so much time.
   select is the fabric `SDIO_SW` tie), NOT that the card or its data is bad. DDR probes pass in this
   state and will mislead you.
 
+### Rule: DDR Is Volatile — Never Power-Cycle Between LOAD and PIPE
+- **TRIGGER**: Any power-cycle, or any run where you did not LOAD in this power cycle.
+- **ACTION**: Re-run LOAD (78 s from eMMC) before PIPE. Confirm `SARI` magic `0x53415249` at
+  `0x88000000` via `bash mpfs/host/run_ddr_peek.sh 0x88000000`.
+- **HALT**: A power-cycle WIPES DDR. Running PIPE on wiped DDR produces a plausible-but-bogus result
+  (cost a fake "corr 0.72 regression" on 2026-07-13 that was an invalid-input artifact, not a bug).
+  eMMC is non-volatile and survives; DDR does not.
+
+### Rule: Where the Bitstreams Actually Live
+- **TRIGGER**: You need to (re)program the FABRIC, or the fabric looks dark.
+- **ACTION**: Firmware, host harnesses and docs ARE standalone in this repo — but the **built Libero
+  projects and exported bitstreams are NOT**. They live in the sibling build repo:
+  `sarProcessor/mpfs/fpga/libero_ffv/export/SAR_TOP_ffv.job` (newest timing-MET CoreFFT + Verilog
+  feeder build, 2026-07-13) and `sarProcessor/mpfs/fpga/bitstreams/`. `libero_tdest/export/` is EMPTY.
+- **HALT**: `program_ffv.tcl` in THIS repo points at `$SAR_FPGA/libero_ffv`, which does not exist here —
+  open the sarProcessor project path instead, or the program step fails. Program FABRIC-ONLY, then
+  obey the App Re-flash + Power-Cycle rules above.
+
 ### Rule: JTAG Teardown Order
 - **TRIGGER**: A gdb/openocd session is hung or must be stopped.
 - **ACTION**: 1) telnet `4444` → `shutdown`. 2) If that fails, kill the **gdb CLIENT only**.
@@ -71,13 +89,23 @@ re-run after a crash-safety fix (see "WHERE TO RESUME").
 This skill is the operational runbook. For chip/toolchain errata use `mpfs-platform-gotchas`; for
 un-wedging JTAG use `jtag-recover`; for the pipeline internals use `sar-pipeline-design`.
 
-## Repo layout (STANDALONE — everything is in THIS repo)
+## Repo layout (standalone for FIRMWARE/HOST — but NOT for the Libero bitstreams)
 
-`mpfs250t-sar-ifp` is self-contained: firmware, SoftConsole project + build config, board
-harnesses, host tooling, and docs are all here. No sibling `sarProcessor` checkout is needed. (The
-work was originally split; it was consolidated into this repo 2026-07-14 — the firmware source is
-byte-identical to the silicon-proven state, and the build was verified standalone.) All paths below
-are relative to the repo root.
+`mpfs250t-sar-ifp` is self-contained for **firmware, SoftConsole project + build config, board
+harnesses, host tooling, and docs** — all here, no sibling checkout needed to build firmware or run
+the JTAG harnesses. (Consolidated 2026-07-14; firmware source is byte-identical to the silicon-proven
+state.) All paths below are relative to the repo root.
+
+> ⚠️ **EXCEPTION — the built Libero projects and exported FABRIC bitstreams are NOT in this repo.**
+> They live in the sibling build repo `sarProcessor/mpfs/fpga/`:
+> `libero_ffv/export/SAR_TOP_ffv.job` (newest, timing MET, CoreFFT + Verilog feeder — the one to
+> program) and `bitstreams/`. `libero_tdest/export/` is EMPTY despite what older notes imply.
+> `program_ffv.tcl` here resolves `$SAR_FPGA/libero_ffv`, which does **not** exist in this repo —
+> point it at the sarProcessor project. See the "Where the Bitstreams Actually Live" rule above.
+>
+> **Paths are configured, not hard-coded:** every script derives the repo root from its own location
+> (`mpfs/host/lib/sar_env.sh`, `mpfs/fpga/lib/sar_env.tcl`); only external tool installs are pinned,
+> in `config.yaml` (`toolchain:`) with a git-ignored `config.local.yaml` override for your machine.
 
 - **Firmware** — `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/`:
   - `src/sar/sar_emmc.{c,h}` (M1/M2/M3 eMMC), `src/sar/ddr_sar_layout.h` (addresses + SARI/SARO/blob

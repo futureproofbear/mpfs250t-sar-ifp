@@ -22,6 +22,28 @@ datapath on a Microchip **PolarFire SoC MPFS250T_ES** (FCVG484). The frame (8192
 far exceeds on-chip SRAM, so the design is **memory-bound and streamed from LPDDR4** over the fabric
 AXI/FIC interconnect. Bring-up is JTAG-only (FlashPro6/J33).
 
+### Baseline scene-data path: on-board eMMC (not host JTAG)
+
+The **baseline design keeps the scene on the board's soldered 8 GB eMMC**; the host is not in the data
+path at run time. This is the shipping configuration, proven end-to-end on silicon:
+
+| Step | Mechanism | Measured |
+|---|---|---:|
+| Scene resident on eMMC | `SARI` partition @ LBA `0x80000` (superblock + TOC + per-scene blob, 10 role segments) | one-time provision |
+| **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **78 s** |
+| **PIPE** focus | `sar_form_image`, fabric CoreFFT (`fft_mode=1`) | **110.8 s** (§5) |
+| **SAVEOUT** DDR → eMMC | `ESAV`, commit-last ordering (crash-safe) | ~16 min |
+| Verify / inspect | `EVOU` full-image CRC; `EROI` crop + small JTAG dump | ~63 s / ~4 min |
+
+**Why this is the baseline, not an add-on:** the host JTAG link (FlashPro6) runs at ~9 KB/s, so pushing
+a 97 MB scene over it took **~3 h per run**. Moving the scene on-card retires that entirely (78 s), and
+the geometry is reconstructed from the card's own self-describing TOC rather than trusted from volatile
+host state. The same link speed is why **outputs stay on-card** and only small ROI crops are dumped to
+the host — eMMC does not speed up host↔PC transfer, and a full 128 MB OUT dump is still ~3 h.
+
+Corollary that bites: **DDR is volatile and a power-cycle wipes it**, so LOAD must be re-run in each
+power cycle before PIPE. eMMC contents survive. See the `emmc-onboard-pipeline` skill's critical rules.
+
 **Dataflow (per frame — one frame = the full 8192×8192 complex array, 256 MiB).** The frame is far
 larger than on-chip SRAM, so **every stage is a DDR→DDR streaming pass** (read a buffer, compute, write
 a buffer); the buffers **ping-pong SIG↔SCRATCH** so an in-place FFT never feeds and drains the same page:
@@ -179,17 +201,27 @@ two silicon realities: CoreAXI4DMA's back-to-back-stream deadlock and SmartHLS's
 
 ## 5. Measured on-silicon per-stage time (full deci-1 Centerfield, 5634×4319 → 8192 grid)
 
-From the firmware MTIME instrumentation (`sar_stage_ts[]`, 1 MHz):
+From the firmware MTIME instrumentation (`sar_stage_ts[]`, 1 MHz). Re-read at any time without
+re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
-| Stage | Time | Where |
-|---|---:|---|
-| Resample (2-pass keystone) | **103.3 s** | fabric gather, 5634 pulses (dominant) |
-| Window | 5.1 s | fabric |
-| Range FFT | 13.2 s | CoreFFT (fabric) |
-| Corner-turn | 8.2 s | fabric transpose |
-| Azimuth FFT | 13.7 s | CoreFFT (fabric) |
-| Detect | 18.7 s | **MSS CPU** (see §6) |
-| **Total** | **~162 s** | RETURN=0 |
+**Current (measured 2026-07-20, eMMC boot-load path, `fft_mode=1` fabric CoreFFT verified at runtime):**
+
+| Stage | Time | Share | Where |
+|---|---:|---:|---|
+| Resample (2-pass keystone) | **53.6 s** | 48% | fabric gather, 5634 pulses (dominant) |
+| Detect | 19.7 s | 18% | **MSS CPU** (see §6) |
+| Azimuth FFT | 12.2 s | 11% | CoreFFT (fabric) |
+| Range FFT | 12.0 s | 11% | CoreFFT (fabric) |
+| Corner-turn | 7.3 s | 7% | fabric transpose |
+| Window | 6.0 s | 5% | fabric |
+| **Total** | **110.8 s** | | `SAR_SEQ_OK` |
+
+**~32% faster than the 2026-07-04 baseline below**, from the burst-256 + hoisted-window resample
+fabric (resample 103.3 → 53.6 s). Detect is now the #2 cost and still runs on the CPU — the largest
+remaining structural win is moving it back to fabric (blocked on the HLS sign-extension miscompile, §6).
+
+<sub>Prior baseline (2026-07-04, superseded): Resample 103.3 s · Window 5.1 s · Range FFT 13.2 s ·
+Corner-turn 8.2 s · Azimuth FFT 13.7 s · Detect 18.7 s · **Total ~162 s**.</sub>
 
 *Note: this is @ 62.5 MHz fabric with an un-tiled resample and single-frame streaming — a throughput
 figure, not the optimized latency roadmap (dual-FIC ~3.2 GB/s, tiled corner-turn, double-buffering).*

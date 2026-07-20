@@ -23,7 +23,8 @@ implementations:
    the pipeline and do the final detect.
 
 **Status:** the full deci-1 Centerfield scene has been focused **end-to-end on
-silicon** (RETURN=0, ~162 s), and the 8192² image reconstructed from DDR matches
+silicon** (`SAR_SEQ_OK`, **110.8 s**, measured 2026-07-20 — scene loaded from the
+board's own eMMC in 78 s, no host JTAG data load), and the 8192² image reconstructed from DDR matches
 the reference scene-for-scene (river, field parcels, pivot-irrigation circles,
 roads) — ~0.97 correlation on the decimated scene, speckle-limited at full
 single-look resolution. See [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](docs/fpga/SAR_ARCHITECTURE_REPORT.md)

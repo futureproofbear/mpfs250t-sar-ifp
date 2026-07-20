@@ -32,6 +32,11 @@ target-neutral (see `sar-pipeline-design`); the FPGA/toolchain specifics are sco
 
 ## What is PROVEN vs OPEN
 Proven (on silicon):
+- **Full autonomous on-board run (re-confirmed 2026-07-20):** scene loaded from the board's own eMMC
+  (78 s, `sig_crc 0x89fa12dc` verified) → focused in **110.8 s** (`SAR_SEQ_OK`, `fft_mode=1` FABRIC
+  CoreFFT confirmed at runtime) → ROI crop rendered to a coherent focused image. No host JTAG data load.
+  Per-stage: resample 53.6 s (48%) · detect 19.7 s (18%, CPU) · azFFT 12.2 · rangeFFT 12.0 ·
+  cornerturn 7.3 · window 6.0. Re-read anytime: `bash mpfs/host/run_stage_timing.sh`.
 - Full pipeline runs end-to-end and forms a correctly focused image (corr ~0.97 vs the CPHD-derived
   golden). Resample, window, corner-turn all validated.
 - The fabric FFT chain is phase-exact (0.0° spread @ 256 & 8192) and value-equals the CPU FFT

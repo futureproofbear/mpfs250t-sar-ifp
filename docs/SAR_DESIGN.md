@@ -288,7 +288,70 @@ Output persistence is commit-last: invalidate the superblock, write the image, w
 last. A power loss mid-image therefore leaves an invalid superblock and readers reject the torn
 image. Do not reorder this.
 
-## 8. Control interface
+## 8. Boot sequence and when the pipeline runs
+
+Nothing runs automatically. The board boots into a command loop and waits; the pipeline executes only
+when a host writes a `PIPE` command into the mailbox. This is deliberate — it keeps the board
+debuggable and makes every run explicit and repeatable.
+
+### 8.1 Power-on chain
+
+1. eNVM holds `app.elf`, programmed in boot mode 1. The MPFS HAL's startup code runs first: it trains
+   LPDDR4 and brings up FIC_0 before any application code executes.
+2. E51 (hart 0, the monitor core) enters `e51()`. It releases the MMUART0 subblock clock/reset, raises
+   a software interrupt to hart 1, and then idles in an infinite loop forever. It does no compute.
+3. U54_1 (hart 1) enters `u54_1()` and does the work:
+   - spins on `MIP.MSIP` waiting for the E51 wake (an active poll, not `WFI`, so the hart stays
+     haltable by JTAG), then clears the soft interrupt;
+   - clears `MSTATUS_MIE` and `mie` — interrupts stay masked for the lifetime of the application.
+     This is the reason eMMC SDMA is unusable (section 7): its completion path is an ISR;
+   - installs a direct-mode trap vector for fault recovery;
+   - clears the result table, runs the self-test battery, latches `g_m2_done`;
+   - zeroes the mailbox and enters the command loop, incrementing a heartbeat each pass.
+4. U54_2..4 are unused.
+
+Boot mode matters for debuggability: mode 1 (this application) and mode 0 (a WFI stub) both leave
+hart 1 haltable over JTAG. An HSS build does not — JTAG then cannot halt the hart, so it is never
+used for this work.
+
+### 8.2 What boot does *not* do
+
+- It does not program the fabric. The bitstream is loaded separately (JTAG or SPI flash); the
+  firmware assumes fabric is already live. A dark fabric mimics several unrelated faults — kernels
+  never complete, and the eMMC appears dead because the eMMC/SD mux select is a fabric tie.
+- It does not load a scene. DDR does not survive a power cycle, so SIG is undefined at boot.
+- It does not run the pipeline.
+
+### 8.3 Required order for a run
+
+Each step depends on the previous one. Skipping one produces a failure that looks like a different
+problem, which is why the order is stated explicitly.
+
+| Step | Action | Why it must come first |
+|---|---|---|
+| 1 | Program the fabric bitstream | Kernels, and the eMMC mux select, do not exist until it is live |
+| 2 | Flash the application to eNVM (`run_program.sh`) | Programming the fabric requires re-flashing the app afterwards |
+| 3 | Power-cycle | The freshly flashed app must actually boot |
+| 4 | `ELOD` — load the scene from eMMC (78 s) | DDR was wiped by step 3; SIG must be populated |
+| 5 | `PIPE` — run the pipeline (110.8 s) | Needs SIG and the geometry tables in DDR |
+| 6 | `EROI` / `ESAV` — crop or persist the result | Needs OUT populated |
+
+Steps 4-6 may repeat freely without re-flashing, provided the board is not power-cycled between
+them. A power cycle at any point returns you to step 4, never earlier.
+
+### 8.4 Reading state over JTAG
+
+How a debugger reaches memory changes what it sees, which explains an otherwise confusing
+inconsistency:
+
+- While the hart is halted, accesses go through its progbuf — they use the hart's own load/store
+  path and are therefore cache-coherent. This is why the host can write the mailbox and poll
+  `mbx->status` without any flush.
+- While the hart is running, the debugger must use the system bus, which is a physical read that does
+  not snoop L2. Anything polled during a run — notably the progress word at `0xB005_9100` — must be
+  explicitly written back by the firmware, or it appears frozen.
+
+## 9. Control interface
 
 The hart1 mailbox at `0xB005_8000` is the single entry point. Layout: `cmd` +0, `base` +4, `len` +8,
 `result` +0xC, `status` +0x10 (done = `0xC0FFEE03`), `seq` +0x14. Write `base` and `len` first and

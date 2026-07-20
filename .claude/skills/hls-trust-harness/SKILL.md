@@ -1,17 +1,91 @@
 ---
 name: hls-trust-harness
 description: >-
-  Treat SmartHLS as an untrusted, behavioural-only tool: constrain its inputs, gate
-  its outputs, and COLLECT the report-vs-silicon statistics it cannot model (DDR
-  latency, AXI backpressure / the II=1 lie, L2 coherency, FIC/AXI-ID, ES errata,
-  cross-IP re-arm). Load before committing any HLS change toward a bitstream, when
-  quantifying why an HLS kernel is slower on silicon than its schedule, or when a
-  silicon symptom smells like SmartHLS mis-synthesis. Triggers: "HLS gate", "II lie",
-  "why is the kernel slow on silicon", "SmartHLS mis-synthesis", "report vs silicon",
-  "effective II", "guide the HLS", "anti-pattern catalog", "collect DDR/AXI stats".
+  Everything SmartHLS on this project: how to AUTHOR a kernel (pragma reference, the two AXI
+  initiator APIs, pin-don't-infer, reference-first rule) and how to DISTRUST the result
+  (constrain inputs, gate outputs, collect the report-vs-silicon statistics the tool cannot
+  model — DDR latency, AXI backpressure / the II=1 lie, L2 coherency, FIC/AXI-ID, ES errata,
+  cross-IP re-arm). Load BEFORE writing or changing any HLS kernel or pragma, before committing
+  an HLS change toward a bitstream, when quantifying why a kernel is slower on silicon than its
+  schedule, or when a silicon symptom smells like mis-synthesis. Triggers: "write/change an HLS
+  kernel", "which pragma", "axi_initiator", "max_burst_len / max_outstanding", "memory partition",
+  "loop pipeline II", "shls hw", "HLS gate", "II lie", "why is the kernel slow on silicon",
+  "SmartHLS mis-synthesis", "report vs silicon", "effective II", "anti-pattern catalog".
 ---
 
 # HLS trust harness
+
+## Rule: Read the reference before writing a pragma
+- **TRIGGER**: about to add, change or reason about any `#pragma HLS`, or to claim the tool
+  can/cannot do something.
+- **ACTION**: check the authoritative sources first, in this order:
+  - Pragma manual (exact syntax + every option):
+    `https://microchiptech.github.io/fpga-hls-docs/2023.1/pragmas.html`
+  - User guide (concepts, limitations):
+    `https://microchiptech.github.io/fpga-hls-docs/2023.1/userguide.html`
+  - Official examples (working reference code):
+    `https://github.com/MicrochipTech/fpga-hls-examples`
+  Then check `docs/fpga/SMARTHLS_ANTIPATTERNS.md` for whether that shape has already burned us.
+- **HALT**: if you cannot cite the option in the manual, do NOT assert it exists and do NOT plan
+  around it. On 2026-07-20 a roadmap recommended "give `out` its own AXI ID" — no such option
+  exists on the pointer-based `axi_initiator` pragma. Guessing a knob wastes a ~40 min build.
+
+## Rule: Pin Class-A behaviour, never rely on inference
+- **TRIGGER**: a kernel depends on a specific memory architecture, II, or port count.
+- **ACTION**: state it as a pragma. Relying on the tool inferring it is an unpinned assumption
+  that can silently change between builds.
+- **HALT**: `hls_resample/resample.cpp` comments claim "buf[j]/buf[j+1] read in one cycle via
+  PolarFire's two-port LSRAM" but carries NO partition pragma — the dual-port behaviour is
+  inferred. Pin it: `#pragma HLS memory partition variable(buf) type(cyclic) factor(2)`.
+
+## Rule: Latency-bound kernels get outstanding transactions before restructuring
+- **TRIGGER**: a kernel's silicon time exceeds its scheduled cycle count and DDR bandwidth is
+  not saturated (compute MB/s before assuming bandwidth).
+- **ACTION**: set `max_outstanding_reads(<n>)` / `max_outstanding_writes(<n>)` on the
+  `axi_initiator` pragmas. They are documented and cheap; the resample kernel sets neither while
+  running 3.1x off its ideal schedule at ~39 MB/s (nowhere near LPDDR4 limits).
+- **HALT**: do not restructure a kernel for latency before trying the pragma that addresses it.
+
+## Pragma quick reference (verbatim from the manual — do not paraphrase)
+
+```
+#pragma HLS function top
+#pragma HLS function pipeline | dataflow | noinline
+#pragma HLS loop pipeline II(<int>)
+#pragma HLS loop unroll
+#pragma HLS memory partition variable(<v>) type(block|cyclic|complete|struct_fields|none) dim(<int>) factor(<int>)
+#pragma HLS memory impl variable(<v>) pack(bit|byte) byte_enable(true|false)
+#pragma HLS memory impl variable(<v>) contention_free(true|false)
+#pragma HLS interface argument(<a>) type(axi_initiator) ptr_addr_interface(<simple|axi_target>) num_elements(<int>) max_burst_len(<int>) max_outstanding_reads(<int>) max_outstanding_writes(<int>)
+#pragma HLS interface argument(<a>) type(axi_target) num_elements(<int>) dma(true|false) requires_copy_in(true|false)
+```
+
+Docs are published for 2023.1; this project builds with **2025.2**. Treat syntax as indicative and
+verify against the installed toolchain's own manual when something does not take effect.
+
+## Two AXI initiator APIs — pick deliberately
+
+- **Pointer-based** (`type(axi_initiator)` on a `T*` argument) — what all our kernels use. Simple,
+  burst-inferred, but all arguments share ONE port: reads and writes serialise, and there is no ID,
+  bundle or port-separation option.
+- **Explicit** (`#include <hls/axi_interface.hpp>`, `AxiInterface<>` + `axi_m_read_req` /
+  `axi_m_write_req` / `axi_m_read_data` / `axi_m_write_data`) — you drive the channels yourself, so a
+  single pipelined loop can issue a read request and a write request and then interleave both data
+  streams. This is the only way to get genuine read/write concurrency. Cost: hand-managed handshake
+  and burst boundaries. See the `axi_initiator` example in the examples repo.
+
+## Microchip's own Claude plugin (evaluate before hand-rolling)
+
+`MicrochipTech/fpga-hls-examples/shls-assistant` is an official Claude Code plugin: an MCP server
+(`shls-mcp`) plus a RAG index over the SmartHLS docs, with setup targeting **2025.2.1 — our exact
+version**. It generates pragma-correct C++, answers doc questions with citations, and drives
+`shls` commands. Prefer it over reciting pragma syntax from memory.
+
+It does NOT know this project's silicon scar tissue — the twiddle drop, the detect sign-extension,
+dead mem<->stream kernels, or that `shls cosim` segfaults here. That delta is what THIS skill owns:
+Microchip's tool tells you what the tool should do; this skill records what it actually did on our
+board. Caveats before installing: needs an Anthropic API key, downloads an embedding model and an
+executable, and expects local SmartHLS + Libero.
 
 SmartHLS 2025.2 on this project has a documented record of **schedule-passing /
 silicon-failing** RTL (twiddle drop, detect sign-extension, II=2→21). Its report is

@@ -107,6 +107,81 @@ serialising `buf[j]`+`buf[j+1]`) with in/idx/wq/out **sharing one `m_axi` port**
   read and write don't stall each other, more outstanding transactions, or dual-FIC. Needs a bitstream
   rebuild; value-verify on silicon.
 
+#### Geometry analysis (2026-07-20) — what the coefficient structure permits
+
+Measured on real geometry from two scenes: Centerfield as staged (705×540, deci 8) and the NDSU
+production CPHD at native 8167×8999. Script logic mirrors `serialize_inputs.interp_coeffs` exactly.
+
+| Scene | Pass | Valid outputs | Non-monotonic lines | Max Δidx |
+|---|---|---:|---:|---:|
+| Centerfield deci 8 | range | 5.5% | 0 / 705 | 2 |
+| Centerfield deci 8 | azimuth | 8.6% | 0 / 8192 | 2 |
+| NDSU deci 1 native | range | 70.1% | 0 / 8167 | 2 |
+| NDSU deci 1 native | azimuth | 97.1% | 0 / 8999 | 2 |
+
+Three structural facts, each provable from the code and confirmed across 26,063 lines:
+
+1. **`idx` is monotonic non-decreasing.** It comes from `np.searchsorted` of an ascending query grid
+   into a monotonic source, so the gather is a sequential scan, not random access. The kernel's
+   full-row `buf[RS_IN]` LSRAM staging is therefore unnecessary — a two-element sliding window suffices.
+2. **The valid region is a single contiguous interval `[lo,hi]`.** `serialize_inputs` builds the query
+   grid as `KRp[:n] = KR` with an out-of-range sentinel beyond, so the pad tail is uniformly invalid;
+   and within `[0:n]`, monotonicity means out-of-range can only be a prefix or suffix. Zero lines out
+   of 8,897 had more than one valid run. The firmware already knows `lo`/`hi` — they are the first and
+   last valid entry of the `idx` it just computed.
+3. **Δidx ≤ 2 in every configuration measured.** Since the host decimates every scene to N ≤ 8192 and
+   the output grid is 8192, inputs ≤ outputs by construction, so the average Δ is ≤ 1 and excursions
+   come only from local non-uniformity in `kr = 2(f0 + j·df)/c · pr`. A 2-bit field with an escape code
+   is therefore bounded by construction, not fitted to these two scenes.
+
+Implied work per line (ideal cycles, current kernel = 8193 in-stage + 8192 idx + 8192 wq + 8192 gather
+= 32,769; silicon measures ~103,000, so ~3.1× is exposed DDR latency on the shared port):
+
+| Change | Saves | Basis |
+|---|---:|---|
+| Stream the input (monotonic) — delete `buf[RS_IN]` staging | 8,193 | fact 1 |
+| Delta-encode `idx`, 2-bit + escape | ~7,900 | fact 3 |
+| Beat-rate `wq` staging (int16 over a 64-bit bus) | ~6,100 | bus width |
+| Bound the gather to `[lo,hi]`, zero the tail | ~3,300 | fact 2, ~40% of iterations |
+| `max_outstanding_reads/writes` on the initiators | part of the 3.1× gap | latency, not bandwidth (39 MB/s peak) |
+
+On that last row: the kernel's four `axi_initiator` pragmas currently set only `num_elements` and
+`max_burst_len`. The SmartHLS pragma manual documents `max_outstanding_reads(<int>)` and
+`max_outstanding_writes(<int>)` on the same pragma, and neither is used — so the kernel is running at
+whatever the default outstanding depth is while being demonstrably latency-bound. This is a one-line
+change per argument with no restructuring, and it should be tried FIRST, before any of the rows above.
+
+Correction to earlier guidance in this document's history: with the **pointer-based** `axi_initiator`
+pragma there is no AXI-ID, bundle or port-separation option — the pragma manual exposes none — which
+is why `in`/`idx`/`wq`/`out` share one port and read/write serialise. Do not plan around a pragma the
+tool does not have.
+
+Read/write concurrency IS reachable, but only by dropping to the **explicit AXI API**
+(`hls/axi_interface.hpp`). Microchip's own `axi_initiator` example issues `axi_m_read_req` and
+`axi_m_write_req` up front and then interleaves `axi_m_read_data` / `axi_m_write_data` inside a single
+`#pragma HLS loop pipeline` — genuine concurrent read and write on one initiator, which the pointer API
+cannot express. That is the structural fix for the 3.1× latency gap, at the cost of hand-managing the
+AXI handshake and burst boundaries. Try `max_outstanding_*` first; escalate to the explicit API only if
+it falls short.
+
+Ideal falls 32,769 → ~7,200 cycles/line. **Sequence matters:** the span bound is worth only ~10% today
+because the gather is a quarter of a staging-dominated budget, but ~31% once staging is gone. Do the
+streaming restructure first and the span bound rides along.
+
+Projected: resample 29.2 → ~7 s, at which point coefficient generation (~5.8 s single-hart) is the
+floor and the multi-hart coefficient split — currently dead by Amdahl — becomes the next lever, taking
+it to ~4 s. Note this is an Amdahl reversal: the moment the kernel gets fast, the coefficient work that
+is presently hidden behind it becomes dominant. Plan the two together.
+
+Preferred over replicating N kernel instances: parallel instances add DDR masters through FIC_0, which
+has a documented 4-bit AXI-ID truncation history (see the ID_FIX/ID_RESTORE work). The single-instance
+restructure captures most of the win with no new masters, and by cutting per-instance LSRAM from ~80 KB
+to ~16 KB it makes instance replication cheap later if ~4 s is still not enough.
+
+Every item needs a value-level iso-test, not a correlation check — the gather loop is precisely where
+SmartHLS has miscompiled twice before (see [`SMARTHLS_ANTIPATTERNS.md`](SMARTHLS_ANTIPATTERNS.md)).
+The delta encoding is the riskiest (new format + decode in the hot loop); the span bound is the safest.
+
 **3. Coherent fabric path.**
 A cache-coherent fabric-master configuration would eliminate the remaining pipeline flushes. Now
 largely priced out: the coefficient flush that motivated it has already been removed in firmware (see

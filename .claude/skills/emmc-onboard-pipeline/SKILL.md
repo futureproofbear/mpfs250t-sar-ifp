@@ -125,6 +125,10 @@ All from `mpfs/host` (this repo). The generic runner:
 #    0x00000000/0xdeadbeef), and openocd starts segfaulting/disconnecting -- symptoms that look
 #    exactly like a wedged FlashPro6 and send you chasing USB replugs. (Cost ~1 h on 2026-07-20.)
 bash run_program.sh                                        # ~4 min, fpgenprog
+#    ...then POWER-CYCLE the board. Flashing eNVM does NOT start the new app: hart1 sits at the
+#    eNVM reset vector (`hart1 pc = 0x20220xxx`) instead of the u54_1() mailbox loop
+#    (`pc = 0x0a00xxxx`), so mailbox commands arm but never run. A JTAG reset will NOT reliably
+#    re-boot the U54 on this ES silicon -- only a power-cycle. Check the pc before trusting a run.
 
 # 1) LOAD scene from eMMC -> DDR (+ JOB). PASS: verdict 0, nseg=10, sig_crc_exp==got
 bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # ~77 s

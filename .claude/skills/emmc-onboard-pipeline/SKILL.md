@@ -174,6 +174,21 @@ Single-block (LEGACY/25 MHz/8-bit): **write 0.13 MB/s** (~3.9 ms/block; per-CMD2
 
 ## Gotchas earned (read before debugging)
 
+- **`ERR_INIT` + `init_status=9` (`MSS_MMC_OP_COND_ERR`) usually means the FABRIC IS NOT PROGRAMMED,
+  not a bad eMMC.** The eMMC/SD demux select is driven by the **fabric** `SDIO_SW_SEL0/1/EN_N` ties
+  (see the comment in `prov_emmc_init`: *"the real select is the fabric SDIO_SW tie"*); the MSS
+  GPIO0.12 write alone is not enough. With a dark fabric the SDMMC controller is wired to nothing →
+  CMD1 silent → `OP_COND_ERR` in ~2 ms with `nseg=0` and zero CRCs. **DDR probes do NOT catch this**
+  (`run_ddr_peek.sh` / DDR reads only exercise the MSS and pass happily with no fabric). Fix: program
+  the fabric (`SAR_TOP_ffv.job`, FABRIC-ONLY), power-cycle, retry LOAD. (2026-07-20.)
+- **NEVER "probe the fabric" with a raw JTAG read of `0x6000_xxxx` (FIC0 kernel control regs).** If
+  the fabric is unprogrammed/unclocked the AXI read NEVER RETURNS: the hart freezes mid-load, openocd
+  then spins `Timed out after 2s waiting for busy to go low (abstractcs=...)`, and clearing it needs a
+  board power-cycle — and if you then force-kill openocd you also wedge the FlashPro6 (USB replug).
+  Infer fabric health SAFELY from firmware-side bounded operations instead: the LOAD `init_status`
+  (above), a `PIPE` that returns `SAR_SEQ_TIMEOUT_*` rather than hanging, or SmartDebug (out-of-band,
+  cannot stall the hart). `mpfs/host/run_pipeline_probe.sh` documents this in-file. (2026-07-20.)
+
 - **SAVEOUT is COMMIT-LAST**: INVALIDATE (magic→0) → write image → write superblock LAST. A power
   loss mid-image leaves an invalid superblock → readers reject the torn image. Never revert to
   superblock-first. `VERIFY_OUT` (EVOU) is the full-image integrity check; ROI's partial read can't

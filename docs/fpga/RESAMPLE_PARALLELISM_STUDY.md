@@ -47,6 +47,36 @@ measuring it.
 Azimuth being the single largest part (46%) also means a parallelism effort that treats the two
 gathers as interchangeable is mis-weighted: azimuth is worth roughly 1.6× range.
 
+## 1b. Hard prerequisite — ID_FIX cannot route responses for two CONCURRENT kernels
+
+Found 2026-07-21 while wiring a second resample instance. It is a blocker for *any* N>1 plan, and it
+is invisible to synthesis and to timing closure — the design builds and closes cleanly, then
+mis-routes on silicon.
+
+The SmartHLS `axi_initiator` ports carry **no ID signals at all** (check `resample_top`: there is no
+`axi4initiator_aw_id`), so every kernel presents initiator-ID 0. `CoreAXI4Interconnect` forms its
+11-bit target ID as `{master_number[2:0], master_id[7:0]}`, so all six kernels differ only in the
+**high** bits: CT `0x000`, WIN `0x100`, RES `0x300`, a 7th initiator `0x600`.
+
+`sar_axi_idconv` (ID_FIX) narrows that to FIC0's 4-bit ID by forwarding `S_AXI_AWID[3:0]` and
+stashing the upper 7 bits in a **table keyed by those same low 4 bits**:
+```verilog
+if (S_AXI_AWVALID & S_AXI_AWREADY) aw_tab[S_AXI_AWID[3:0]] <= S_AXI_AWID[10:4];
+assign S_AXI_BID = { aw_tab[M_AXI_BID[3:0]], M_AXI_BID[3:0] };
+```
+Since every kernel's low 4 bits are `0`, **all initiators collide on `aw_tab[0]`**. The module's own
+header states the assumption that makes this safe — "≤1 outstanding txn per distinct low-4 tag
+(sequential kernels)" — which holds today only because the stages run strictly one at a time.
+
+Run RES and RES2 concurrently and the sequence `RES AW` (stash←0x30), `RES2 AW` (stash←0x60),
+`RES B` reconstructs `0x600` and the interconnect routes RES's write response to **RES2**. Both
+kernels then hang or corrupt. This is the same failure mode as the "M2 tag 0x30" write-hang saga the
+ID_FIX header was written to fix.
+
+Fix before building any N>1 variant: key the stash on the **full 11-bit** ID (or at least include the
+`master_number` bits), i.e. widen the FIC0-side tag or carry the master number through a side
+channel. This is an RTL change to `sar_axi_idconv.v` only — no HLS work.
+
 ## 2. What parallelism buys
 
 Assuming N independent gather instances and an unchanged corner-turn:

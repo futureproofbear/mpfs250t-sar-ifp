@@ -210,8 +210,12 @@ static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins)
  * transpose SCRATCH -> SIG so range bins (columns) become rows.
  * pass 2 (azimuth): each range-bin row (M sorted pulses) is resampled to Mp,
  *   leaving the resampled k-space in SCRATCH (range x cross).
- * The resample kernel runs one line per call; the MSS double-buffers the next
- * line's coefficients (bank b^1) while the current line (bank b) streams. */
+ * TWO resample kernel instances (K_RESAMPLE, K_RESAMPLE2) run in parallel: both
+ * gathers are embarrassingly parallel across lines (no loop-carried dependency),
+ * so each iteration arms instance 0 on line i and instance 1 on line i+1. Each
+ * instance owns its own double-buffered coefficient bank pair: instance 0 uses
+ * banks b / b^1, instance 1 uses banks b+2 / (b^1)+2. The MSS computes the NEXT
+ * pair's coefficients into the alternate banks while the current pair streams. */
 static int resample_2pass(const sar_geom_t *g, uint32_t spins)
 {
     float *f32 = (float *)(uintptr_t)SAR_COEF_LINE_F32;
@@ -223,21 +227,42 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     /* PASS 1 (range) */
     sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
                                 (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
-    for (uint32_t i = 0; i < g->M; i++) {
+    if (1u < g->M)
+        sar_coeffs_pass1(g, 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(2),
+                                     (int16_t *)(uintptr_t)SAR_COEF_WQ(2));
+    for (uint32_t i = 0; i < g->M; i += 2u) {
+        /* i+1 may be past the end on an ODD line count -- then instance 1 idles this
+         * iteration and must NOT be armed or waited on (M/Np/Mp are runtime values). */
+        int pair = (i + 1u < g->M);
         SAR_PROG(1u, i, g->M);
         sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);            /* in  (N-wide) */
         sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
-        /* FIC0 non-coherent: the idx/wq coeffs just computed by the MSS (bank b) live in
-         * L2, not DDR. Publish just that bank before the kernel reads it via FIC0, else
-         * it gathers with stale coeffs. */
+        if (pair) {
+            sar_reg_w(K_RESAMPLE2, HLS_ARG0, BUF_SIG + (i + 1u) * g->N * 4u);
+            sar_reg_w(K_RESAMPLE2, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b + 2));
+            sar_reg_w(K_RESAMPLE2, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b + 2));
+            sar_reg_w(K_RESAMPLE2, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i + 1u] * Np * 4u);
+        }
+        /* FIC0 non-coherent: the idx/wq coeffs just computed by the MSS (banks b and
+         * b+2) live in L2, not DDR. Publish BOTH banks before the kernels read them via
+         * FIC0, else they gather with stale coeffs. */
         flush_coef_bank_to_ddr(b, Np);
+        if (pair) flush_coef_bank_to_ddr(b + 2, Np);
         sar_k_start(K_RESAMPLE);
-        if (i + 1u < g->M)
-            sar_coeffs_pass1(g, i + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
+        if (pair) sar_k_start(K_RESAMPLE2);
+        if (i + 2u < g->M)
+            sar_coeffs_pass1(g, i + 2u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
                                              (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-        if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+        if (i + 3u < g->M)
+            sar_coeffs_pass1(g, i + 3u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX((b ^ 1) + 2),
+                                             (int16_t *)(uintptr_t)SAR_COEF_WQ((b ^ 1) + 2));
+        /* Wait for BOTH; on a timeout still drain the other instance so we never leave
+         * a kernel armed while the caller unwinds. */
+        int ok = sar_k_wait(K_RESAMPLE, spins);
+        if (pair && !sar_k_wait(K_RESAMPLE2, spins)) ok = 0;
+        if (!ok) return 0;
         b ^= 1;
     }
     /* zero padded pulse rows (M..Mp-1) for clean FFT zero-padding (CPU clear; a
@@ -269,19 +294,36 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     /* PASS 2 (azimuth) */
     sar_coeffs_pass2(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
                                 (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
+    if (1u < Np)
+        sar_coeffs_pass2(g, 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(2),
+                                     (int16_t *)(uintptr_t)SAR_COEF_WQ(2));
     b = 0;
-    for (uint32_t j = 0; j < Np; j++) {
+    for (uint32_t j = 0; j < Np; j += 2u) {
+        int pair = (j + 1u < Np);                  /* odd line count: instance 1 idles */
         SAR_PROG(2u, j, Np);
         sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG     + j * Mp * 4u);   /* in  (Mp-wide, M valid) */
         sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u);   /* out (Mp-wide) */
+        if (pair) {
+            sar_reg_w(K_RESAMPLE2, HLS_ARG0, BUF_SIG     + (j + 1u) * Mp * 4u);
+            sar_reg_w(K_RESAMPLE2, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b + 2));
+            sar_reg_w(K_RESAMPLE2, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b + 2));
+            sar_reg_w(K_RESAMPLE2, HLS_ARG3, BUF_SCRATCH + (j + 1u) * Mp * 4u);
+        }
         flush_coef_bank_to_ddr(b, Mp);   /* publish just-computed coeffs L2 -> DDR (non-coherent FIC0) */
+        if (pair) flush_coef_bank_to_ddr(b + 2, Mp);
         sar_k_start(K_RESAMPLE);
-        if (j + 1u < Np)
-            sar_coeffs_pass2(g, j + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
+        if (pair) sar_k_start(K_RESAMPLE2);
+        if (j + 2u < Np)
+            sar_coeffs_pass2(g, j + 2u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
                                              (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-        if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+        if (j + 3u < Np)
+            sar_coeffs_pass2(g, j + 3u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX((b ^ 1) + 2),
+                                             (int16_t *)(uintptr_t)SAR_COEF_WQ((b ^ 1) + 2));
+        int ok = sar_k_wait(K_RESAMPLE, spins);
+        if (pair && !sar_k_wait(K_RESAMPLE2, spins)) ok = 0;
+        if (!ok) return 0;
         b ^= 1;
     }
     sar_resample_ts[3] = readmtime();          /* azimuth gather done */

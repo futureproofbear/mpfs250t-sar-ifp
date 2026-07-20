@@ -100,6 +100,54 @@ generate_component -component_name {AXIIC_CTRL}
 - Target address decode lives in `TARGET<n>_START_ADDR/END_ADDR` (+`_UPPER`). With `NUM_TARGETS=1`,
   extra `TARGET1..n` ranges in the `.cxf` are ignored defaults.
 
+#### Reconfiguring an interconnect that ALREADY exists (2026-07-21)
+`create_and_configure_core` **refuses** to touch an existing component:
+`Error: The core AXIIC_C0 cannot be created because the folder ...\component\work\AXIIC_C0 already
+exists.` The following `generate_component` then happily regenerates the **old** config and reports
+success — so the reconfigure is a **silent no-op that looks like it worked**. Delete first:
+```tcl
+delete_component -component_name {AXIIC_C0}     ;# safe: only `delete_component SAR_TOP` is forbidden
+create_and_configure_core -core_vlnv {...} -component_name {AXIIC_C0} -params $P
+generate_component -component_name {AXIIC_C0}
+```
+Always gate on the regenerated `.cxf`, never on the return code:
+```tcl
+regexp {referenceId="NUM_INITIATORS" value="([0-9]+)"} $cxf_text -> got
+```
+
+### 2.4 Editing an EXISTING SmartDesign headless (three traps, all hit 2026-07-21)
+1. **`open_smartdesign` first.** `create_smartdesign` implicitly opens; for a design that already
+   exists you must `open_smartdesign -sd_name SAR_TOP` before any edit. Without it every
+   `sd_update_instance` / `sd_connect_pins` fails **with an EMPTY error message** (`$e` is blank, so
+   a `catch`-based script cannot tell you why), `sd_instantiate_hdl_core` / `sd_invert_pins`
+   deceptively still succeed, and the following `generate_component` **crashes `libero.exe`** on the
+   resulting half-wired design. `remove_det.tcl` shows the correct pattern.
+2. **Regenerating a sub-component deletes the parent's generated HDL.** After regenerating
+   `AXIIC_C0`/`AXIIC_CTRL`, `component/work/SAR_TOP/SAR_TOP.v` is **removed** and `SAR_TOP.cxf`
+   shrinks to a ~1 KB stub. This is *not* damage — the design source `SAR_TOP.sdb` (a zip of
+   `SD_MODEL_DATA`) survives intact. Recovery: `open_smartdesign` → `sd_update_instance` on each
+   changed instance → `save_smartdesign` → `generate_component`. Skipping `sd_update_instance` gives
+   `Error: Out-of-date Instance / Component definition is not consistent for instance DIC` and
+   generate fails.
+   To read the true design state when `SAR_TOP.v` is gone, unzip the `.sdb` and grep `SD_MODEL_DATA`
+   for `name="<INST>"`.
+3. **Broken-link trap, instantiation direction.** §2.2 covers cores *created* in an earlier session.
+   The inverse also bites: `sd_instantiate_hdl_core` of an HDL+ core in a session where that core was
+   **not created** gives the NEW instance a broken link —
+   `Error: Missing Core Definition / HDL module 'resample_top' cannot be found` — while the existing
+   instances of the very same core stay fine. So a second instance of an existing HLS kernel
+   **cannot be added incrementally**; it needs the one-session `create_fresh_project_*.tcl` path
+   (all cores created + SAR_TOP assembled in a single session).
+
+### 2.5 libero.exe console output is lost on exit
+Redirected stdout is buffered and gets **truncated mid-line** when the process exits, so `puts`
+markers vanish exactly when you need them. Append every marker to a file with an explicit flush:
+```tcl
+proc mark {msg} { global MARKS; puts $msg; set f [open $MARKS a]; puts $f $msg; flush $f; close $f }
+```
+Also: a detached launcher returning **does not** mean Libero finished — poll `tasklist | grep -i
+libero` alongside the marks file. `build_design_hierarchy` on this design takes ~10 min on its own.
+
 ---
 
 ## 3. PolarFire SoC MSS (the hard block)

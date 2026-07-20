@@ -36,10 +36,18 @@ static inline int16_t lerp(int16_t a, int16_t b, int16_t w) {   // a + (b-a)*w, 
 void resample(uint32_t *in, int32_t *idx, int16_t *wq, uint32_t *out) {
 #pragma HLS function top
 #pragma HLS interface default type(axi_target)
-#pragma HLS interface argument(in)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_IN)  max_burst_len(256)
-#pragma HLS interface argument(idx) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256)
-#pragma HLS interface argument(wq)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256)
-#pragma HLS interface argument(out) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256)
+// max_outstanding_* added 2026-07-20. SmartHLS's own optimization recipe
+// (SmartHLS/examples/user_guide_examples/axi_initiator_optimization) is four steps: pipeline the
+// loop to infer bursts, set max_burst_len, set max_outstanding, pick the CPU-side alloc region.
+// This kernel did 1 and 2 but never 3, while measuring ~3.1x off its ideal schedule at only
+// ~39 MB/s -- i.e. DDR LATENCY-bound, not bandwidth-bound, which is exactly what outstanding
+// transactions hide. Values are the vendor's: reads(8) per axi_initiator_max_outstanding,
+// writes(2) per both that example and axi_initiator_optimization.
+// Numerically INERT: this changes only how many AXI transactions are in flight, never any value.
+#pragma HLS interface argument(in)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_IN)  max_burst_len(256) max_outstanding_reads(8)
+#pragma HLS interface argument(idx) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256) max_outstanding_reads(8)
+#pragma HLS interface argument(wq)  type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256) max_outstanding_reads(8)
+#pragma HLS interface argument(out) type(axi_initiator) ptr_addr_interface(axi_target) num_elements(RS_OUT) max_burst_len(256) max_outstanding_writes(2)
     static uint32_t buf[RS_IN];
     static int32_t  idxb[RS_OUT];
     static int16_t  wqb[RS_OUT];

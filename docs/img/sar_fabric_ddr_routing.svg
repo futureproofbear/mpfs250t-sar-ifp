@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 720" width="1240" height="720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1240" height="720" fill="#ffffff"/>
+  <defs>
+    <marker id="ra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#444444"/>
+    </marker>
+    <marker id="rc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#b5651d"/>
+    </marker>
+  </defs>
+
+  <text x="620" y="32" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">Fabric &lt;-&gt; DDR routing: one control plane, one data plane</text>
+  <text x="620" y="54" text-anchor="middle" font-size="12.5" fill="#555555">MPFS250T_ES. Both planes cross FIC_0. Kernels never talk to each other — the MSS sequences everything.</text>
+
+  <!-- ============ CONTROL PLANE ============ -->
+  <rect x="24" y="76" width="1192" height="196" rx="7" fill="#fff8ec" stroke="#b5651d" stroke-width="1.6" stroke-dasharray="6 3"/>
+  <text x="40" y="98" font-size="13.5" font-weight="700" fill="#8a4a12">CONTROL PLANE — AXI4-Lite, MSS is initiator</text>
+  <text x="40" y="115" font-size="11" fill="#8a4a12">hart1 writes 4 argument registers then a START bit, and polls a DONE bit. Tiny traffic; never the bottleneck.</text>
+
+  <rect x="44" y="128" width="150" height="120" rx="6" fill="#fbe3d6" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="119" y="150" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">MSS hart1</text>
+  <text x="119" y="168" text-anchor="middle" font-size="10.5" fill="#333333">U54_1, mailbox loop</text>
+  <text x="119" y="183" text-anchor="middle" font-size="10.5" fill="#333333">sar_form_image()</text>
+  <text x="119" y="200" text-anchor="middle" font-size="10.5" fill="#333333">computes idx/wq</text>
+  <text x="119" y="215" text-anchor="middle" font-size="10.5" fill="#333333">arms + polls kernels</text>
+  <text x="119" y="234" text-anchor="middle" font-size="10" fill="#8a4a12">interrupts MASKED</text>
+
+  <path d="M 198 188 L 236 188" stroke="#b5651d" stroke-width="2" marker-end="url(#rc)"/>
+  <text x="217" y="181" text-anchor="middle" font-size="9.5" fill="#8a4a12">FIC_0</text>
+
+  <rect x="240" y="150" width="96" height="76" rx="5" fill="#f6e2cc" stroke="#b5651d" stroke-width="1.6"/>
+  <text x="288" y="180" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">CIC</text>
+  <text x="288" y="196" text-anchor="middle" font-size="10" fill="#333333">1 initiator</text>
+  <text x="288" y="210" text-anchor="middle" font-size="10" fill="#333333">6 targets</text>
+
+  <path d="M 340 188 L 372 188" stroke="#b5651d" stroke-width="2" marker-end="url(#rc)"/>
+
+  <!-- control slaves -->
+  <rect x="376" y="140" width="840" height="96" rx="5" fill="#ffffff" stroke="#c9a227" stroke-width="1.2"/>
+  <text x="390" y="158" font-size="11" font-weight="600" fill="#6b5400">AXI4-Lite control windows — 4 KiB each at 0x6000_n000</text>
+  <text x="390" y="176" font-size="10.5" font-family="Consolas, monospace" fill="#333333">0x6000_0000 CT   0x6000_1000 WIN   0x6000_2000 DET   0x6000_3000 RES   0x6000_4000 FEED   0x6000_5000 UNLD</text>
+  <text x="390" y="196" font-size="10.5" fill="#555555">Register map per kernel (sar_kernels.h): ARG0 +0x0C · ARG1 +0x10 · ARG2 +0x14 · ARG3 +0x18 · START/DONE +0x08</text>
+  <text x="390" y="214" font-size="10.5" fill="#555555">For RES: ARG0 = in, ARG1 = idx, ARG2 = wq, ARG3 = out — all DDR byte addresses.</text>
+  <text x="390" y="230" font-size="10" fill="#8a2f2f">0x6000_6000 is a free slot. It is NOT a monitor — see the K_RESAMPLE2 note in u54_1.c.</text>
+
+  <!-- ============ DATA PLANE ============ -->
+  <rect x="24" y="290" width="1192" height="300" rx="7" fill="#f2f7fd" stroke="#2c5aa0" stroke-width="1.6" stroke-dasharray="6 3"/>
+  <text x="40" y="312" font-size="13.5" font-weight="700" fill="#1a3a6b">DATA PLANE — AXI4, each kernel is its own initiator</text>
+  <text x="40" y="329" font-size="11" fill="#1a3a6b">This is where all the time goes. Every stage is a DDR-to-DDR streaming pass; the frame never fits on chip.</text>
+
+  <!-- kernels -->
+  <rect x="44" y="344" width="150" height="182" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="119" y="364" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">Fabric kernels</text>
+  <text x="119" y="384" text-anchor="middle" font-size="10.5" fill="#333333">CT · WIN · DET</text>
+  <text x="119" y="399" text-anchor="middle" font-size="10.5" fill="#333333">RES · FEED · UNLD</text>
+  <text x="119" y="420" text-anchor="middle" font-size="10" fill="#2c5aa0">6 AXI4 initiators</text>
+  <text x="119" y="436" text-anchor="middle" font-size="10" fill="#2c5aa0">64-bit data bus</text>
+  <text x="119" y="458" text-anchor="middle" font-size="10" fill="#8a2f2f">no AXI ID ports</text>
+  <text x="119" y="473" text-anchor="middle" font-size="10" fill="#8a2f2f">(SmartHLS) -&gt; ID 0</text>
+  <text x="119" y="497" text-anchor="middle" font-size="10" fill="#555555">stage operands into</text>
+  <text x="119" y="511" text-anchor="middle" font-size="10" fill="#555555">LSRAM, then compute</text>
+
+  <path d="M 198 435 L 236 435" stroke="#444444" stroke-width="2.2" marker-end="url(#ra)"/>
+
+  <rect x="240" y="382" width="120" height="106" rx="5" fill="#c9dcf5" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="300" y="404" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">DIC</text>
+  <text x="300" y="420" text-anchor="middle" font-size="10" fill="#333333">CoreAXI4Interconnect</text>
+  <text x="300" y="434" text-anchor="middle" font-size="10" fill="#333333">6 initiators -&gt; 1 target</text>
+  <text x="300" y="452" text-anchor="middle" font-size="10" fill="#2c5aa0">tags ID =</text>
+  <text x="300" y="466" text-anchor="middle" font-size="9.5" font-family="Consolas, monospace" fill="#2c5aa0">{master#[2:0], id[7:0]}</text>
+  <text x="300" y="480" text-anchor="middle" font-size="9.5" fill="#555555">11-bit</text>
+
+  <path d="M 364 435 L 396 435" stroke="#444444" stroke-width="2.2" marker-end="url(#ra)"/>
+
+  <rect x="400" y="382" width="130" height="106" rx="5" fill="#e6e0f0" stroke="#5a4a80" stroke-width="1.8"/>
+  <text x="465" y="404" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">ID_FIX</text>
+  <text x="465" y="420" text-anchor="middle" font-size="10" fill="#333333">sar_axi_idconv.v</text>
+  <text x="465" y="436" text-anchor="middle" font-size="10" fill="#333333">11-bit -&gt; 4-bit ID</text>
+  <text x="465" y="452" text-anchor="middle" font-size="10" fill="#333333">32 -&gt; 38-bit addr</text>
+  <text x="465" y="470" text-anchor="middle" font-size="9.5" fill="#8a2f2f">stashes upper bits,</text>
+  <text x="465" y="483" text-anchor="middle" font-size="9.5" fill="#8a2f2f">keyed by low 4</text>
+
+  <path d="M 534 435 L 566 435" stroke="#444444" stroke-width="2.2" marker-end="url(#ra)"/>
+
+  <rect x="570" y="382" width="120" height="106" rx="5" fill="#fbe3d6" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="630" y="410" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">FIC_0</text>
+  <text x="630" y="428" text-anchor="middle" font-size="10" fill="#333333">MSS fabric port</text>
+  <text x="630" y="444" text-anchor="middle" font-size="10" fill="#333333">64-bit @ 62.5 MHz</text>
+  <text x="630" y="462" text-anchor="middle" font-size="10" font-weight="600" fill="#b5651d">ceiling 500 MB/s</text>
+  <text x="630" y="478" text-anchor="middle" font-size="10" fill="#8a2f2f">NOT L2-coherent</text>
+
+  <path d="M 694 435 L 726 435" stroke="#444444" stroke-width="2.2" marker-end="url(#ra)"/>
+
+  <rect x="730" y="382" width="120" height="106" rx="5" fill="#f2f2f2" stroke="#888888" stroke-width="1.6"/>
+  <text x="790" y="412" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">MSS AXI</text>
+  <text x="790" y="430" text-anchor="middle" font-size="12.5" font-weight="600" fill="#1a1a1a">switch</text>
+  <text x="790" y="452" text-anchor="middle" font-size="10" fill="#555555">bypasses L2</text>
+
+  <path d="M 854 435 L 886 435" stroke="#444444" stroke-width="2.2" marker-end="url(#ra)"/>
+
+  <rect x="890" y="368" width="150" height="134" rx="6" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.8"/>
+  <text x="965" y="392" text-anchor="middle" font-size="13" font-weight="700" fill="#4a3670">LPDDR4</text>
+  <text x="965" y="412" text-anchor="middle" font-size="10.5" font-family="Consolas, monospace" fill="#6b4fa0">SIG     0x8800_0000</text>
+  <text x="965" y="428" text-anchor="middle" font-size="10.5" font-family="Consolas, monospace" fill="#6b4fa0">SCRATCH 0x9800_0000</text>
+  <text x="965" y="444" text-anchor="middle" font-size="10.5" font-family="Consolas, monospace" fill="#6b4fa0">OUT     0xA800_0000</text>
+  <text x="965" y="460" text-anchor="middle" font-size="10.5" font-family="Consolas, monospace" fill="#6b4fa0">tables  0xB000_0000</text>
+  <text x="965" y="482" text-anchor="middle" font-size="10" fill="#555555">1 GiB, 256 MiB/frame</text>
+
+  <!-- coherency callout -->
+  <rect x="1056" y="368" width="150" height="134" rx="6" fill="#fff0f0" stroke="#a03535" stroke-width="1.5"/>
+  <text x="1131" y="390" text-anchor="middle" font-size="11.5" font-weight="600" fill="#7a2626">Coherency</text>
+  <text x="1066" y="410" font-size="10" fill="#5a1a1a">FIC_0 does not snoop</text>
+  <text x="1066" y="424" font-size="10" fill="#5a1a1a">L2, so the MSS must</text>
+  <text x="1066" y="438" font-size="10" fill="#5a1a1a">publish anything it</text>
+  <text x="1066" y="452" font-size="10" fill="#5a1a1a">wrote before arming</text>
+  <text x="1066" y="466" font-size="10" fill="#5a1a1a">a kernel, and evict</text>
+  <text x="1066" y="480" font-size="10" fill="#5a1a1a">before reading back.</text>
+  <text x="1066" y="496" font-size="9.5" font-family="Consolas, monospace" fill="#a03535">CCACHE FLUSH64</text>
+
+  <!-- measured throughput band -->
+  <rect x="44" y="540" width="1162" height="38" rx="5" fill="#fff8e0" stroke="#c9a227" stroke-width="1.4"/>
+  <text x="58" y="558" font-size="11.5" font-weight="600" fill="#6b5400">Measured on this path (2026-07-21):</text>
+  <text x="248" y="558" font-size="11.5" fill="#5a4a10">resample 69-78 MB/s · corner-turn 70 MB/s · window 85 MB/s — every kernel lands at 14-17% of the 500 MB/s FIC_0 ceiling.</text>
+  <text x="58" y="572" font-size="11" fill="#5a4a10">Four independent kernels converging on the same number is evidence the limit is this shared path, not any one kernel. Parallel instances would SPLIT it, not multiply it.</text>
+
+  <!-- ============ what the controller does ============ -->
+  <text x="24" y="616" font-size="13.5" font-weight="600" fill="#333333">What the controller does, per line</text>
+  <rect x="24" y="626" width="1192" height="72" rx="6" fill="#fafbfd" stroke="#aaaaaa" stroke-width="1.3"/>
+  <text x="40" y="647" font-size="11" fill="#333333"><tspan font-weight="600">1.</tspan> compute idx[]/wq[] for the NEXT line into the alternate coefficient bank (float geometry, on hart1)  ·  <tspan font-weight="600">2.</tspan> publish this line's bank to DDR with CCACHE FLUSH64 (two disjoint ranges: idx, wq)</text>
+  <text x="40" y="666" font-size="11" fill="#333333"><tspan font-weight="600">3.</tspan> write ARG0..ARG3 over AXI4-Lite  ·  <tspan font-weight="600">4.</tspan> write START  ·  <tspan font-weight="600">5.</tspan> spin on DONE while the kernel streams DDR-&gt;LSRAM-&gt;compute-&gt;DDR  ·  <tspan font-weight="600">6.</tspan> swap bank parity, repeat</text>
+  <text x="40" y="688" font-size="11" fill="#666666">Steps 1 and 5 overlap by design — coefficient generation for line i+1 hides behind the kernel running line i. Stages are strictly sequential: arm, wait, arm the next. Nothing is fused.</text>
+
+  <text x="24" y="714" font-size="10.5" fill="#777777">Addresses and register offsets: src/sar/sar_kernels.h and src/sar/ddr_sar_layout.h. Interconnect topology: docs/fpga/AMBA_ARCHITECTURE.md.</text>
+</svg>

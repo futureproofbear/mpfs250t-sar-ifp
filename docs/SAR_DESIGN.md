@@ -105,6 +105,30 @@ earlier profile reported; that profile was taken while an experimental per-chunk
 flushes) was active, and the figure outlived the reverted code. What remains is bound by fabric
 gather throughput, not by coefficient generation — the coefficient work is hidden behind the kernel.
 
+#### Resample is three workloads, and they behave differently
+
+`sar_stage_ts` reports resample as one number, which hides the structure. `sar_resample_ts[0..3]`
+splits it (measured 2026-07-21, deci-1 Centerfield):
+
+| Part | Measured | Share | Shape | Parallel across lines? |
+|---|---:|---:|---|---|
+| Range gather | 8.31 s | 28% | 5,634 pulse lines, Np=8192 outputs each | yes — fully independent |
+| Corner-turn | 7.33 s | 25% | one global transpose of the 256 MiB frame | **no** — global data movement |
+| Azimuth gather | 13.53 s | 46% | 8,192 range-bin lines, Mp=8192 outputs each | yes — fully independent |
+
+The independence of the two gathers is provable from the host reference rather than assumed:
+`resample_coeffs` is `for i in range(m): interp_coeffs(KR, kr[i])` and `apply1` is a pure per-row map,
+with no loop-carried dependency. The ordering between the three is strict, though — the corner-turn
+needs all of the range output, and azimuth needs all of the corner-turn output.
+
+Azimuth is the largest part at 46%, and costs more per line than range (1.652 ms vs 1.475 ms) because
+it reads Mp=8192 samples per line against range's N=4319. Treating the two gathers as interchangeable
+when optimising is therefore mis-weighted; azimuth is worth about 1.6x range.
+
+The corner-turn is the one part that does not parallelise along the same axis, and it appears
+**twice** in the pipeline — once here and once between the FFT passes (stage 4, also ~7.3 s) — so the
+two together are ~14.6 s, about 17% of the whole run, from a single shared kernel.
+
 ### 2.2 Window
 
 Separable Hamming taper applied as the on-the-fly product `hamr[j] · hamc[k]` from two Q15 1-D
@@ -140,6 +164,109 @@ sext16(u) = (int32_t)((u & 0xFFFF) ^ 0x8000) - 0x8000
 ```
 
 Engine selection is runtime: `detect_mode` @ `0xB0059118`, 1 = CPU detect (the shipping path).
+
+### 2.5 Data movement: how bytes get between fabric and DDR
+
+![Fabric to DDR routing](img/sar_fabric_ddr_routing.svg)
+
+Two planes cross FIC_0, and only one of them matters for performance.
+
+### Control plane — the MSS drives, kernels never initiate
+
+Each fabric kernel exposes a 4 KiB AXI4-Lite target at `0x6000_n000`. The MSS reaches them through
+its FIC_0 initiator into a control interconnect (CIC, 1 initiator to 6 targets). Per kernel the map
+is `ARG0 +0x0C`, `ARG1 +0x10`, `ARG2 +0x14`, `ARG3 +0x18`, `START`/`DONE` at `+0x08`
+(`sar_kernels.h`). For resample: ARG0 = `in`, ARG1 = `idx`, ARG2 = `wq`, ARG3 = `out`, all plain DDR
+byte addresses.
+
+This traffic is a handful of register writes per line and is never the bottleneck. Kernels never talk
+to each other and never self-sequence — the MSS arms one, waits for DONE, then arms the next.
+
+### Data plane — six initiators, one shared path
+
+Every kernel is its own AXI4 initiator with a 64-bit data bus. All six converge on a data
+interconnect (DIC, 6 initiators to 1 target), then `ID_FIX`, then FIC_0, then the MSS AXI switch,
+then LPDDR4. Nothing on this path snoops L2.
+
+The AXI ID story matters and is easy to get wrong. CoreAXI4Interconnect tags each transaction with an
+11-bit ID formed as `{master_number[2:0], master_id[7:0]}`. `master_number` is the interconnect's own
+index of which initiator port the transaction arrived on; `master_id` is whatever the master drove.
+**SmartHLS `axi_initiator` kernels have no ID ports at all**, so `master_id` is always 0 and kernels
+differ only in the high bits — RES is `0x300`, a seventh initiator would be `0x600`.
+
+`ID_FIX` (`sar_axi_idconv.v`) narrows that 11-bit ID to FIC_0's 4 bits by forwarding the low 4 bits
+and stashing the upper 7 in a table **keyed by those same low 4 bits**, re-attaching them on the
+response. Since every kernel's low 4 bits are zero, all initiators collide on `aw_tab[0]`. That is
+safe only because stages run strictly one at a time — the module's header states the assumption
+outright: "≤1 outstanding txn per distinct low-4 tag (sequential kernels)". It is a pure
+combinational pass-through and does **not** throttle outstanding transactions.
+
+> Consequence for any future parallelism: two kernels running concurrently would reconstruct each
+> other's response IDs and mis-route. This is invisible to synthesis and to timing closure — such a
+> design builds clean and fails only on silicon. Fixing it is an RTL change to `sar_axi_idconv.v`
+> (forward `master_number` through the 4-bit tag, since `master_id` is always 0).
+
+### The measured ceiling
+
+| Stage | Bytes moved | Time | Throughput |
+|---|---:|---:|---:|
+| Resample, azimuth | 114,692 / line | 1.652 ms | 69 MB/s |
+| Resample, range | 114,692 / line | 1.475 ms | 78 MB/s |
+| Corner-turn | 512 MB | 7.33 s | 70 MB/s |
+| Window | 512 MB | 6.0 s | 85 MB/s |
+
+FIC_0 at 64-bit × 62.5 MHz has a 500 MB/s ceiling, so every kernel sits at 14–17% of it. Four
+independent kernels converging on the same figure is evidence that the limit is this shared path
+rather than any one kernel's logic — and it predicts that replicating kernels would **split** that
+bandwidth rather than multiply it.
+
+### What the controller actually does, per line
+
+1. Compute `idx[]`/`wq[]` for the **next** line into the alternate coefficient bank (float geometry,
+   on hart1).
+2. Publish the **current** line's bank to DDR with `CCACHE FLUSH64` — two disjoint ranges, because a
+   bank is not contiguous (section 6).
+3. Write ARG0..ARG3 over AXI4-Lite.
+4. Write START.
+5. Spin on DONE while the kernel streams DDR → LSRAM → compute → DDR.
+6. Swap bank parity and repeat.
+
+Steps 1 and 5 overlap by design, so coefficient generation for line `i+1` hides behind the kernel
+running line `i`. That is why coefficient work is currently "free" — and why it becomes the binding
+constraint the moment the gather gets substantially faster.
+
+### 2.6 AXI beat packing
+
+![AXI beat packing](img/sar_axi_packing.svg)
+
+The bus is 64-bit, but `AxSIZE` decides how many of those 8 bytes a beat actually carries (2^n). The
+kernel originally moved **one C element per beat**: `AxSIZE 3'd2` (4 bytes) for `in`, `idx` and `out`,
+and `3'd1` (2 bytes) for `wq`. That is 32,769 beats per line carrying 114,692 useful bytes inside
+262,152 bytes of bus time — **43.7% packing efficiency**, with `wq` wasting 75% of every beat it used.
+
+Reading `idx` as two int32 per 64-bit word and `wq` as four int16 per word, then unpacking into the
+existing LSRAM arrays, cuts this to 22,529 beats and 63.6% efficiency. The gather loop, the lerp and
+every output value are untouched — only the transport changes.
+
+Two streams are deliberately left unpacked, and both reasons should be re-checked before anyone
+"finishes the job":
+
+- **`in`** — pass 1 reads `BUF_SIG + i*N*4` with N=4319, so for odd `i` the address is only 4-byte
+  aligned and an 8-byte beat needs 8-byte alignment. Pass 2 would be fine, but one kernel binary
+  serves both passes.
+- **`out`** — producing two outputs per cycle would need four LSRAM reads per cycle from `buf`
+  (`buf[j0]`, `buf[j0+1]`, `buf[j1]`, `buf[j1+1]`), which the two-port LSRAM cannot do; II would go
+  to 2 and cancel the gain.
+
+`idx` and `wq` are always safe because every coefficient bank (`0xB014_8000 + b*0x2_0000`, and
+`+0x1_0000` for wq) is 8-byte aligned by construction.
+
+> Tooling trap found doing this: a `#pragma HLS memory partition` placed anywhere other than
+> immediately above the variable's **declaration** is silently dropped — SmartHLS warns
+> `[HLS pragma] ignored`, exits 0, and the partitioning simply is not there. The `wq` unpack loop
+> degraded to II=2 while `idx` coincidentally still made II=1 on the LSRAM's two native ports, so
+> half the regression hid itself. Only the II report gate caught it. See
+> [`fpga/SMARTHLS_ANTIPATTERNS.md`](fpga/SMARTHLS_ANTIPATTERNS.md) entry 6.
 
 ## 3. Fixed-point and data contracts
 
@@ -385,7 +512,7 @@ Fabric kernels are controlled over AXI4-Lite through FIC0; per-kernel register o
 `src/sar/sar_kernels.h`. Note there are two register-map models in the project's history — the
 hardware uses the per-kernel model in `sar_kernels.h`, not the older monolithic one.
 
-## 9. Verification contract
+## 10. Verification contract
 
 Correlation is scale-, phase- and orientation-invariant, so it hides real bugs — the detect
 sign-extension defect passed a correlation check while corrupting half the image. Verify by value:
@@ -402,7 +529,7 @@ scanned to 0.97 — run the full 8-dihedral orientation search
 Current reference result: corr 0.9923 against `golden_small_mag.npy` on the Centerfield decimated
 scene, with a point-target crop at 0.9962.
 
-## 10. Known deviations from the ideal design
+## 11. Known deviations from the ideal design
 
 These are deliberate and load-bearing. Do not "fix" them without reading the linked history.
 

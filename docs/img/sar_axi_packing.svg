@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 640" width="1180" height="640" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1180" height="640" fill="#ffffff"/>
+
+  <text x="590" y="32" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">AXI beat packing on the resample kernel</text>
+  <text x="590" y="54" text-anchor="middle" font-size="12.5" fill="#555555">The bus is 64-bit. AxSIZE says how many of those 8 bytes a beat actually carries — encoded as 2^n.</text>
+
+  <!-- legend -->
+  <rect x="812" y="70" width="16" height="16" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+  <text x="836" y="83" font-size="11.5" fill="#333333">useful payload</text>
+  <rect x="948" y="70" width="16" height="16" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  <text x="972" y="83" font-size="11.5" fill="#333333">wasted bus time</text>
+
+  <!-- ===================== BEFORE ===================== -->
+  <text x="30" y="90" font-size="14" font-weight="700" fill="#8a2626">BEFORE — one C element per beat</text>
+
+  <!-- in -->
+  <text x="30" y="122" font-size="12" font-weight="600" fill="#333333">in</text>
+  <text x="30" y="138" font-size="10" fill="#666666">uint32</text>
+  <text x="96" y="128" font-size="10.5" font-family="Consolas, monospace" fill="#8a2626">AxSIZE 3'd2 = 4 B</text>
+  <g>
+    <rect x="250" y="110" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="310" y="110" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="386" y="110" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="446" y="110" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="522" y="110" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="582" y="110" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  </g>
+  <text x="700" y="128" font-size="11.5" fill="#333333">8,193 beats · 50% wasted</text>
+
+  <!-- idx -->
+  <text x="30" y="176" font-size="12" font-weight="600" fill="#333333">idx</text>
+  <text x="30" y="192" font-size="10" fill="#666666">int32</text>
+  <text x="96" y="182" font-size="10.5" font-family="Consolas, monospace" fill="#8a2626">AxSIZE 3'd2 = 4 B</text>
+  <g>
+    <rect x="250" y="164" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="310" y="164" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="386" y="164" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="446" y="164" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="522" y="164" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="582" y="164" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  </g>
+  <text x="700" y="182" font-size="11.5" fill="#333333">8,192 beats · 50% wasted</text>
+
+  <!-- wq -->
+  <text x="30" y="230" font-size="12" font-weight="600" fill="#333333">wq</text>
+  <text x="30" y="246" font-size="10" fill="#666666">int16</text>
+  <text x="96" y="236" font-size="10.5" font-family="Consolas, monospace" fill="#8a2626">AxSIZE 3'd1 = 2 B</text>
+  <g>
+    <rect x="250" y="218" width="30" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="280" y="218" width="90" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="386" y="218" width="30" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="416" y="218" width="90" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="522" y="218" width="30" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="552" y="218" width="90" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  </g>
+  <text x="700" y="236" font-size="11.5" font-weight="600" fill="#8a2626">8,192 beats · 75% wasted — the worst offender</text>
+
+  <!-- out -->
+  <text x="30" y="284" font-size="12" font-weight="600" fill="#333333">out</text>
+  <text x="30" y="300" font-size="10" fill="#666666">uint32</text>
+  <text x="96" y="290" font-size="10.5" font-family="Consolas, monospace" fill="#8a2626">AxSIZE 3'd2 = 4 B</text>
+  <g>
+    <rect x="250" y="272" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="310" y="272" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="386" y="272" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="446" y="272" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="522" y="272" width="60" height="26" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="582" y="272" width="60" height="26" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  </g>
+  <text x="700" y="290" font-size="11.5" fill="#333333">8,192 beats · 50% wasted</text>
+
+  <rect x="250" y="312" width="800" height="30" rx="4" fill="#fff0f0" stroke="#a03535" stroke-width="1.4"/>
+  <text x="264" y="332" font-size="11.5" fill="#5a1a1a"><tspan font-weight="600">32,769 beats/line</tspan> carrying 114,692 useful bytes in 262,152 bytes of bus time = <tspan font-weight="600">43.7% packing efficiency</tspan></text>
+
+  <line x1="30" y1="366" x2="1150" y2="366" stroke="#cccccc" stroke-width="1.4"/>
+
+  <!-- ===================== AFTER ===================== -->
+  <text x="30" y="394" font-size="14" font-weight="700" fill="#2f6b2f">AFTER — pack what is safe to pack</text>
+
+  <!-- in unchanged -->
+  <text x="30" y="426" font-size="12" font-weight="600" fill="#333333">in</text>
+  <text x="96" y="426" font-size="10.5" font-family="Consolas, monospace" fill="#8a6a26">AxSIZE 3'd2 (unchanged)</text>
+  <g>
+    <rect x="290" y="410" width="60" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="350" y="410" width="60" height="24" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="426" y="410" width="60" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="486" y="410" width="60" height="24" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  </g>
+  <text x="600" y="426" font-size="11" fill="#8a6a26">8,193 beats — pass-1 reads SIG + i*N*4 with N=4319, so odd i is only 4-byte aligned</text>
+
+  <!-- idx packed -->
+  <text x="30" y="464" font-size="12" font-weight="600" fill="#333333">idx</text>
+  <text x="96" y="464" font-size="10.5" font-family="Consolas, monospace" fill="#2f6b2f">AxSIZE 3'd3 = 8 B</text>
+  <g>
+    <rect x="290" y="448" width="56" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="346" y="448" width="56" height="24" fill="#7fb35f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="426" y="448" width="56" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="482" y="448" width="56" height="24" fill="#7fb35f" stroke="#4a7c3f" stroke-width="1.2"/>
+  </g>
+  <text x="600" y="464" font-size="11" fill="#2f6b2f">2 int32 per beat -&gt; 4,096 beats (was 8,192)</text>
+
+  <!-- wq packed -->
+  <text x="30" y="502" font-size="12" font-weight="600" fill="#333333">wq</text>
+  <text x="96" y="502" font-size="10.5" font-family="Consolas, monospace" fill="#2f6b2f">AxSIZE 3'd3 = 8 B</text>
+  <g>
+    <rect x="290" y="486" width="28" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="318" y="486" width="28" height="24" fill="#7fb35f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="346" y="486" width="28" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="374" y="486" width="28" height="24" fill="#7fb35f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="426" y="486" width="28" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="454" y="486" width="28" height="24" fill="#7fb35f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="482" y="486" width="28" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="510" y="486" width="28" height="24" fill="#7fb35f" stroke="#4a7c3f" stroke-width="1.2"/>
+  </g>
+  <text x="600" y="502" font-size="11" font-weight="600" fill="#2f6b2f">4 int16 per beat -&gt; 2,048 beats (was 8,192) — a 4x cut</text>
+
+  <!-- out unchanged -->
+  <text x="30" y="540" font-size="12" font-weight="600" fill="#333333">out</text>
+  <text x="96" y="540" font-size="10.5" font-family="Consolas, monospace" fill="#8a6a26">AxSIZE 3'd2 (unchanged)</text>
+  <g>
+    <rect x="290" y="524" width="60" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="350" y="524" width="60" height="24" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+    <rect x="426" y="524" width="60" height="24" fill="#8fbf6f" stroke="#4a7c3f" stroke-width="1.2"/>
+    <rect x="486" y="524" width="60" height="24" fill="#f0f0f0" stroke="#aaaaaa" stroke-width="1.2"/>
+  </g>
+  <text x="600" y="540" font-size="11" fill="#8a6a26">8,192 beats — packing needs 2 outputs/cycle = 4 LSRAM reads; the 2-port LSRAM forces II&gt;1</text>
+
+  <rect x="290" y="562" width="760" height="30" rx="4" fill="#eef7ea" stroke="#4a7c3f" stroke-width="1.4"/>
+  <text x="304" y="582" font-size="11.5" fill="#234a1c"><tspan font-weight="600">22,529 beats/line</tspan> — 31% fewer — packing efficiency <tspan font-weight="600">43.7% -&gt; 63.6%</tspan></text>
+
+  <text x="30" y="618" font-size="11" fill="#777777">The gather loop, the lerp and every output value are untouched: this changes only how the same bytes are carried. Verified in the generated RTL, not inferred.</text>
+</svg>

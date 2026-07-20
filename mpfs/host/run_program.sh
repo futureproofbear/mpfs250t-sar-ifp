@@ -2,11 +2,12 @@
 # Reprogram eNVM (boot mode 1) with the self-test firmware via fpgenprog
 # (reliable Microchip programmer -- NOT the buggy OpenOCD HID). Needs FlashPro
 # connected + board powered.
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
-BM1="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/bm1"
-NEWELF="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+SC="$SAR_SOFTCONSOLE"
+BM1="$SAR_ROOT/mpfs/fpga/bm1"
+NEWELF="$SAR_ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
 export SC_INSTALL_DIR="$SC"
-export FPGENPROG="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin64/fpgenprog.exe"
+export FPGENPROG="$SAR_LIBERO/Libero_SoC/Designer/bin64/fpgenprog.exe"
 JAVA="$SC/eclipse/jre/bin/java.exe"
 [ -x "$JAVA" ] || JAVA="java"
 

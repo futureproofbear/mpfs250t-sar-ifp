@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_pipe_corr.gdb -- run the FULL SAR pipeline in FABRIC FFT mode (mode=1) on the current
 # SCALE_EXP+renorm build, verify the scaleexp fabric is actually programmed (captured sar_row_exp[]
 # must be nonzero/varying -- all-zero => gbxfix is live and the test is INVALID), then dump the full
@@ -6,10 +8,10 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-set logging file C:/Users/lkwangsi/Tools/openocd-new/pipe_corr_gdb.log
+set logging file ../../../scratch/pipe_corr_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -20,7 +22,7 @@ monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
 echo >>> loading small scene ...\n
-cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small
+cd ../jtag_stage_small
 source load.gdb
 set *(unsigned int*)0xB0059110 = 1
 set *(unsigned int*)0xB0059114 = @HR@
@@ -53,7 +55,7 @@ end
 printf "\n"
 call (void)flush_l2_cache(1)
 echo >>> dumping full OUT bright band [896:1152] (4 MB) -> out_bright.bin\n
-dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/out_bright.bin 0xA8E00000 0xA9200000
+dump binary memory ../jtag_stage_small/out_bright.bin 0xA8E00000 0xA9200000
 echo >>> dump done\n
 monitor resume
 monitor shutdown

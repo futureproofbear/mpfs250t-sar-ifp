@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_ffttest_unld.gdb -- verify the range-FFT now COMPLETES with the fft_unloader (HLS AXI
 # write master) replacing the deadlocking CoreAXI4DMAController. Arms sar_fft_hold (feeder +
 # CoreFFT + unloader over the whole frame, NO firmware timeout) and samples FEEDER-busy and
@@ -11,7 +13,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor mpfs.hart0_e51 arp_halt
 monitor mpfs.hart1_u54_1 arp_halt

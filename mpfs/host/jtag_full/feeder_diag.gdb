@@ -1,8 +1,10 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart1_u54_1 arp_halt
@@ -11,7 +13,7 @@ monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
 echo >>> load const re=1000 row to SIG 0x88000000\n
-restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/fft_test_row.bin binary 0x88000000
+restore ../jtag_stage_small/fft_test_row.bin binary 0x88000000
 call (void) flush_l2_cache(1)
 printf ">>> SIG[0]=0x%08x (expect 0x03e80000)\n", *(unsigned int*)0x88000000
 printf ">>> BEFORE arm: FEED status=0x%08x  UNLD status=0x%08x\n", *(unsigned int*)0x60004008, *(unsigned int*)0x60005008

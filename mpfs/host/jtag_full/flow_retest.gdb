@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_retest.gdb -- silicon re-test after the FFT gearbox fix.
 # Loads geometry+job (NOT the 93MB SIG -- we're testing stage-5 control flow; the FFT
 # completes regardless of data values), runs the full pipeline, reports the stage result.
@@ -6,7 +8,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 echo \n>>> attached; halting hart0 + U54_1\n
 monitor mpfs.hart0_e51 arp_halt

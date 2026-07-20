@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # load_deci1.gdb -- load the FULL (deci-1) Centerfield board input: geometry + 97 MB sig.bin in
 # 12 chunks with per-chunk progress (so a stall/wedge is visible), then flush L2->DDR. Leaves the
 # firmware running for a later attach (run + dump). ~3 h over the ~84 kbit/s FlashPro6 link.
@@ -5,10 +7,10 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-set logging file C:/Users/lkwangsi/Tools/openocd-new/load_deci1_gdb.log
+set logging file ../../../scratch/load_deci1_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -18,7 +20,7 @@ echo \n>>> booting firmware (for flush/CRC) ...\n
 monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
-cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_deci1
+cd ../jtag_stage_deci1
 echo >>> loading geometry tables ...\n
 restore f0.bin binary 0xB0100000
 restore df.bin binary 0xB0108000

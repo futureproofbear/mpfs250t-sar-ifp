@@ -5,8 +5,9 @@
 # does NOT cooperate with JTAG halt -> openocd "Target not halted" / gdb rejected (proven
 # 2026-07-08, needed a power-cycle). For the iso-test, program SAR_TOP_corefft.job FABRIC-ONLY
 # and re-flash the APP via mpfs/host/run_program.sh (boot mode 1). See runbook §8.
-set PROJDIR {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_corefft_vm}
-set ENVMCFG {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/hss/ENVM.cfg}
+source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths (config.yaml)
+set PROJDIR "$SAR_FPGA/libero_corefft_vm"
+set ENVMCFG "$SAR_FPGA/hss/ENVM.cfg"
 open_project -file "$PROJDIR/corefft_vm.prjx"
 project_settings -abort_flow_on_sdc_errors 0
 catch { project_settings -abort_flow_on_pdc_errors 0 }

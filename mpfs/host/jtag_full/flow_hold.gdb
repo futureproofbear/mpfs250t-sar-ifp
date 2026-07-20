@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_hold.gdb -- arm the FFT feeder and HOLD the stall live in fabric for SmartDebug.
 # Calls sar_fft_hold() (arms DMA + starts feeder from BUF_SCRATCH, returns immediately),
 # then detaches. The feeder runs/stalls autonomously in fabric while OpenOCD is killed
@@ -6,7 +8,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 echo \n>>> attached; halting hart0 + U54_1\n
 target extended-remote localhost:3333
 monitor mpfs.hart0_e51 arp_halt

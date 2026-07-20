@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_pipe_trace.gdb -- run the full pipeline in a chosen FFT mode, then COHERENTLY dump a
 # bright-band chunk (256 KB = 64k complex) from each stage buffer so the host can compare the
 # per-stage dynamic range (peak |value|) of the CPU path vs the fabric path and localize where
@@ -10,10 +12,10 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-set logging file C:/Users/lkwangsi/Tools/openocd-new/pipe_trace_gdb.log
+set logging file ../../../scratch/pipe_trace_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -24,7 +26,7 @@ monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
 echo >>> loading small scene ...\n
-cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small
+cd ../jtag_stage_small
 source load.gdb
 set *(unsigned int*)0xB0059110 = @MODE@
 set *(unsigned int*)0xB0059114 = @HR@

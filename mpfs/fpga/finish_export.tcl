@@ -1,6 +1,7 @@
 # finish_export.tcl -- the ~1hr build succeeded (timing 0/0, prog file generated) but
 # export_prog_job failed only because the export dir didn't exist. Just re-export.
-set PROJDIR {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_corefft_vm}
+source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths (config.yaml)
+set PROJDIR "$SAR_FPGA/libero_corefft_vm"
 open_project -file "$PROJDIR/corefft_vm.prjx"
 file mkdir "$PROJDIR/export"
 puts "@@@ EXPORTING"

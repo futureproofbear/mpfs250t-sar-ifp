@@ -178,3 +178,6 @@ docs/fpga/SAR_ARCHITECTURE_REPORT.pdf
 
 # build console logs (generated)
 *.console.txt
+
+# machine-specific toolchain paths (never commit)
+config.local.yaml

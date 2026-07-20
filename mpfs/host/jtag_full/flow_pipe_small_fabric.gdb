@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_pipe_small_fabric.gdb -- full sar_form_image on the small scene, with the range/azimuth
 # FFT routed through the FABRIC CoreFFT chain (fft_feeder->gearbox->CoreFFT->fft_unloader)
 # instead of the CPU. Identical to flow_pipe_small.gdb except it sets the FFT-mode word
@@ -7,10 +9,10 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-set logging file C:/Users/lkwangsi/Tools/openocd-new/pipe_small_fabric_gdb.log
+set logging file ../../../scratch/pipe_small_fabric_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -21,7 +23,7 @@ monitor resume
 shell C:/ProgramData/Anaconda3-2025.12-1/python.exe -c "import time;time.sleep(30)"
 monitor mpfs.hart1_u54_1 arp_halt
 echo >>> loading small scene (sig 1.5MB + geometry + job) over JTAG ...\n
-cd C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small
+cd ../jtag_stage_small
 source load.gdb
 printf ">>> pre-PIPE mbx.cmd=0x%08x (0=mailbox-loop-ready)\n", *(unsigned int*)0xB0058000
 echo >>> SET FFT MODE = 1 (FABRIC CoreFFT chain)\n

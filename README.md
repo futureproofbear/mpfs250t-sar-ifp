@@ -50,6 +50,34 @@ sarProcessor/
 Paths are anchored to the project root, so scripts run the same from any working
 directory.
 
+## Configuration — paths are relative; only external tools are pinned
+
+Nothing in this repo hard-codes a user or a checkout location. Every script derives the repo
+root from its own location, so you can clone or move it anywhere:
+
+| Language | How the root is found |
+|---|---|
+| shell (`.sh`) | `source .../mpfs/host/lib/sar_env.sh` → `$SAR_ROOT`, `$SAR_FPGA`, `$SAR_SCRATCH` |
+| Libero (`.tcl`) | `source .../mpfs/fpga/lib/sar_env.tcl` → `$SAR_ROOT`, `$SAR_FPGA` |
+| gdb (`.gdb`) | paths are **relative to `mpfs/host/jtag_full`** (the `run_*.sh` drivers `cd` there) |
+| openocd (`.cfg`) | `$env(SAR_ROOT)` (inherited from the calling script) |
+| Python | repo root derived from `__file__` |
+
+Only **external tool installs** need pinning, in [`config.yaml`](config.yaml) under `toolchain:`
+(Libero, SoftConsole, openocd, Python, vault, license) plus `board:` (UART port, scratch dir).
+
+**Set your machine's paths in `config.local.yaml`** — it is git-ignored and overrides
+`config.yaml` key-by-key, so your local paths are never committed:
+
+```yaml
+# config.local.yaml
+toolchain:
+  openocd:      C:/Users/me/Tools/openocd-new/xpack-openocd-0.12.0-4
+  license_file: C:/Users/me/polarfire-soc/License.dat
+```
+
+Scripts fail fast with a clear message if a tool path is missing or still a `<you>` placeholder.
+
 ## Run — laptop reference
 
 ```bash

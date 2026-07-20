@@ -11,7 +11,7 @@ Console Mode = TCL_BEGIN: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examp
 
 Fetching device info...
 
-Creating new Libero project in C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/hls_corner_turn/hls_output/synthesis/hls_corner_turn/
+Creating new Libero project in <repo-root>/mpfs/fpga/hls_corner_turn/hls_output/synthesis/hls_corner_turn/
 
 Info: This version of Libero supports only the enhanced constraint flow.
 The hls_corner_turn project was created.
@@ -25,7 +25,7 @@ Linking Verilog files:
 
 Building design hierarchy...
 
-Reading file 'C:\Users\lkwangsi\Documents\github\mpfs250t-sar-ifp\mpfs\fpga\hls_corner_turn\hls_output\rtl\hls_corner_turn_corner_turn.v'.
+Reading file '<repo-root>\mpfs\fpga\hls_corner_turn\hls_output\rtl\hls_corner_turn_corner_turn.v'.
 Configuring synthesis tool...
 
 Saving and closing the project...
@@ -36,7 +36,7 @@ TCL_END: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\setup_proj_li
 The Execute Script command succeeded.
 Console Mode = TCL_BEGIN: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\synthesize_libero.tcl
 
-Reading file 'C:\Users\lkwangsi\Documents\github\mpfs250t-sar-ifp\mpfs\fpga\hls_corner_turn\hls_output\rtl\hls_corner_turn_corner_turn.v'.
+Reading file '<repo-root>\mpfs\fpga\hls_corner_turn\hls_output\rtl\hls_corner_turn_corner_turn.v'.
 The hls_corner_turn project was opened.
 INFO: The option "Abort flow if errors are found in SDC" is turned ON in Project Settings> Design flow page. The Synthesis tool will fail if errors are found in associated SDC files. Please uncheck the option to ignore the errors and continue running the tool
 
@@ -85,7 +85,7 @@ Info: [127205382]:  CMPPF_303: Deleted 0 global instances.
 Info: [127205590]:  BLK014: Adding interface buffers. Port processed: 474, Added buffers: 427.
 
 Synthesis completed.
-Info: Successfully wrote HDL file 'C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/hls_corner_turn/hls_output/synthesis/hls_corner_turn/synthesis/corner_turn_top.v'
+Info: Successfully wrote HDL file '<repo-root>/mpfs/fpga/hls_corner_turn/hls_output/synthesis/hls_corner_turn/synthesis/corner_turn_top.v'
 
 TCL_END: C:\Microchip\Libero_SoC_2025.2\SmartHLS\SmartHLS\examples\synthesize_libero.tcl
 

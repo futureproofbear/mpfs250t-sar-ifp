@@ -2,10 +2,11 @@
 # run_hlsfft_build.sh -- chained board-free Libero build for the HLS-FFT variant.
 # Stage 1 create project (+assembly) -> Stage 2 stage constraints -> Stage 3 synth/PnR/timing/bitstream.
 # Each stage gates on its DONE marker in the log; stops on first failure. NO PROGRAMDEVICE (board-free).
-FPGA="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/host/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+FPGA="$SAR_ROOT/mpfs/fpga"
 cd "$FPGA" || exit 2
-LIBERO="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
-export LM_LICENSE_FILE='C:\Users\lkwangsi\Documents\github\polarfire-soc\License.dat'
+LIBERO="$SAR_LIBERO/Libero_SoC/Designer/bin/libero.exe"
+export LM_LICENSE_FILE='$SAR_LICENSE'
 run() { "$LIBERO" "SCRIPT:$1" "LOGFILE:$2" >/dev/null 2>&1; }
 
 echo "[$(date +%H:%M:%S)] STAGE 0/3: HLS pre-build gate (anti-pattern + II report firebreak)"

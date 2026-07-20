@@ -3,10 +3,11 @@
 # regenerate, synth/P&R/bitstream, export a programming job -- NO GUI.
 # Verifies the regenerated wrapper actually dropped the ID truncation.
 set -u
-LIB="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
-ROOT="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+LIB="$SAR_LIBERO/Libero_SoC/Designer/bin/libero.exe"
+ROOT="$SAR_ROOT/mpfs/fpga"
 TCL="$ROOT/build_dataplane_fix.tcl"
-LOG="/c/Users/lkwangsi/Tools/openocd-new/build_fix.log"
+LOG="$SAR_SCRATCH/build_fix.log"
 SARTOP="$ROOT/libero_sar/component/work/SAR_TOP/SAR_TOP.v"
 JOB="$ROOT/libero_sar/designer/SAR_TOP/export/SAR_TOP_idfix.job"
 

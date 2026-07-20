@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # GDB pre-loads the ELF, then a synchronous `shell` waiter blocks until OpenOCD's
 # telnet port (4444) binds, and GDB attaches to 3333 the instant it returns --
 # zero connect delay, so the FlashPro HID never idles into a crash.
@@ -7,11 +9,11 @@ set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
 
-set logging file C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/gdb_session.log
+set logging file gdb_session.log
 set logging overwrite on
 set logging redirect off
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 echo \n>>> openocd up; attaching now\n
 
 target extended-remote localhost:3333

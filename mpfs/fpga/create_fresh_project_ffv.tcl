@@ -9,7 +9,8 @@
 ## Output project: mpfs/fpga/libero_fresh  (the corrupt libero_sar is left untouched as fallback).
 ## Then: copy constraints in + run build_full_prog.tcl (pointed at libero_fresh).
 
-set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
+source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths (config.yaml)
+set here "$SAR_FPGA"
 set proj "$here/libero_ffv"
 file delete -force $proj
 

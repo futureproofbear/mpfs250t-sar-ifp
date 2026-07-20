@@ -6,7 +6,7 @@ rem  PREREQUISITE: program the FPGA first (FlashPro Express -> SAR_TOP.job, ES).
 rem ============================================================================
 setlocal
 set "SC=C:\Microchip\SoftConsole-v2022.2-RISC-V-747"
-set "ELF=C:\Users\lkwangsi\Documents\github\mpfs250t-sar-ifp\mpfs\fpga\libero_sar\softconsole\mpfs-hal-ddr-demo\Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release\mpfs-hal-ddr-demo.elf"
+set "ELF=%SAR_ROOT%\mpfs\fpga\libero_sar\softconsole\mpfs-hal-ddr-demo\Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release\mpfs-hal-ddr-demo.elf"
 set "JTAG=%~dp0jtag_full"
 
 if not exist "%ELF%" ( echo ERROR: .elf not found: %ELF% & exit /b 1 )

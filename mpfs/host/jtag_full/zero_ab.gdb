@@ -1,10 +1,12 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # zero_ab.gdb -- is an ALL-ZERO transform the trigger? Fresh single transform, feeder reads SCRATCH
 # row0 preloaded with zeros (A) vs ones (B), unloader -> SIG. A stall + B complete => all-zero wedges the chain.
 set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 define run_one
   monitor reset halt

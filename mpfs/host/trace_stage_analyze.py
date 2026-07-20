@@ -4,7 +4,9 @@ the magnitude saturates. SCRATCH = range-FFT/corner-turn out (complex), SIG = az
 detect sqrt(I^2+Q^2) overflows uint16 -> the fix is more pre-detect right-shift (headroom)."""
 import numpy as np, os
 
-D = "C:/Users/lkwangsi/AppData/Local/Temp/claude/c--Users-lkwangsi-Documents-github-mpfs250t-sar-ifp/57187086-2926-4c2b-a916-6ce2d6aca80a/scratchpad/trace_fab/"
+# scratch dir: $SAR_SCRATCH if the shell env set it, else <repo-root>/scratch
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+D = os.environ.get("SAR_SCRATCH", os.path.join(_root, "scratch")) + "/trace_fab/"
 
 def cplx(path):
     raw = np.fromfile(path, dtype=np.uint32)

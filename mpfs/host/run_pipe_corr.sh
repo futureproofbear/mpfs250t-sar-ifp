@@ -3,13 +3,14 @@
 # current SCALE_EXP+renorm build. Race-the-window openocd+gdb launch; NO taskkill /F (JTAG hygiene).
 # Usage: ./run_pipe_corr.sh [HEADROOM]   (default 0). Then: python correlate_cpufft.py
 set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
 HR="${1:-0}"
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
-ELF="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
-LOG="/c/Users/lkwangsi/Tools/openocd-new/pipe_corr.log"
-cd /c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full
+ELF="$SAR_ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+LOG="$SAR_SCRATCH/pipe_corr.log"
+cd "$SAR_ROOT/mpfs/host/jtag_full"
 if tasklist 2>/dev/null | grep -qi openocd.exe; then
   echo ">>> WARNING: openocd.exe already running (stale). Close it cleanly; NOT force-killing." >&2; exit 1
 fi

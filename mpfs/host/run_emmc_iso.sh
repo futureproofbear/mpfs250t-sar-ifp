@@ -6,12 +6,13 @@
 # programmed; -DSAR_EMMC_ENABLE firmware flashed (run_program.sh). Attach-in-place --
 # do NOT reset (this ES silicon won't re-boot the U54 after a JTAG reset).
 set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GDBSCRIPT="$HERE/jtag_full/emmc_selftest_iso.gdb"
 GDBLOG="$HERE/jtag_full/emmc_selftest_iso.log"
 OOLOG="${GDBLOG%.log}.openocd.log"
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
 ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
 
@@ -25,6 +26,7 @@ fi
   -f board/microchip_riscv_efp6.cfg -l "$OOLOG" >/dev/null 2>&1 &
 OO_PID=$!
 sleep 14
+cd "$HERE/jtag_full"   # .gdb paths are relative to jtag_full
 "$GDB" -batch "$ELF" -x "$GDBSCRIPT" </dev/null > "$GDBLOG" 2>&1
 echo "GDB_RC=$?" >> "$GDBLOG"
 # graceful escape if gdb died before 'monitor shutdown' -- telnet shutdown, never taskkill

@@ -11,9 +11,10 @@
 #   bash run_build_safe.sh                       # lint current generated netlist, then build+program
 #   bash run_build_safe.sh ../fpga/build_addrfix.tcl   # run a prep/edit+generate tcl first, then gate+build
 set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"          # mpfs/host
 FPGA="$(cd "$HERE/../fpga" && pwd)"                            # mpfs/fpga
-LIB="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
+LIB="$SAR_LIBERO/Libero_SoC/Designer/bin/libero.exe"
 BUILD_TCL="$FPGA/build_dmafix.tcl"        # open -> build_design_hierarchy -> synth/P&R/bitstream/export/PROGRAMDEVICE
 PREP="${1:-}"
 [ -x "$LIB" ] || { echo "libero.exe not found: $LIB"; exit 2; }

@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # scle_value.gdb -- VALUE-level fabric range-FFT + SCALE_EXP-capture test. Triggers the 'SCLE'
 # mailbox cmd (firmware fills SIG with 2 DC rows 16:1 on-chip, runs fabric fft_pass SIG->SCRATCH),
 # reads sar_row_exp[0..3] (model predicts 11,7,0,0), and dumps SCRATCH rows 0..2 for a bit-exact
@@ -6,10 +8,10 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-set logging file C:/Users/lkwangsi/Tools/openocd-new/scle_value_gdb.log
+set logging file ../../../scratch/scle_value_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -47,7 +49,7 @@ if $done == 1
   call (void)flush_l2_cache(1)
   printf ">>> SCRATCH row0 bin0 = 0x%08x   row1 bin0 = 0x%08x   (re<<16|im)\n", *(unsigned int*)0x98000000, *(unsigned int*)0x98008000
   echo >>> dumping SCRATCH rows 0..2 (3*32KB) -> scratch_scle.bin\n
-  dump binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/scratch_scle.bin 0x98000000 (0x98000000 + 0x18000)
+  dump binary memory ../jtag_stage_small/scratch_scle.bin 0x98000000 (0x98000000 + 0x18000)
   echo >>> dump done\n
 end
 if $done == 0

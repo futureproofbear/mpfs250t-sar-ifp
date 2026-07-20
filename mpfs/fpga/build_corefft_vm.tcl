@@ -5,9 +5,10 @@
 #
 # Flip STOP_AFTER_SETUP to 0 for the full ~1hr gated build. =1 validates the fragile
 # project-setup API fast (seconds-minutes) BEFORE committing to P&R.
+source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths (config.yaml)
 set STOP_AFTER_SETUP 0
 
-set ROOT    {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
+set ROOT    "$SAR_FPGA"
 set PROJDIR "$ROOT/libero_corefft_vm"
 set NL      "$ROOT/libero_sar/synthesis/SAR_TOP_NL.vm"
 set IOPDC   "$ROOT/libero_sar/constraint/io/sar_io.pdc"

@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_ffttest.gdb -- isolate whether the range-FFT now WORKS (just slow) vs still hung.
 # Arms sar_fft_hold (feeder+FFT+DMA over the whole frame, NO firmware timeout), then
 # samples the DMA completion + feeder-busy over ~60s. If the fix works, the DMA should
@@ -6,7 +8,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor mpfs.hart0_e51 arp_halt
 monitor mpfs.hart1_u54_1 arp_halt

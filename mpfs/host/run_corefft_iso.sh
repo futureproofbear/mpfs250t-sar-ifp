@@ -9,19 +9,20 @@
 # The firmware ELF is used only for init + the flush_l2_cache symbol; it must be the
 # CoreFFT-build firmware (feeder@0x60004000 / unloader@0x60005000 -- sar_kernels.h).
 set -u
-PY="C:/ProgramData/Anaconda3-2025.12-1/python.exe"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+PY="$SAR_PYTHON"
 # Windows-format ROOT: python + the Windows-native gdb (restore/dump/ELF) need C:/ paths,
 # NOT MSYS /c/ (which they resolve inconsistently -> "No such file"). git-bash handles C:/ too.
-ROOT="C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp"
+ROOT="$SAR_ROOT"
 HOST="$ROOT/mpfs/host"
 GDBDIR="$HOST/jtag_full"
 VEC="$HOST/corefft_vectors"
 CASES="${CASES:-impulse impulse_k dc tone twotone twotone_hidr dc_smalltone random}"
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
 ELF="$ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
-LOG="/c/Users/lkwangsi/Tools/openocd-new/corefft_iso.log"
+LOG="$SAR_SCRATCH/corefft_iso.log"
 
 # 1) bit-accurate BFP golden + input vectors (8192-pt)
 "$PY" "$HOST/fft_golden.py" gen --n 8192 --out "$VEC" >/dev/null

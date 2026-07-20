@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # dbg_fft.gdb -- read the range-FFT timeout diagnostic left by fft_pass @0xB0059200 and the
 # live feeder/unloader busy state, after the pipeline stalled at range-FFT. No reset (preserve
 # the stalled fabric state). dbg[0]=feeder busy, [1]=unloader busy, [2]=feeder nbeats,
@@ -6,7 +8,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor mpfs.hart1_u54_1 arp_halt
 printf ">>> FFT timeout snapshot @0xB0059200:\n"

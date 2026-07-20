@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # flow_pipe_deci1.gdb -- run the pipeline on the ALREADY-LOADED deci-1 Centerfield (NO scene reload;
 # the 97 MB sig + geometry are in DDR). reset+boot gives a clean firmware cache (attach-only warm cache
 # doesn't service the mailbox). Sanity-check the sig survived the reboot, run PIPE (fabric FFT + CPU
@@ -6,10 +8,10 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-set logging file C:/Users/lkwangsi/Tools/openocd-new/pipe_deci1_gdb.log
+set logging file ../../../scratch/pipe_deci1_gdb.log
 set logging overwrite on
 set logging on
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -46,13 +48,13 @@ if $done == 1
   printf ">>> per-stage MTIME us: resample=%lu window=%lu rangeFFT=%lu cornerturn=%lu azFFT=%lu detect=%lu\n", sar_stage_ts[1]-sar_stage_ts[0], sar_stage_ts[2]-sar_stage_ts[1], sar_stage_ts[3]-sar_stage_ts[2], sar_stage_ts[4]-sar_stage_ts[3], sar_stage_ts[5]-sar_stage_ts[4], sar_stage_ts[6]-sar_stage_ts[5]
   call (void)flush_l2_cache(1)
   echo >>> dumping 1/4 OUT (rows 0:2048, 32 MB) in 4 banks ...\n
-  dump   binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_deci1/out_q.bin 0xA8000000 0xA8800000
+  dump   binary memory ../jtag_stage_deci1/out_q.bin 0xA8000000 0xA8800000
   echo >>>  bank 1/4 done (8 MB)\n
-  append binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_deci1/out_q.bin 0xA8800000 0xA9000000
+  append binary memory ../jtag_stage_deci1/out_q.bin 0xA8800000 0xA9000000
   echo >>>  bank 2/4 done (16 MB)\n
-  append binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_deci1/out_q.bin 0xA9000000 0xA9800000
+  append binary memory ../jtag_stage_deci1/out_q.bin 0xA9000000 0xA9800000
   echo >>>  bank 3/4 done (24 MB)\n
-  append binary memory C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_deci1/out_q.bin 0xA9800000 0xAA000000
+  append binary memory ../jtag_stage_deci1/out_q.bin 0xA9800000 0xAA000000
   echo >>>  bank 4/4 done (32 MB) -- DUMP COMPLETE\n
 end
 if $done == 0

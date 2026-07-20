@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Short JTAG read of the autonomous self-test results (g_sar_done / g_sar_status).
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-CFG="C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/efp6_read.cfg"
-LOG="/c/Users/lkwangsi/Tools/openocd-new/read.log"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+NEW="$SAR_OPENOCD"
+CFG="$SAR_ROOT/mpfs/fpga/efp6_read.cfg"
+LOG="$SAR_SCRATCH/read.log"
 cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
 : > "$LOG"
 "$NEW/bin/openocd.exe" -s "$NEW/openocd/scripts" -f "$CFG" -l "$LOG" > "$LOG.stdout" 2>&1

@@ -4,7 +4,8 @@
 ## QuestaSim by corefft_stream64_lossck_tb.v). The gearbox is a LINKED HDL source (component
 ## caches only the bif .xml, and the fix did NOT change ports/bifs), so re-synthesis re-reads
 ## the edited .v. Gated on setup+hold TIMING MET. NO PROGRAMDEVICE (board off / separate step).
-set here {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
+source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths (config.yaml)
+set here "$SAR_FPGA"
 set pd "$here/libero_ffv"
 open_project -file "$pd/sar_accel.prjx"
 

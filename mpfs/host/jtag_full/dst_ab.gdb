@@ -1,3 +1,5 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 # dst_ab.gdb -- isolate whether the range-FFT stall is the DESTINATION ADDRESS (unloader writing
 # SIG 0x88M) or the PRIOR-KERNEL STATE. Two FRESH single-transform FFTs driven directly through the
 # feeder/unloader registers (no resample/window before them):
@@ -10,7 +12,7 @@ set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 
 define run_one

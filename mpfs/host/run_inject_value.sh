@@ -2,12 +2,13 @@
 # SCLE value-test: fabric range-FFT on the on-chip 2-DC-row known input, dump SCRATCH + sar_row_exp
 # for a bit-exact value diff vs fabric_scale_value.py. Race-the-window launch; NO taskkill /F.
 set -u
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
-ELF="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
-LOG="/c/Users/lkwangsi/Tools/openocd-new/inject_value.log"
-cd /c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full
+ELF="$SAR_ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+LOG="$SAR_SCRATCH/inject_value.log"
+cd "$SAR_ROOT/mpfs/host/jtag_full"
 if tasklist 2>/dev/null | grep -qi openocd.exe; then
   echo ">>> WARNING: openocd.exe already running (stale). Close it cleanly; NOT force-killing." >&2; exit 1
 fi

@@ -2,7 +2,9 @@ import numpy as np, matplotlib
 matplotlib.use('Agg'); import matplotlib.pyplot as plt
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
-base = r"C:\Users\lkwangsi\Documents\github\mpfs250t-sar-ifp"
+import os
+# repo root, derived from this file's location (mpfs/host/show_cf.py -> ../..)
+base = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 det = np.asarray(Image.open(base + r"\output\2023-10-10-16-57-44_UMBRA-04_detected.tif")).astype(np.float64)
 gec = np.asarray(Image.open(base + r"\data\sar-data\tasks\Centerfield, Utah\c0dbd830-e863-42c5-97d0-2cfd291bcb2a\2023-10-10-16-57-44_UMBRA-04\2023-10-10-16-57-44_UMBRA-04_GEC.tif")).astype(np.float64)
 print('our detected:', det.shape, 'range', det.min(), det.max())

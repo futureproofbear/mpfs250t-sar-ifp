@@ -1,8 +1,10 @@
+# NOTE: paths below are RELATIVE to mpfs/host/jtag_full -- run gdb with that as the
+# working directory (the run_*.sh drivers cd there for you).
 set pagination off
 set confirm off
 set architecture riscv:rv64
 set mem inaccessible-by-default off
-shell C:/ProgramData/Anaconda3-2025.12-1/python.exe C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_full/wait_port.py
+shell C:/ProgramData/Anaconda3-2025.12-1/python.exe wait_port.py
 target extended-remote localhost:3333
 monitor reset halt
 monitor mpfs.hart0_e51 arp_halt
@@ -15,10 +17,10 @@ monitor mpfs.hart1_u54_1 arp_halt
 thread 2
 
 echo >>> loading const-1000 source row -> SIG 0x88000000 ...\n
-restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/fft_test_row.bin binary 0x88000000
+restore ../jtag_stage_small/fft_test_row.bin binary 0x88000000
 echo >>> loading IDENTITY idx (i) -> COEF_IDX 0xB0148000, wq=0 -> COEF_WQ 0xB0158000 ...\n
-restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/idx_identity.bin binary 0xB0148000
-restore C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host/jtag_stage_small/wq_zero.bin binary 0xB0158000
+restore ../jtag_stage_small/idx_identity.bin binary 0xB0148000
+restore ../jtag_stage_small/wq_zero.bin binary 0xB0158000
 echo >>> pre-clear SCRATCH[0..3]:\n
 set *(unsigned int*)0x98000000 = 0
 set *(unsigned int*)0x98000004 = 0

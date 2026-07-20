@@ -3,14 +3,15 @@
 # FlashPro Express program the new fabric job. Then power-cycle + run_m2.sh to verify.
 # FlashPro must be connected + board powered (program phase needs it).
 set -u
-LIB="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/libero.exe"
-FPX="/c/Microchip/Libero_SoC_2025.2/Libero_SoC/Designer/bin/FPExpress.exe"
-ROOT="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga"
-HOST="/c/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/host"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+LIB="$SAR_LIBERO/Libero_SoC/Designer/bin/libero.exe"
+FPX="$SAR_LIBERO/Libero_SoC/Designer/bin/FPExpress.exe"
+ROOT="$SAR_ROOT/mpfs/fpga"
+HOST="$SAR_ROOT/mpfs/host"
 SARTOP="$ROOT/libero_sar/component/work/SAR_TOP/SAR_TOP.v"
 JOB="$ROOT/libero_sar/export/SAR_TOP_idfix.job"
-BLOG="/c/Users/lkwangsi/Tools/openocd-new/build_fix.log"
-PLOG="/c/Users/lkwangsi/Tools/openocd-new/program_fabric.log"
+BLOG="$SAR_SCRATCH/build_fix.log"
+PLOG="$SAR_SCRATCH/program_fabric.log"
 win() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
 
 echo "===== PHASE 1/3: headless Libero build (reconfig + synth + P&R + bitstream, ~15-40 min) ====="

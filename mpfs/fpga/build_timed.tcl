@@ -10,7 +10,8 @@
 #
 # Run:  <libero>/libero SCRIPT:build_timed.tcl   (or `script build_timed.tcl` in the Tcl console)
 
-set ROOT {C:/Users/lkwangsi/Documents/github/mpfs250t-sar-ifp/mpfs/fpga}
+source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths (config.yaml)
+set ROOT "$SAR_FPGA"
 set PROJ "$ROOT/libero_sar/sar_accel.prjx"
 open_project -file $PROJ
 build_design_hierarchy

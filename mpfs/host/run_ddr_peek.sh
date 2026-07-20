@@ -4,16 +4,17 @@
 # to the packed image's superblock magic 0x53415249 ('SARI'). Attach-in-place, no
 # reset, telnet-4444 shutdown, never taskkill.  Usage: run_ddr_peek.sh [ADDR]
 set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
 ADDR="${1:-0x88000000}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GDBSCRIPT="$HERE/jtag_full/ddr_peek.gen.gdb"
 GDBLOG="$HERE/jtag_full/ddr_peek.log"
 OOLOG="${GDBLOG%.log}.openocd.log"
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
 ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
-PY="C:/ProgramData/Anaconda3-2025.12-1/python.exe"
+PY="$SAR_PYTHON"
 
 cat > "$GDBSCRIPT" <<GDBEOF
 set pagination off

@@ -9,6 +9,24 @@ key: sar-data/tasks/ship_detection_testdata/6e495891-3cdd-4856-9b6f-b4f512a95f36
 data_root: data        # bucket mirror: data/<key...>  (download target / cache)
 output_dir: output      # generated products
 
+# --- toolchain: EXTERNAL installs (edit these for YOUR machine) -----------------
+# Everything INSIDE the repo is resolved relative to the project root automatically
+# (each script derives it from its own location) -- only these outside-the-repo
+# installs need pinning. Windows-style forward-slash paths; the shell loader converts
+# to /c/... form as needed. Loaded by mpfs/host/lib/sar_env.sh and mpfs/fpga/lib/sar_env.tcl.
+toolchain:
+  libero:       C:/Microchip/Libero_SoC_2025.2
+  softconsole:  C:/Microchip/SoftConsole-v2022.2-RISC-V-747
+  openocd:      C:/Users/<you>/Tools/openocd-new/xpack-openocd-0.12.0-4
+  python:       C:/ProgramData/Anaconda3-2025.12-1/python.exe
+  vault:        C:/Microchip/Common/vault
+  license_file: C:/Users/<you>/Documents/github/polarfire-soc/License.dat
+
+# --- board / probe (edit if your setup differs) ---
+board:
+  uart_port:    COM4      # MMUART console (115200 8N1)
+  scratch_dir:  scratch   # repo-relative working dir for JTAG dumps/logs
+
 # --- processing ---
 mode: pfa               # pfa | quicklook
 decimate_pulse: 1       # >1 -> coarser azimuth resolution, faster / less RAM

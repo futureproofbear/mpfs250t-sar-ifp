@@ -8,17 +8,18 @@
 #   CMD/BASE/LEN : mailbox cmd + args (hex ok). REC_ADDR : result record base (16 words dumped).
 #   DUMP_*       : optional -- `dump binary memory` of [DUMP_ADDR, +DUMP_BYTES) to DUMP_FILE.
 set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
 CMD="$1"; BASE="$2"; LEN="$3"; SLEEP_MS="$4"; REC="$5"
 DADDR="${6:-}"; DBYTES="${7:-}"; DFILE="${8:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GDBSCRIPT="$HERE/jtag_full/m3_iso.gen.gdb"
 GDBLOG="$HERE/jtag_full/m3_iso.log"
 OOLOG="${GDBLOG%.log}.openocd.log"
-NEW="/c/Users/lkwangsi/Tools/openocd-new/xpack-openocd-0.12.0-4"
-SC="/c/Microchip/SoftConsole-v2022.2-RISC-V-747"
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
 ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
-PY="C:/ProgramData/Anaconda3-2025.12-1/python.exe"
+PY="$SAR_PYTHON"
 
 DUMPCMD=""
 if [ -n "$DADDR" ]; then

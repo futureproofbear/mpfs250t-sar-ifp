@@ -145,11 +145,27 @@ Implied work per line (ideal cycles, current kernel = 8193 in-stage + 8192 idx +
 | Bound the gather to `[lo,hi]`, zero the tail | ~3,300 | fact 2, ~40% of iterations |
 | `max_outstanding_reads/writes` on the initiators | part of the 3.1× gap | latency, not bandwidth (39 MB/s peak) |
 
-On that last row: the kernel's four `axi_initiator` pragmas currently set only `num_elements` and
-`max_burst_len`. The SmartHLS pragma manual documents `max_outstanding_reads(<int>)` and
-`max_outstanding_writes(<int>)` on the same pragma, and neither is used — so the kernel is running at
-whatever the default outstanding depth is while being demonstrably latency-bound. This is a one-line
-change per argument with no restructuring, and it should be tried FIRST, before any of the rows above.
+> **`max_outstanding` was tried on silicon 2026-07-20 and gave ZERO gain. Do not retry it.**
+> The kernel's four `axi_initiator` pragmas set only `num_elements` and `max_burst_len`; adding
+> `max_outstanding_reads(8)` / `max_outstanding_writes(2)` (SmartHLS's own values, from its
+> `axi_initiator_optimization` example) provably reached hardware — the regenerated RTL shows the AXI
+> read-address FIFO going from **depth 1 to 8** and `r_data` 256 → 2048, so the kernel really had been
+> limited to one read burst in flight. It made no difference: resample 29.25 s against a 29.19/29.20 s
+> baseline, pipeline 88.12 s against 88.04/88.11 s, image bit-identical (ROI crc `0xd596c9eb`).
+> Cost +5 LSRAM blocks (15.02 → 15.64%), timing still MET (setup +6.545 ns, hold +0.049 ns).
+>
+> **What that rules out.** Two AXI request-management knobs have now been falsified by measurement:
+> `max_burst_len` 64→256 (2026-07-12, zero gain) and outstanding depth 1→8 (2026-07-20, zero gain).
+> The ~3.1× gap between the kernel's silicon time and its scheduled cycle count is therefore NOT in
+> AXI request scheduling — it is internal to the kernel's dataflow. That promotes the streaming
+> restructure (deleting the `buf[RS_IN]` staging that monotonicity proves unnecessary) from
+> "nice alongside AXI tuning" to the actual lever.
+>
+> **Method lesson.** Both attempts inferred a bottleneck from arithmetic (measured ÷ ideal, plus a
+> bandwidth estimate) and spent a ~40 min build to test it. The project already owns the right
+> instrument: the Class-B ledger's `axi_ii_lie` metric derives EFFECTIVE II from an iso-test's
+> busy-cycles ÷ elements. Scheduled II=1 against ~3.1× on silicon is exactly that phenomenon.
+> Measure effective II and localise the stall BEFORE the next resample bitstream.
 
 Correction to earlier guidance in this document's history: with the **pointer-based** `axi_initiator`
 pragma there is no AXI-ID, bundle or port-separation option — the pragma manual exposes none — which

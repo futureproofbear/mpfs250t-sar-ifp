@@ -6,3 +6,4 @@
 {"build": "resample", "metric": "flush_frac", "note": "per-chunk L2 flush ~2% of latency, not the bottleneck", "phenomenon": "l2_coherency", "source": "profiling", "ts": "2026-07-12", "unit": "frac", "value": 0.02}
 {"build": "k_fft", "metric": "observation", "note": "golden TB ran one transform, never exercised the re-arm path", "phenomenon": "corefft_rearm", "source": "golden_tb_review", "ts": "2026-07-12"}
 {"build": "mpfs250t_es", "metric": "observation", "note": "ER0219; see skill", "phenomenon": "es_errata", "source": "mpfs-platform-gotchas", "ts": "2026-07-12"}
+{"build": "resample-max-outstanding", "metric": "resample_seconds", "phenomenon": "ddr_latency", "source": "PIPE 2026-07-20; baseline 29.19/29.20 s with ar_addr FIFO depth 1; depth 8 gave no change", "ts": "2026-07-20", "unit": "s", "value": 29.25}

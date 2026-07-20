@@ -183,11 +183,18 @@ bash run_program.sh                                        # ~4 min, fpgenprog
 # 1) LOAD scene from eMMC -> DDR (+ JOB). PASS: verdict 0, nseg=10, sig_crc_exp==got
 bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # ~77 s
 
-# 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK). LONG (resample ~10 min)
+# 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
+#    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
+#      resample 53.6 s | detect 19.7 s | azFFT 12.2 s | rangeFFT 12.0 s | cornerturn 7.3 s
+#      window 6.0 s  ->  TOTAL 110.8 s
+#    (An earlier note here claimed "resample ~10 min" -- WRONG by ~11x. Beats the 162 s in
+#     SAR_ARCHITECTURE_REPORT.md §5 by ~32%, from the burst-256 + hoisted-window fabric.)
+#    A 300000 ms (5 min) budget is ample; the runner POLLS and returns as soon as it completes.
 #    For CMD 0x50495045 the runner sets FFTMODE @0xB0059110 = 1 (FABRIC CoreFFT chain -- the
 #    shipping FFT path; mode 0 = legacy CPU FFT), and prints per-stage timing from sar_stage_ts
 #    (start/resample/window/rangeFFT/cornerturn/azimuthFFT/detect, 1 us/tick).
-bash run_m3_iso.sh 0x50495045 0 0 1500000 0xB0058020       # background it (>10 min)
+bash run_m3_iso.sh 0x50495045 0 0 300000 0xB0058020        # ~111 s; polls, exits on completion
+bash run_stage_timing.sh                                   # re-read per-stage timing anytime (no re-run)
 
 # 3) crop-verify: gather center 1024x1024 from DDR OUT, dump, render
 #    base=len=(3584<<16)|4608 = 0x0E001200 ; 1024*1024*2 = 2097152 bytes

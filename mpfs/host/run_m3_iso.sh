@@ -10,6 +10,9 @@
 set -u
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
 CMD="$1"; BASE="$2"; LEN="$3"; SLEEP_MS="$4"; REC="$5"
+# SLEEP_MS is a TIMEOUT BUDGET (we poll and exit early on completion), not a fixed wait.
+# POLL_MS = how often to halt/read/resume while waiting. Override via env for long ops.
+POLL_MS="${POLL_MS:-10000}"
 DADDR="${6:-}"; DBYTES="${7:-}"; DFILE="${8:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 GDBSCRIPT="$HERE/jtag_full/m3_iso.gen.gdb"
@@ -53,9 +56,26 @@ set {unsigned int}0xB0058008 = $LEN
 set {unsigned int}0xB005800C = 0
 set {unsigned int}0xB0058010 = 0
 set {unsigned int}0xB0058000 = $CMD
-echo >>> armed cmd; resume + wait...\n
+echo >>> armed cmd; resume + poll for completion...\n
 monitor resume
-monitor sleep $SLEEP_MS
+## POLL, don't blind-sleep. SLEEP_MS is now a TIMEOUT BUDGET, not a fixed wait: we halt/read/resume
+## every POLL_MS and stop as soon as the hart sets mbx.status = MBX_DONE_MAGIC (0xC0FFEE03) -- which
+## the arm sequence above cleared to 0, so it is unambiguous. This both (a) returns immediately when
+## the command finishes instead of burning the whole budget, and (b) REPORTS THE REAL ELAPSED TIME,
+## which a fixed sleep hides. (Before this, a ~162 s focus sat in a 25-min sleep and we could not
+## tell how long it actually took. 2026-07-20.)
+set \$waited = 0
+while (\$waited < $SLEEP_MS && *(unsigned int*)0xB0058010 != 0xC0FFEE03)
+  monitor sleep $POLL_MS
+  monitor mpfs.hart1_u54_1 arp_halt
+  thread 2
+  set \$waited = \$waited + $POLL_MS
+  if (*(unsigned int*)0xB0058010 != 0xC0FFEE03)
+    printf ">>>   ... running, %u s elapsed (status=0x%08x)\n", (\$waited/1000), *(unsigned int*)0xB0058010
+    monitor resume
+  end
+end
+printf ">>> command finished after ~%u s (budget was %u s)\n", (\$waited/1000), ($SLEEP_MS/1000)
 monitor mpfs.hart1_u54_1 arp_halt
 thread 2
 printf ">>> post pc = 0x%016lx\n", \$pc

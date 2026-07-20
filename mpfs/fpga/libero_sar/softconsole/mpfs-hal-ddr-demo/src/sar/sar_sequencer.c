@@ -106,6 +106,14 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
 extern uint64_t readmtime(void);
 __attribute__((used)) volatile uint64_t sar_stage_ts[8];
 
+/* Resample SUB-stage timestamps (MTIME, 1 us/tick). `resample` in sar_stage_ts is a single
+ * number covering three structurally different workloads: a per-pulse gather (range), a global
+ * transpose, and a per-range-bin gather (azimuth). They parallelise very differently -- the two
+ * gathers are embarrassingly parallel across lines, the transpose is not -- so any parallel-fabric
+ * design needs them measured, not apportioned. Indices: 0 start, 1 range done, 2 corner-turn done,
+ * 3 azimuth done. Read with mpfs/host/run_stage_timing.sh. */
+__attribute__((used)) volatile uint64_t sar_resample_ts[4];
+
 /* Fabric CoreFFT with a GLOBAL block exponent, matching sar_cpu_fft. CoreFFT auto-scales each
  * row by its own per-row exponent exp_i (SCALE_EXP), which would corrupt the 2-D image; so we
  * ARM PER ROW, read exp_i from the feeder's SCALE_EXP register (0x14), then renormalize every
@@ -211,6 +219,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     const uint32_t Np = g->Np, Mp = g->Mp;
     int b = 0;
 
+    sar_resample_ts[0] = readmtime();
     /* PASS 1 (range) */
     sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
                                 (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
@@ -248,12 +257,14 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
      * 84 MB would be ~1.3 M FLUSH64 stores, far worse than one way-walk. This runs
      * once per pipeline, not per line. */
     flush_l2_cache(1u);
+    sar_resample_ts[1] = readmtime();          /* range gather + pad-zero + publish done */
 
     /* transpose SCRATCH(Mp x Np) -> SIG(Np x Mp) */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
     sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) return 0;
+    sar_resample_ts[2] = readmtime();          /* internal corner-turn done */
 
     /* PASS 2 (azimuth) */
     sar_coeffs_pass2(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
@@ -273,6 +284,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
         b ^= 1;
     }
+    sar_resample_ts[3] = readmtime();          /* azimuth gather done */
     return 1;
 }
 

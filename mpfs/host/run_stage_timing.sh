@@ -43,6 +43,17 @@ if sar_stage_ts[6] >= sar_stage_ts[0] && sar_stage_ts[0] != 0
 else
   printf "  (no timing: sar_stage_ts not populated -- no PIPE completed since power-on)\n"
 end
+printf "\n===== RESAMPLE SUB-STAGES (sar_resample_ts) =====\n"
+if sar_resample_ts[3] >= sar_resample_ts[0] && sar_resample_ts[0] != 0
+  printf "  range gather   = %12llu us  (%6llu ms)   5634 lines\n", (unsigned long long)(sar_resample_ts[1]-sar_resample_ts[0]), (unsigned long long)((sar_resample_ts[1]-sar_resample_ts[0])/1000)
+  printf "  corner-turn    = %12llu us  (%6llu ms)   global transpose\n", (unsigned long long)(sar_resample_ts[2]-sar_resample_ts[1]), (unsigned long long)((sar_resample_ts[2]-sar_resample_ts[1])/1000)
+  printf "  azimuth gather = %12llu us  (%6llu ms)   8192 lines\n", (unsigned long long)(sar_resample_ts[3]-sar_resample_ts[2]), (unsigned long long)((sar_resample_ts[3]-sar_resample_ts[2])/1000)
+  printf "  ---------------------------------------------\n"
+  printf "  resample TOTAL = %12llu us\n", (unsigned long long)(sar_resample_ts[3]-sar_resample_ts[0])
+  printf "  (the two gathers parallelise across lines; the transpose does not)\n"
+else
+  printf "  (not populated -- firmware predates the sub-stage instrumentation)\n"
+end
 printf "\n"
 monitor shutdown
 quit

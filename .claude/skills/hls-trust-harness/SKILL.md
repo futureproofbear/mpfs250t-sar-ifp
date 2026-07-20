@@ -15,6 +15,38 @@ description: >-
 
 # HLS trust harness
 
+## Rule: A gate must require positive evidence, never the absence of a match
+- **TRIGGER**: writing or trusting any check that concludes "0 violations", "PASS", or "OK".
+- **ACTION**: make the check fail when its input is missing, empty, or stale. Require a minimum
+  parsed-row count, an explicit clean marker, and a fresh timestamp — not merely the absence of a
+  bad line.
+- **HALT**: real instances from 2026-07-20, all of which passed while checking nothing:
+  - `build_full_prog_ffv.tcl` verified hold by counting negative slacks in the *min-delay repair*
+    report — which only lists REPAIRED paths. With "paths eligible for improvement: 0" it matched
+    nothing and printed `HOLD nviol=0` unconditionally. **Every build before that date claimed hold
+    met without ever checking it.** Fixed to require "No Path" in the multi-corner violation XMLs.
+  - The same script's setup check would read a missing `pinslacks.txt` as zero violations.
+  - `program_ffv.log` was a week old and said `@@@ PROG_OK`. Grepping it would have reported a stale
+    success for a programming run that had not happened. Read the run's OWN stdout; never a file that
+    could predate the run. `sarProcessor/mpfs/fpga/` holds 113 such logs.
+
+## Rule: Measure the shipping path — do not derive it, do not trust an old number
+- **TRIGGER**: about to spend a build (~40 min) or a design decision on a bottleneck you inferred.
+- **ACTION**: measure it first. For HLS kernels the instrument already exists —
+  `hls_stats.py eff-ii` derives EFFECTIVE II from an iso-test's busy-cycles / elements, which
+  localises whether a stall is in request issue or in the loop body.
+- **HALT**: three failures of this in one session, in both directions:
+  - Trusted a documented "flush is 2%" figure and argued against a change worth 24.4 s. The figure
+    was real but profiled on an experimental branch that had been reverted; it never described the
+    shipping code.
+  - Derived "latency-bound" from measured/ideal plus a bandwidth estimate, spent a build on
+    `max_outstanding`, and got exactly zero gain. `max_burst_len` had failed the same way earlier.
+  - Reported a timing margin of "+19 ps" from hand-parsing `pinslacks.txt` mid-build; the real
+    number from SmartTime was +6.545 ns. Wait for the gate.
+- Corollary: when a number and a mechanism disagree, that is a finding — chase it. 24.4 s saved /
+  13,826 flushes = 1.76 ms each, matching the ~1.6 ms a 16-way L2 walk predicts, is what confirmed
+  the flush result was real rather than noise.
+
 ## Rule: Read the reference before writing a pragma
 - **TRIGGER**: about to add, change or reason about any `#pragma HLS`, or to claim the tool
   can/cannot do something.

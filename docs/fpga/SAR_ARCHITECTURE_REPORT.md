@@ -10,8 +10,8 @@ the MPFS250T_ES Icicle-class board (Centerfield + ship Umbra CPHD scenes).*
 
 **Result in one line:** the full Polar-Format datapath — fabric resample → windowing → CoreFFT (range
 + azimuth) → corner-turn → detect — runs **end-to-end on the FPGA**, forming a correctly-focused
-Centerfield image at full resolution (**corr 0.9923** vs the CPHD-derived golden), using **12.9 % 4LUT,
-10.2 % LSRAM, 2.3 % MACC** of the MPFS250T.
+Centerfield image at full resolution (**corr 0.9923** vs the CPHD-derived golden), using **11.8 % 4LUT,
+15.6 % LSRAM, 1.7 % MACC** of the MPFS250T.
 
 ---
 
@@ -137,15 +137,20 @@ magnitude (`fft_fabric_pass`).
 
 ## 3. Fabric resource usage (MPFS250T_ES, timing MET @ 62.5 MHz)
 
-**Overall** (`SAR_TOP_compile_netlist_resources.rpt`):
+**Overall** (`SAR_TOP_compile_netlist_resources.rpt`, current build 2026-07-20):
 
 | Type | Used | Device total | % |
 |---|---|---|---|
-| 4LUT (logic) | 32,655 | 254,196 | **12.85 %** |
-| DFF (registers) | 27,025 | 254,196 | **10.63 %** |
-| LSRAM (20 Kb blocks) | 83 | 812 | **10.22 %** |
-| µSRAM (64×12) | 111 | 2,352 | 4.72 % |
-| Math (18×18 MACC) | 18 | 784 | **2.30 %** |
+| 4LUT (logic) | 29,857 | 254,196 | **11.75 %** |
+| DFF (registers) | 25,274 | 254,196 | **9.94 %** |
+| LSRAM (20 Kb blocks) | 127 | 812 | **15.64 %** |
+| µSRAM (64×12) | 72 | 2,352 | 3.06 % |
+| Math (18×18 MACC) | 13 | 784 | **1.66 %** |
+
+<sub>Prior figures in this document (4LUT 12.85 %, LSRAM 10.22 %, MACC 2.30 %) were from the
+2026-07-11 milestone build and had gone stale — the design has since dropped the DMA datamover and
+gained the CoreFFT chain and deeper AXI FIFOs. The immediately preceding build measured LSRAM 15.02 %
+(122 blocks); the +5 blocks are the `max_outstanding` read FIFOs.</sub>
 
 **Per stage / block** (aggregated from `SAR_TOP_compile_netlist_hier_resources.csv`):
 

@@ -113,3 +113,45 @@ files: mpfs/fpga/**/*.cpp, *.hpp
 pattern: #pragma\s+HLS\s+loop\s+pipeline\s*$
 message: `pipeline` pragma with no II() -- pin II(k) so Gate 1 can catch schedule degradation.
 -->
+
+## 6. `memory partition` pragma placed in the function body  `[warn, manual]`
+
+Confirmed 2026-07-21 while widening the resample staging loops to full 64-bit AXI beats.
+
+A `#pragma HLS memory partition variable(v) ...` must sit **immediately above the
+declaration of `v`**. Placed anywhere else in the function body — for example grouped
+with the other pragmas at the top, which reads naturally — SmartHLS emits
+
+```
+warning: [HLS pragma] ignored: expected a variable after the pragma
+```
+
+**drops the pragma, and exits 0.** The build "succeeds" with the partitioning silently
+absent.
+
+What makes this dangerous is the failure is partial and can hide itself. Two arrays were
+partitioned in the same edit: `wqb` (factor 4) and `idxb` (factor 2). With both pragmas
+ignored, the `wq` unpack loop degraded to II=2 —
+`'@resample_wqb@_local_memory_port' has 4 uses per cycle but only 2 units available` —
+while the `idx` loop coincidentally still made II=1 on the LSRAM's two native ports. So
+half the regression was invisible, and the half that showed up did so only in the
+pipelining report, never as an error.
+
+Nothing upstream catches this: `shls hw` returns 0, no RTL is obviously wrong, and the
+kernel is functionally correct — just slower. **Gate 1 (`hls_report_lint.py`) is the only
+thing that catches it**, which is the whole argument for running the II gate on every
+build rather than trusting a clean exit code.
+
+Guard: put each partition pragma directly above its own declaration, include `dim(1)`,
+and confirm the achieved II in the pipelining report afterwards. Treat a `[HLS pragma]
+ignored` warning as a build failure.
+
+Related: `cyclic` returns zero string hits when grepping the SmartHLS Python/source tree,
+which makes it look unsupported. It is supported — the pragma reference is embedded in
+`clang-15.exe`, which documents `block|cyclic|complete` with `dim` and `factor`.
+
+<!-- LINT
+id: partition-pragma-placement
+severity: warn
+message: `memory partition` must immediately precede the variable's DECLARATION; elsewhere SmartHLS warns "[HLS pragma] ignored", drops it and exits 0. Verify the achieved II in the pipelining report.
+-->

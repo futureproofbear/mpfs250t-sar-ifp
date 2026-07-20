@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 600" width="1020" height="600" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1020" height="600" fill="#ffffff"/>
+
+  <text x="510" y="32" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">DDR memory map — 1 GiB LPDDR4, cached window at 0x8000_0000</text>
+  <text x="510" y="54" text-anchor="middle" font-size="12.5" fill="#555555">Single source of truth: src/sar/ddr_sar_layout.h, mirrored by mpfs/host/ddr_layout.py. Keep the two in lock-step.</text>
+
+  <!-- ================= main map ================= -->
+  <text x="46" y="86" font-size="13.5" font-weight="600" fill="#333333">Frame buffers</text>
+
+  <!-- app -->
+  <rect x="112" y="98" width="230" height="58" fill="#f2f2f2" stroke="#888888" stroke-width="1.5"/>
+  <text x="227" y="122" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">app / heap / stack</text>
+  <text x="227" y="141" text-anchor="middle" font-size="11" fill="#666666">128 MiB</text>
+  <text x="106" y="104" text-anchor="end" font-size="11" font-family="Consolas, monospace" fill="#444444">0x8000_0000</text>
+
+  <!-- SIG -->
+  <rect x="112" y="156" width="230" height="104" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.8"/>
+  <text x="227" y="188" text-anchor="middle" font-size="15" font-weight="700" fill="#4a3670">SIG</text>
+  <text x="227" y="208" text-anchor="middle" font-size="11" fill="#4a3670">input signal, complex int16 I/Q</text>
+  <text x="227" y="225" text-anchor="middle" font-size="11" fill="#4a3670">8192 x 8192 x 4 B = 256 MiB</text>
+  <text x="227" y="245" text-anchor="middle" font-size="10.5" fill="#6b4fa0">reused as scratch-2 after resample</text>
+  <text x="106" y="162" text-anchor="end" font-size="11" font-family="Consolas, monospace" fill="#444444">0x8800_0000</text>
+
+  <!-- SCRATCH -->
+  <rect x="112" y="260" width="230" height="104" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.8"/>
+  <text x="227" y="292" text-anchor="middle" font-size="15" font-weight="700" fill="#4a3670">SCRATCH</text>
+  <text x="227" y="312" text-anchor="middle" font-size="11" fill="#4a3670">primary intermediate</text>
+  <text x="227" y="329" text-anchor="middle" font-size="11" fill="#4a3670">256 MiB</text>
+  <text x="227" y="349" text-anchor="middle" font-size="10.5" fill="#6b4fa0">corner-turn transpose target</text>
+  <text x="106" y="266" text-anchor="end" font-size="11" font-family="Consolas, monospace" fill="#444444">0x9800_0000</text>
+
+  <!-- OUT -->
+  <rect x="112" y="364" width="230" height="72" fill="#f7dede" stroke="#a03535" stroke-width="1.8"/>
+  <text x="227" y="390" text-anchor="middle" font-size="15" font-weight="700" fill="#7a2626">OUT</text>
+  <text x="227" y="409" text-anchor="middle" font-size="11" fill="#7a2626">detected magnitude, uint16</text>
+  <text x="227" y="426" text-anchor="middle" font-size="11" fill="#7a2626">8192 x 8192 x 2 B = 128 MiB</text>
+  <text x="106" y="370" text-anchor="end" font-size="11" font-family="Consolas, monospace" fill="#444444">0xA800_0000</text>
+
+  <!-- tables -->
+  <rect x="112" y="436" width="230" height="52" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="227" y="459" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a3a6b">tables + control</text>
+  <text x="227" y="478" text-anchor="middle" font-size="11" fill="#1a3a6b">16 MiB — expanded at right</text>
+  <text x="106" y="442" text-anchor="end" font-size="11" font-family="Consolas, monospace" fill="#444444">0xB000_0000</text>
+  <text x="106" y="494" text-anchor="end" font-size="11" font-family="Consolas, monospace" fill="#444444">0xB100_0000</text>
+
+  <!-- byte/px warning -->
+  <rect x="46" y="506" width="296" height="72" rx="5" fill="#fff0f0" stroke="#a03535" stroke-width="1.5"/>
+  <text x="60" y="526" font-size="11.5" font-weight="600" fill="#7a2626">Row-addressing trap</text>
+  <text x="60" y="543" font-size="11" fill="#5a1a1a">A complex buffer is 4 B/px; OUT is 2 B/px. The</text>
+  <text x="60" y="558" font-size="11" fill="#5a1a1a">SAME byte offset addresses DIFFERENT rows in</text>
+  <text x="60" y="573" font-size="11" fill="#5a1a1a">the two. Always compute base + row*GRID*bpp.</text>
+
+  <!-- zoom connector -->
+  <path d="M 342 462 L 400 462" stroke="#2c5aa0" stroke-width="1.6" stroke-dasharray="5 3"/>
+  <path d="M 342 440 L 400 100" stroke="#2c5aa0" stroke-width="1" stroke-dasharray="4 3" opacity="0.5"/>
+  <path d="M 342 486 L 400 560" stroke="#2c5aa0" stroke-width="1" stroke-dasharray="4 3" opacity="0.5"/>
+
+  <!-- ================= zoom panel ================= -->
+  <rect x="400" y="86" width="586" height="480" rx="6" fill="#fafbfd" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="416" y="108" font-size="14" font-weight="600" fill="#1a3a6b">0xB000_0000 — tables, geometry, coefficients, control</text>
+
+  <!-- host-staged tables -->
+  <text x="416" y="134" font-size="12" font-weight="600" fill="#444444">Host-staged tables</text>
+  <line x1="416" y1="140" x2="970" y2="140" stroke="#cccccc" stroke-width="1"/>
+  <text x="416" y="157" font-size="10.5" font-family="Consolas, monospace" fill="#2c5aa0">0xB000_0000</text>
+  <text x="516" y="157" font-size="10.5" fill="#333333">KR grid</text>
+  <text x="700" y="157" font-size="10.5" font-family="Consolas, monospace" fill="#2c5aa0">0xB003_0000</text>
+  <text x="800" y="157" font-size="10.5" fill="#333333">WIN (2-D Hamming, Q15)</text>
+  <text x="416" y="173" font-size="10.5" font-family="Consolas, monospace" fill="#2c5aa0">0xB001_0000</text>
+  <text x="516" y="173" font-size="10.5" fill="#333333">KC grid</text>
+  <text x="700" y="173" font-size="10.5" font-family="Consolas, monospace" fill="#2c5aa0">0xB004_0000</text>
+  <text x="800" y="173" font-size="10.5" fill="#333333">JOB descriptor</text>
+  <text x="416" y="189" font-size="10.5" font-family="Consolas, monospace" fill="#2c5aa0">0xB002_0000</text>
+  <text x="516" y="189" font-size="10.5" fill="#333333">TANPHI</text>
+
+  <!-- control -->
+  <text x="416" y="216" font-size="12" font-weight="600" fill="#444444">Mailbox and runtime control</text>
+  <line x1="416" y1="222" x2="970" y2="222" stroke="#cccccc" stroke-width="1"/>
+  <text x="416" y="239" font-size="10.5" font-family="Consolas, monospace" fill="#b5651d">0xB005_8000</text>
+  <text x="516" y="239" font-size="10.5" fill="#333333">hart1 mailbox (cmd/base/len/result/status/seq)</text>
+  <text x="416" y="255" font-size="10.5" font-family="Consolas, monospace" fill="#b5651d">0xB005_9110</text>
+  <text x="516" y="255" font-size="10.5" fill="#333333">SAR_FFTMODE — 1 = fabric CoreFFT, 0 = legacy CPU FFT</text>
+  <text x="416" y="271" font-size="10.5" font-family="Consolas, monospace" fill="#b5651d">0xB005_9114</text>
+  <text x="516" y="271" font-size="10.5" fill="#333333">headroom</text>
+  <text x="416" y="287" font-size="10.5" font-family="Consolas, monospace" fill="#b5651d">0xB005_9118</text>
+  <text x="516" y="287" font-size="10.5" fill="#333333">detect_mode — 1 = CPU detect (the shipping path)</text>
+  <text x="416" y="303" font-size="10.5" font-family="Consolas, monospace" fill="#b5651d">0xB005_Exxx</text>
+  <text x="516" y="303" font-size="10.5" fill="#333333">eMMC result records (LOAD / SAVE / ROI / VERIFY)</text>
+
+  <!-- geometry -->
+  <text x="416" y="330" font-size="12" font-weight="600" fill="#444444">Per-pulse geometry (GEOM_BASE 0xB010_0000, 32 KiB slots)</text>
+  <line x1="416" y1="336" x2="970" y2="336" stroke="#cccccc" stroke-width="1"/>
+  <text x="416" y="353" font-size="10.5" fill="#333333">f0 · df · pr · tans · invorder · krgrid · kcgrid · hamr · hamc</text>
+  <text x="416" y="369" font-size="10.5" fill="#666666">Small O(M) arrays. The MSS computes the large per-line idx/wq coefficients on</text>
+  <text x="416" y="384" font-size="10.5" fill="#666666">the fly from these, so the ~768 MiB full-grid coefficient set is never stored.</text>
+
+  <!-- coefficient banks -->
+  <text x="416" y="411" font-size="12" font-weight="600" fill="#444444">Resample coefficient banks (double-buffered) — COEF_BASE 0xB014_8000</text>
+  <line x1="416" y1="417" x2="970" y2="417" stroke="#cccccc" stroke-width="1"/>
+
+  <rect x="416" y="428" width="150" height="34" rx="3" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.4"/>
+  <text x="491" y="443" text-anchor="middle" font-size="11" font-weight="600" fill="#1a3a6b">idx  int32[Np]</text>
+  <text x="491" y="456" text-anchor="middle" font-size="9.5" fill="#2c5aa0">bank+0x0000, 32 KiB</text>
+
+  <rect x="572" y="428" width="106" height="34" rx="3" fill="#f2f2f2" stroke="#aaaaaa" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="625" y="443" text-anchor="middle" font-size="11" fill="#777777">hole</text>
+  <text x="625" y="456" text-anchor="middle" font-size="9.5" fill="#888888">32 KiB unused</text>
+
+  <rect x="684" y="428" width="150" height="34" rx="3" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.4"/>
+  <text x="759" y="443" text-anchor="middle" font-size="11" font-weight="600" fill="#1a3a6b">wq  int16[Np] Q15</text>
+  <text x="759" y="456" text-anchor="middle" font-size="9.5" fill="#2c5aa0">bank+0x10000, 16 KiB</text>
+
+  <text x="846" y="443" font-size="10.5" fill="#666666">bank stride</text>
+  <text x="846" y="456" font-size="10.5" font-family="Consolas, monospace" fill="#2c5aa0">0x2_0000</text>
+
+  <rect x="416" y="472" width="554" height="80" rx="5" fill="#fff0f0" stroke="#a03535" stroke-width="1.5"/>
+  <text x="430" y="491" font-size="11.5" font-weight="600" fill="#7a2626">A coefficient bank is NOT 48 KiB contiguous.</text>
+  <text x="430" y="508" font-size="11" fill="#5a1a1a">idx and wq are separated by a 32 KiB hole. Because FIC0 is non-coherent, the MSS must write these back to DDR</text>
+  <text x="430" y="524" font-size="11" fill="#5a1a1a">before arming the gather kernel — and flushing one 48 KiB run from the bank base would cover idx plus half the</text>
+  <text x="430" y="540" font-size="11" fill="#5a1a1a">hole and miss wq entirely, gathering with stale weights: a still-focused but subtly wrong image. Flush both ranges.</text>
+
+  <text x="46" y="592" font-size="11" fill="#777777">All addresses are physical, in the cached DDR window. Fabric masters reach DDR over FIC0 and do not snoop L2 — see SAR_DESIGN.md "Cache coherency" for the required flush at each handoff.</text>
+</svg>

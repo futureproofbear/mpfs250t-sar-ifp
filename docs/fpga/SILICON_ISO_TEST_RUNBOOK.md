@@ -515,7 +515,7 @@ generic runner `mpfs/host/run_m3_iso.sh CMD BASE LEN SLEEP_MS REC_ADDR [DUMPADDR
 Sequence (mailbox cmds; records in the 0xB005Exxx block):
 1. **LOAD** `ELOD` 0x454C4F44, .base=scene idx (0). eMMC INPUT -> DDR: scatters the 10 blob
    segments to `sar_emmc_role_addr` + rebuilds the JOB. rec@0xB005E000: verdict, nseg(=10),
-   sig_crc_exp==sig_crc_got, M/N. ~77 s. PROVEN: sig_crc 0x89fa12dc, M=5634 N=4319.
+   sig_crc_exp==sig_crc_got, M/N. 78 s. PROVEN: sig_crc 0x89fa12dc, M=5634 N=4319.
 2. **PIPE** `MBX_CMD_PIPE` -> `sar_form_image`, result=stage status (0=OK). PROVEN status 0.
 3. **ROI** `EROI` 0x45524F49 (from DDR) / **ROIE** `EROE` 0x45524F45 (from SARO image).
    .base=(r0<<16)|r1  .len=(c0<<16)|c1. Gathers OUT[r0:r1,c0:c1] uint16 -> SCRATCH

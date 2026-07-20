@@ -10,7 +10,7 @@ the MPFS250T_ES Icicle-class board (Centerfield + ship Umbra CPHD scenes).*
 
 **Result in one line:** the full Polar-Format datapath — fabric resample → windowing → CoreFFT (range
 + azimuth) → corner-turn → detect — runs **end-to-end on the FPGA**, forming a correctly-focused
-Centerfield image at full resolution (**corr 0.97** vs the CPHD-derived golden), using **12.9 % 4LUT,
+Centerfield image at full resolution (**corr 0.9923** vs the CPHD-derived golden), using **12.9 % 4LUT,
 10.2 % LSRAM, 2.3 % MACC** of the MPFS250T.
 
 ---
@@ -233,7 +233,7 @@ figure, not the optimized latency roadmap (dual-FIC ~3.2 GB/s, tiled corner-turn
 - **Detect runs on the MSS CPU** (`detect_mode` default). The fabric detect HLS kernel is correct in C,
   but **SmartHLS mis-synthesizes the negative-I sign extension** (the high-16 field read as unsigned →
   ~50% pixel saturation). Multiple C rewrites + a fresh timing-MET fabric rebuild did **not** survive
-  synthesis. CPU detect (correct signed sqrt) is the shipping path and gives **corr 0.97** on silicon.
+  synthesis. CPU detect (correct signed sqrt) is the shipping path and gives **corr 0.9923** on silicon.
   A hand-written Verilog detect (or `ap_int<16>`, de-risked in sim first) is the fix if a fabric-detect
   throughput win is needed.
 - **FFT is CoreFFT, not HLS** — the HLS `K_FFT` butterfly is unsynthesizable here (drops the twiddle
@@ -250,21 +250,16 @@ figure, not the optimized latency roadmap (dual-FIC ~3.2 GB/s, tiled corner-turn
 ## 7. Results — imagery (Centerfield, Utah — deci-1 full resolution)
 
 **Emulator reference** — bit-accurate silicon mirror (`silicon_emulator.py`), full 8192² focused image
-(fftshift + dB display). Field parcels + the meandering river are cleanly resolved:
-
-![Emulator deci-1 focused image](img_emulator_deci1.png)
+(fftshift + dB display). Field parcels + the meandering river are cleanly resolved.
 
 **Silicon output — full 8192² image.** The complete OUT (128 MiB) was dumped from DDR over JTAG in two
 parts (rows 0:2048 + rows 2048:8192) and stitched. The whole image — not just a quarter — reproduces the
-Centerfield scene formed on-chip (fabric FFT + CPU detect, RETURN=0):
+Centerfield scene formed on-chip (fabric FFT + CPU detect, RETURN=0).
 
-![Silicon full focused image](img_silicon_full_deci1.png)
-
-**Silicon vs emulator, full frame** (**left: silicon**, **right: emulator golden**). The meandering river,
-the grid of rectangular field parcels, the circular pivot-irrigation plots, and the diagonal roads all line
-up feature-for-feature across the entire 8192² frame:
-
-![Silicon vs emulator, full frame](img_silicon_full_vs_emu.png)
+**Silicon vs emulator, full frame.** The meandering river, the grid of rectangular field parcels, the
+circular pivot-irrigation plots, and the diagonal roads all line up feature-for-feature across the entire
+8192² frame. (Render these locally with `mpfs/host/render_quarters.py` /
+`mpfs/host/stitch_silicon_deci1.py` — the figures are not checked into the repo.)
 
 **Reconciliation notes (two understood, benign offsets):**
 
@@ -278,8 +273,8 @@ up feature-for-feature across the entire 8192² frame:
 **~0.73** (16×16 multilook, speckle-suppressed) and **~0.64** (8×8); the raw full-resolution pixel
 correlation is lower (~0.3) because single-look SAR speckle decorrelates pixel-for-pixel under the tiny
 fixed-point/phase differences between the silicon HLS resample and the emulator model. The **structural
-match is exact** (visible above) — the correlation number is speckle-limited, not a scene mismatch. This
-is the expected single-look behaviour; the earlier decimated-scene figure correlated 0.97 for the same
+match is exact** in the rendered figures — the correlation number is speckle-limited, not a scene mismatch. This
+is the expected single-look behaviour; the decimated-scene figure correlated 0.9923 for the same
 reason (far less speckle at lower resolution).
 
 ---
@@ -339,8 +334,8 @@ plumbing rivals the compute kernels. All are live; only the fabric detect is byp
 
 - **Fabric FFT chain**: phase-exact vs bit-accurate golden (0.0° spread @ 256 & 8192); fabric == CPU FFT
   (corr 0.9999); zero-loss gearbox.
-- **Full pipeline on silicon**: corr **0.97** vs the CPHD-derived golden (decimated scene); **runs
-  end-to-end at full deci-1 resolution** (RETURN=0, ~162 s), producing a correctly focused Centerfield
+- **Full pipeline on silicon**: corr **0.9923** vs the CPHD-derived golden; **runs
+  end-to-end at full deci-1 resolution** (RETURN=0, 110.8 s — §5), producing a correctly focused Centerfield
   image (river + fields resolved, matches the emulator).
 - **Bit-accurate silicon mirror** (`silicon_emulator.py`) == float golden (corr 1.0), used to isolate
   the detect bug and predict full-resolution output.

@@ -5,7 +5,7 @@
 > **on-board eMMC pipeline (M1–M3) is proven on silicon** — a CPHD scene is stored on the eMMC, loaded +
 > focused on-board (`sar_form_image` → SAR_SEQ_OK; focused image confirmed via ROI crop), and the output
 > persisted back to the card, retiring the recurring ~3 h JTAG scene load. Authoritative current status:
-> [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3.
+> [`PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](../SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3.
 > The 2026-06/07 status below is retained as history.
 
 **Scope:** GUI-free SAR image formation (Polar Format Algorithm) on the Microchip
@@ -13,10 +13,10 @@ PolarFire SoC Icicle Kit (MPFS250T-FCVG484E), JTAG-only, bare-metal RISC-V + FPG
 fabric, with the irregular work off-loaded to a host PC.
 **Date:** 2026-06-22
 **Companion docs:** [`REPORT.md`](REPORT.md) (algorithm + device study),
-[`fpga/history/M1_cosim.md`](fpga/history/M1_cosim.md), [`fpga/history/M2_integration.md`](fpga/history/M2_integration.md)
+[`fpga/history/M1_cosim.md`](M1_cosim.md), [`fpga/history/M2_integration.md`](M2_integration.md)
 
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
-> gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md)
+> gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md)
 > "CURRENT STATUS". Wherever this report describes `CoreAXI4DMAController` / the DMA as the live
 > FFT-stream datamover (the "full DMA *transfer* test" item, the S2MM path, the `corefft_stream_adapter`
 > DMA↔CoreFFT bridge), that is stale — the DMA deadlocked on the 2nd back-to-back S2MM transaction and
@@ -109,32 +109,32 @@ azimuth FFT.
   resample-quantization gap so the oracle covers resample→window→FFT→detect.
 
 ### 3.4 FPGA fabric (`mpfs/fpga/`) — built with Libero SoC 2025.2 + SmartHLS
-- **CoreFFT 8.1.100** generated headless ([`gen_corefft.tcl`](fpga/gen_corefft.tcl)):
+- **CoreFFT 8.1.100** generated headless ([`gen_corefft.tcl`](../gen_corefft.tcl)):
   in-place, POINTS=8192, WIDTH=16, conditional BFP, `SCALE_EXP` enabled. Verified in
-  QuestaSim with the real PolarFire primitives ([`sim/`](fpga/sim/)).
-- **SmartHLS kernels** ([`hls_corner_turn`](fpga/hls_corner_turn/),
-  [`hls_window`](fpga/hls_window/), [`hls_detect`](fpga/hls_detect/),
-  [`hls_resample`](fpga/hls_resample/)) — all `shls sw` PASS; corner-turn also
+  QuestaSim with the real PolarFire primitives ([`sim/`](../sim/)).
+- **SmartHLS kernels** ([`hls_corner_turn`](../hls_corner_turn/),
+  [`hls_window`](../hls_window/), [`hls_detect`](../hls_detect/),
+  [`hls_resample`](../hls_resample/)) — all `shls sw` PASS; corner-turn also
   `shls cosim` PASS and `shls rtl_synth` = **3.3 % 4LUT, 0 DSP, ~134 MHz** on the
   MPFS250T. Resample uses CPU-precomputed index+weight tables (gather+lerp), matching
   the partition.
-- **Assembly** ([`assemble_sar.tcl`](fpga/assemble_sar.tcl)) — Libero project
+- **Assembly** ([`assemble_sar.tcl`](../assemble_sar.tcl)) — Libero project
   `fpga/libero_sar/` with all components in one SmartDesign (`sar_datapath`),
   clocks + resets wired (active-low `ARESETN` direct to CoreFFT/DMA, inverted to the
   active-high HLS kernels), all data/control/AXI promoted to the boundary, and the
   SmartDesign **generated** (synthesizable).
 - **Datapath stitch (in progress):**
-  - **CoreFFT↔DMA stream adapter** ([`corefft_stream_adapter.v`](fpga/corefft_stream_adapter.v))
+  - **CoreFFT↔DMA stream adapter** ([`corefft_stream_adapter.v`](../corefft_stream_adapter.v))
     — bridges AXI4-Stream ↔ CoreFFT's load/read handshake. **Verified** with the
     real CoreFFT @8192 through the stream interface (corr **1.0000**, NRMSE 6.4e-4)
-    — [`sim/corefft_stream_tb.v`](fpga/sim/corefft_stream_tb.v).
+    — [`sim/corefft_stream_tb.v`](../sim/corefft_stream_tb.v).
   - **CoreAXI4Interconnect 3.0.130** ×2 (upgraded from 2.9.100): a **data** crossbar
     (DIC / `AXIIC_C0`, 6 masters → 1 DDR target) and a **control** crossbar (CIC /
     `AXIIC_CTRL`, 1 master → 6 targets), the latter carrying the AXI4-Lite kernel
     control + the DMA control slave (CIC slave-5 @ `0x60005000`).
   - **Done (2026-06-30):** crossbar wiring, AXI4-Lite control fan-out, DMA-stream↔CoreFFT
     adapter, and MSS/FIC integration are all complete — the design is built, programmed,
-    and brought up on silicon (see §5 and [`fpga/SAR_BRINGUP_REPORT.md`](fpga/SAR_BRINGUP_REPORT.md)).
+    and brought up on silicon (see §5 and [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md)).
 
 ### 3.5 Resource footprint on the MPFS250T (measured, per component)
 
@@ -198,8 +198,8 @@ batch (no GUI): `CoreFFT_C0` (8192 BFP, 8.1.100), `AXIDMA_C0` (CoreAXI4DMAContro
 kernels as HDL+ cores, `corefft_stream_adapter` (HDL+, verified), and `ICICLE_MSS`.
 SmartDesign wiring + P&R are now **done** (bitstream built and programmed); the turn-key
 recipe (every interface name, the FIC0 connections, CORERESET, constraints, build commands)
-is in [`fpga/history/M2_integration.md` §6b](fpga/history/M2_integration.md), and the
-authoritative interconnect reference is [`fpga/AMBA_ARCHITECTURE.md`](fpga/AMBA_ARCHITECTURE.md).
+is in [`fpga/history/M2_integration.md` §6b](M2_integration.md), and the
+authoritative interconnect reference is [`fpga/AMBA_ARCHITECTURE.md`](../AMBA_ARCHITECTURE.md).
 
 ## 5. Bitstream — DONE (fully GUI-free, 2026-06-22)
 
@@ -208,12 +208,12 @@ produces a **timing-clean bitstream** on the MPFS250T-FCVG484E:
 
 | Stage | Result |
 |---|---|
-| Scripted top SmartDesign `SAR_TOP` (15 blocks) | ✅ generated, DRC passed ([`build_sartop.tcl`](fpga/build_sartop.tcl)) |
+| Scripted top SmartDesign `SAR_TOP` (15 blocks) | ✅ generated, DRC passed ([`build_sartop.tcl`](../build_sartop.tcl)) |
 | Synthesis | ✅ |
 | Place & route | ✅ Placer + Router completed |
 | Timing | ✅ **met** — worst slack **+0.163 ns** (all corners positive) |
 | Bitstream / programming data | ✅ `BITSTREAM_OK` |
-| FlashPro Express job | ✅ [`libero_sar/export/SAR_TOP.job`](fpga/libero_sar/export/SAR_TOP.job) (JTAG-programmable) |
+| FlashPro Express job | ✅ [`libero_sar/export/SAR_TOP.job`](../libero_sar/export/SAR_TOP.job) (JTAG-programmable) |
 
 **Key integration problems solved (all headless):**
 1. DMA can't *source* a stream → added the `fft_feeder` HLS kernel (DDR→AXI4-Stream→gearbox→CoreFFT).
@@ -261,8 +261,8 @@ on connector J33** (not FlashPro5/J11). Runtime: bare-metal RISC-V (U54_1) over 
    is a one-time chunked **background** load (run-to-completion, never killed) verified by on-target
    CRC.
 
-See [`fpga/SAR_BRINGUP_REPORT.md`](fpga/SAR_BRINGUP_REPORT.md) for the full bring-up log and
-[`fpga/FABRIC_INTERCONNECT_CONVENTIONS.md`](fpga/FABRIC_INTERCONNECT_CONVENTIONS.md) for the
+See [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md) for the full bring-up log and
+[`fpga/FABRIC_INTERCONNECT_CONVENTIONS.md`](../FABRIC_INTERCONNECT_CONVENTIONS.md) for the
 interconnect lint gate / conventions.
 
 ## 5c. M3 full PFA pipeline — root-caused to FPGA timing closure (2026-06-30)

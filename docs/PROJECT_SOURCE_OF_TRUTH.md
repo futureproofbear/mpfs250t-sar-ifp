@@ -22,28 +22,32 @@
 > **On-board eMMC pipeline (M1–M3) PROVEN on silicon** — the scene lives on the board eMMC and is loaded +
 > focused entirely on-board, retiring the recurring ~3 h JTAG scene load: **M1** bring-up (write→read→CRC);
 > **M2** provision a CPHD scene to the INPUT partition (`crcE==crcR==0x58d0ea66`, Centerfield 97.6 MB); **M3**
-> boot-load eMMC→DDR (~77 s; 10 segments → role addresses + JOB reconstruct), run `sar_form_image` end-to-end
+> boot-load eMMC→DDR (78 s; 10 segments → role addresses + JOB reconstruct), run `sar_form_image` end-to-end
 > (**SAR_SEQ_OK**, no stage timeout), confirm a coherent focused SAR image via an ROI crop, and persist the
 > output to the eMMC OUTPUT partition (commit-last, crash-safe). LOAD/PIPE/crop proven; the commit-last
 > SAVEOUT + a VERIFY_OUT command are built and await a reflash + re-run next board session. eMMC read
-> ~1.5 MB/s (scene load ~63 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
+> ~1.5 MB/s (scene load 78 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
 > the bottleneck, not the eMMC) — verify via small ROI crops.
 > **FFT engine (corrected):** the range/azimuth FFTs run on the **fabric CoreFFT** chain
 > (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected at runtime by **`SAR_FFTMODE`
 > @`0xB0059110` = 1**, which the pipeline flow scripts (`flow_pipe_*.gdb`) set before PIPE. CPU
-> `sar_cpu_fft` (mode 0) is the **legacy fallback** — the 2026-07-04 note below that calls the FFT a
-> CPU path is superseded. (Caveat: the eMMC `run_m3_iso.sh` PIPE path did NOT set mode=1 until
-> 2026-07-14, so the eMMC-run PIPE this cycle likely used the CPU fallback; the runner now sets
-> mode=1, so the next board run exercises the fabric CoreFFT path.) Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
+> `sar_cpu_fft` (`src/sar/sar_fft.c`, mode 0) is the **legacy fallback** — the 2026-07-04 note below that
+> calls the FFT a CPU path is superseded. The 2026-07-20 board run confirmed `fft_mode=1` (fabric CoreFFT)
+> at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
-> `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`. Open next: per-stage timing
-> capture on the next board run; the NDSU production scene; and automating the closed-loop sim→HIL gate.
+> `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
+> **Pipeline total: 110.8 s** (measured 2026-07-20) — the per-stage breakdown lives in exactly one place,
+> [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current design
+> (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
+> [`docs/SAR_DESIGN.md`](SAR_DESIGN.md). Open next: the NDSU production scene; and automating the
+> closed-loop sim→HIL gate.
 >
-> **✅ CURRENT STATUS (2026-07-04 LATEST) — SAR PIPELINE VALIDATED END-TO-END ON SILICON, image
-> corr=0.9923 vs golden.** The FFT runs on the **MSS U54 CPU** (`src/sar/sar_fft.c`, L1-BFP full-precision
-> radix-2) because the HLS `K_FFT` butterfly is unsynthesizable on SmartHLS 2025.2 (drops the twiddle term
-> → passthrough; 3 structural fixes failed, cosim blocked). Fabric does resample/corner-turn/window/detect;
-> FFT is firmware, ~120 s/frame. Full status + per-stage timing + latency roadmap:
+> **✅ STATUS (2026-07-04) — SAR PIPELINE VALIDATED END-TO-END ON SILICON, image
+> corr=0.9923 vs golden.** The HLS `K_FFT` butterfly is unsynthesizable on SmartHLS 2025.2 (drops the
+> twiddle term → passthrough; 3 structural fixes failed, cosim blocked), so the HLS FFT was abandoned;
+> the shipping FFT is the fabric CoreFFT chain (see the 2026-07-14 block above). Fabric does
+> resample/corner-turn/window/FFT; **detect runs on the MSS CPU** (`detect_mode` @`0xB0059118`) because
+> SmartHLS mis-synthesizes the fabric detect's sign extension. Full status + per-stage timing + latency roadmap:
 > [`docs/fpga/SAR_PIPELINE_STATUS.md`](fpga/SAR_PIPELINE_STATUS.md); silicon-debug harness + learnings:
 > [`docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md). The CoreFFT note below is historical.
 >
@@ -90,7 +94,8 @@
 
 | Repo | Path | Role | Git |
 |---|---|---|---|
-| **sarProcessor** (this) | `…\github\sarProcessor` | **Canonical.** Python golden pipeline (`src/`), host JTAG tools (`mpfs/host/`), FPGA design + HLS kernels + Libero project (`mpfs/fpga/`), and the board firmware (SoftConsole project under `mpfs/fpga/libero_sar/softconsole/`). | git → `github.com/futureproofbear/sarProcessor` (LFS) |
+| **mpfs250t-sar-ifp** (this) | `…\github\mpfs250t-sar-ifp` | **Canonical** for firmware, host tooling and docs. Python golden pipeline (`src/`), host JTAG tools (`mpfs/host/`), FPGA design + HLS kernels (`mpfs/fpga/`), and the board firmware (SoftConsole project under `mpfs/fpga/libero_sar/softconsole/`). | git → `github.com/futureproofbear/mpfs250t-sar-ifp` (LFS) |
+| sarProcessor | `…\github\sarProcessor` | **Retired as canonical**, but the Libero projects and exported bitstreams historically live here (`libero_ffv/export/SAR_TOP_ffv.job`). | git (LFS) |
 | **polarfire-soc** | `…\github\polarfire-soc` | **Vendor reference (the "Software Index" + "Driver Layer").** Doc mirror, HSS source, bare-metal HAL library, examples, Icicle reference design. Read-only — cite, don't edit. | vendor clone |
 | orbitDesign | `…\github\orbitDesign` | **Unrelated** (orbital-mechanics study). Ignore unless explicitly asked. | — |
 
@@ -116,7 +121,8 @@
   completion** — the FlashPro6 HID wedges only when a transfer is *killed/interrupted* mid-stream, not
   inherently on sustained traffic (see §7).
 - **Partition:** host PC (Python) does parse/geometry/coeff-gen/quantize + golden + post; **U54_1**
-  orchestrates; **FPGA fabric** does the heavy compute (resample→window→FFT→corner-turn→FFT→detect).
+  orchestrates and runs detect; **FPGA fabric** does the heavy compute
+  (resample→window→FFT→corner-turn→FFT). Fabric clock 62.5 MHz, timing MET.
 
 ### Crawl / Walk / Run — where THIS project sits
 The vendor "Crawl(Linux)/Walk(bare-metal+AMP)/Run(fabric accel)" ladder applies, but **this project
@@ -150,7 +156,7 @@ Highest-value docs for this project:
 
 > Two memory/config docs (`mpfs-memory-configuration.md`, `mpfs-memory-hierarchy.md`) are the most
 > load-bearing for the current data-plane debug — see the analysis in
-> `docs/fpga/SAR_BRINGUP_REPORT.md` §9.
+> `docs/fpga/history/SAR_BRINGUP_REPORT.md` §9.
 
 ---
 
@@ -186,8 +192,8 @@ L2-coherency handling (see SAR_BRINGUP_REPORT §9.2) for *all* buffers, not some
 - **REAL / built (use this):** per-kernel SmartHLS model — `<SC>/sar/sar_kernels.h` +
   `<SC>/sar/sar_sequencer.c`. Six AXI4-Lite slaves on **MSS FIC0 @ `0x60000000`**, 4 KiB each:
   `K_CORNER_TURN 0x60000000`(SLAVE0), `K_WINDOW 0x60001000`(1), `K_DETECT 0x60002000`(2),
-  `K_RESAMPLE 0x60003000`(3), `K_FFT_FEEDER 0x60004000`(4), `DMA_CTRL 0x60005000`(5,
-  CoreAXI4DMAController). Per kernel: `HLS_START 0x08` (write 1 = start; read 0 = done),
+  `K_RESAMPLE 0x60003000`(3), `K_FFT_FEEDER 0x60004000`(4), `K_FFT_UNLOADER 0x60005000`(5 — the
+  `CoreAXI4DMAController` that used to own this window was removed). Per kernel: `HLS_START 0x08` (write 1 = start; read 0 = done),
   `HLS_ARG0 0x0c`, `ARG1 0x10`, `ARG2 0x14`, `ARG3 0x18`.
 - **LEGACY / aspirational (do NOT assume on hardware):** monolithic accelerator model —
   `<SC>/sar/sar_accel_driver.h` with a single block at `SAR_ACCEL_BASE 0x60000000`,
@@ -284,9 +290,9 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 - **FPGA docs — organised set (read before re-deriving):**
   - *Architecture & conventions (current):* `docs/fpga/AMBA_ARCHITECTURE.md` (definitive interconnect
     design), `docs/fpga/FABRIC_INTERCONNECT_CONVENTIONS.md` (silent-failure firebreaks +
-    `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/WIRING_GUIDE.md`, `docs/regmap.md`.
-  - *Status / active:* `docs/fpga/SAR_BRINGUP_REPORT.md` (full on-silicon bring-up + doc cross-check §9),
-    `docs/fpga/dma_fix_plan.md` (DMA control-slave root-cause→fix, §7g RESOLVED),
+    `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/WIRING_GUIDE.md`, `docs/fpga/history/regmap.md`.
+  - *Status / active:* `docs/fpga/history/SAR_BRINGUP_REPORT.md` (full on-silicon bring-up + doc cross-check §9),
+    `docs/fpga/history/dma_fix_plan.md` (DMA control-slave root-cause→fix, §7g RESOLVED),
     `docs/fpga/SMARTDEBUG_RUNBOOK.md` (reusable active-probe runbook), `docs/BRINGUP.md`.
   - *History (resolved journey — `docs/fpga/history/`):* `M1_cosim.md`, `M2_integration.md`,
     `dataplane_bringup_vplan.md`, `dataplane_fix_plan.md` (superseded), `fic0s_probe_plan.md`,
@@ -348,12 +354,19 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
   feeding the DMA's reduced AXI4-Lite control through a 64→32 DWC, black-holing reads; fix = CIC
   `TARGET5_TYPE=1` (AXI4-Lite) + 11-bit address slice (`sd_create_pin_slices`). **Both interconnects
   upgraded to CoreAXI4Interconnect 3.0.130** (was 2.9.100; DMA = CoreAXI4DMAController 2.2.107, CoreFFT
-  8.1.100). Detail: `docs/fpga/dma_fix_plan.md` §7g + `docs/fpga/AMBA_ARCHITECTURE.md`.
+  8.1.100). Detail: `docs/fpga/history/dma_fix_plan.md` §7g + `docs/fpga/AMBA_ARCHITECTURE.md`.
 - DDR JTAG loopback + CRC integrity (M0). **Bulk JTAG load integrity proven** (2026-06-30): 1 MB and
   8 MB loads byte-identical to source (`dump_image` + host cmp, MD5 match), and confirmed via the
   on-target CRC32 mailbox (§4.5).
 
 **NOT yet done / open:**
+
+> ⚠ The list below is the 2026-07-01 snapshot and is **superseded** by the status blocks at the top of
+> this file: the full PFA pipeline now runs end-to-end on silicon at 62.5 MHz with timing MET
+> (110.8 s, corr 0.9923, scene loaded from on-board eMMC in 78 s), the DMA has been removed in favour of
+> `fft_unloader`, and the fabric CoreFFT path is confirmed at runtime. It is kept for the root-cause
+> history (the timing-closure lesson), not as a to-do list.
+
 - **M3 full PFA pipeline — root-caused to FPGA timing closure; 62.5 MHz fix PROVEN
   (2026-07-01), bootable bitstream pending.** The full PFA pipeline was wired into firmware
   (PIPE mailbox → `sar_form_image`).
@@ -392,7 +405,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 ---
 
 ## 9. Cross-references
-- Deep bring-up + Microchip-doc cross-check: `docs/fpga/SAR_BRINGUP_REPORT.md`.
+- Deep bring-up + Microchip-doc cross-check: `docs/fpga/history/SAR_BRINGUP_REPORT.md`.
 - Persistent memory notes:
   `~/.claude/projects/c--Users-<you>-Documents-github-sarProcessor/memory/`
   (`sar-polarfire-architecture`, `sar-onsilicon-fabric-dataplane`, `mpfs-boot-mode-0-for-debug`,

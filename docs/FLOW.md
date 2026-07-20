@@ -21,7 +21,8 @@ address windows; this demo uses the **cached 32-bit window at `0x8000_0000`**.
 | Non-cached write-combine | `0xD000_0000` | `0x18_0000_0000` | streaming writes                     |
 
 To *guarantee* the write reached the DRAM (not just L2 cache), retarget
-`DDR_TEST_BASE` to `DDR_NONCACHED_BASE_32` in [e51.c](src/application/hart0/e51.c).
+`DDR_TEST_BASE` to `DDR_NONCACHED_BASE_32` in
+[e51.c](../mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/application/hart0/e51.c).
 
 ---
 

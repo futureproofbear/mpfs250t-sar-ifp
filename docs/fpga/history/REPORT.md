@@ -5,15 +5,15 @@
 > **on-board eMMC pipeline (M1–M3) is proven on silicon** — a CPHD scene is stored on the eMMC, loaded +
 > focused on-board (`sar_form_image` → SAR_SEQ_OK; focused image confirmed via ROI crop), and the output
 > persisted back to the card, retiring the recurring ~3 h JTAG scene load. Authoritative current status:
-> [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3.
+> [`PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md) + [`fpga/SILICON_ISO_TEST_RUNBOOK.md`](../SILICON_ISO_TEST_RUNBOOK.md) § eMMC M1/M2/M3.
 > The 2026-06/07 status below is retained as history.
 
 **Project:** Lightweight SAR image formation from Umbra Complex Phase History Data (CPHD), with a PolarFire SoC (MPFS Icicle Kit) embedded port
 **Date:** 2026-06-16 (status updated 2026-06-30)
-**Status:** Algorithm complete and verified; CPU port works; FPGA fabric **built, programmed, and brought up on silicon** — data plane and DMA control slave both fixed and verified on the board (see [`fpga/SAR_BRINGUP_REPORT.md`](fpga/SAR_BRINGUP_REPORT.md)). **M3 full PFA pipeline root-caused to FPGA timing closure** (bitstream fails timing at 125 MHz on the single fabric clock); the **62.5 MHz fix is now PROVEN** — headless P&R closes timing completely (0 setup violations of 315,349 pins, 0 hold) — with a bootable bitstream still pending a SAR_TOP rebuild (see §5).
+**Status:** Algorithm complete and verified; CPU port works; FPGA fabric **built, programmed, and brought up on silicon** — data plane and DMA control slave both fixed and verified on the board (see [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md)). **M3 full PFA pipeline root-caused to FPGA timing closure** (bitstream fails timing at 125 MHz on the single fabric clock); the **62.5 MHz fix is now PROVEN** — headless P&R closes timing completely (0 setup violations of 315,349 pins, 0 hold) — with a bootable bitstream still pending a SAR_TOP rebuild (see §5).
 
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
-> gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](PROJECT_SOURCE_OF_TRUTH.md)
+> gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md)
 > "CURRENT STATUS". The `CoreAXI4DMAController 2.2.107` referenced below as the FFT-stream datamover is
 > stale — it deadlocked on the 2nd back-to-back S2MM transaction and was replaced by the `fft_unloader`
 > HLS kernel (AXI4-Stream slave → AXI4 write master). The fixes are fabric-level (firmware unchanged);
@@ -93,8 +93,8 @@ Location: [src/](src/)
 > and **CoreAXI4DMAController 2.2.107**, stitched over two **CoreAXI4Interconnect 3.0.130** crossbars
 > (data + control) to the MSS/FIC — built into a programmed bitstream and brought up on silicon. The
 > Linux/UIO/CMA `FpgaBackend` runtime model below was **abandoned** in favor of bare-metal RISC-V
-> (U54_1) over JTAG. See [`fpga/SAR_BRINGUP_REPORT.md`](fpga/SAR_BRINGUP_REPORT.md),
-> [`fpga/AMBA_ARCHITECTURE.md`](fpga/AMBA_ARCHITECTURE.md).
+> (U54_1) over JTAG. See [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md),
+> [`fpga/AMBA_ARCHITECTURE.md`](../AMBA_ARCHITECTURE.md).
 
 Location: [mpfs/](mpfs/)
 
@@ -134,7 +134,7 @@ Architecture — storage-to-storage batch processor with a CPU/FPGA partition:
 
 > **Status (2026-06-30):** Milestones 0-2 below are **done** — the original Linux-on-Icicle plan
 > was replaced by a JTAG-only, bare-metal RISC-V runtime (see [`mpfs-REPORT.md`](mpfs-REPORT.md) and
-> [`fpga/SAR_BRINGUP_REPORT.md`](fpga/SAR_BRINGUP_REPORT.md)). The board is an **MPFS250T_ES
+> [`fpga/SAR_BRINGUP_REPORT.md`](../SAR_BRINGUP_REPORT.md)). The board is an **MPFS250T_ES
 > (FCVG484)** programmed via the **embedded FlashPro6 on connector J33** (boot mode 1). What remains
 > open is only the full DMA *transfer* test (control verified; real descriptor + START data-move not
 > yet run). Bulk-data transport over JTAG is **slow but viable run-to-completion** — measured
@@ -177,7 +177,7 @@ closure PROVEN.** Headless P&R of the 62.5 MHz design (with the CoreFFT `CLK`↔
 (`mpfs/fpga/libero_vm`); the clock-lowering fix is confirmed. **Caveat:** a fully *bootable* bitstream
 still needs the SAR_TOP SmartDesign rebuilt with the (already regenerated) 62.5 MHz CCC — the MSS is
 coupled to the SmartDesign flow and resists the pure headless netlist flow (verified recipe in
-[`fpga/SAR_TOP_RECOVERY.md`](fpga/SAR_TOP_RECOVERY.md)). Pending: that bootable rebuild + reprogram +
+[`fpga/SAR_TOP_RECOVERY.md`](../SAR_TOP_RECOVERY.md)). Pending: that bootable rebuild + reprogram +
 re-run; the firmware itself is valid (PIPE/CRC mailboxes, DMA external-stream-descriptor, bounded harness).
 
 ### Risks / items to flag

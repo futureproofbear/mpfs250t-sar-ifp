@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 470" width="1120" height="470" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1120" height="470" fill="#ffffff"/>
+
+  <defs>
+    <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#444444"/>
+    </marker>
+    <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4a7c3f"/>
+    </marker>
+  </defs>
+
+  <text x="560" y="32" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">Fabric FFT chain — CoreFFT hard IP (the shipping FFT path)</text>
+  <text x="560" y="54" text-anchor="middle" font-size="13" fill="#555555">Selected at runtime by SAR_FFTMODE @ 0xB005_9110 = 1. Mode 0 is the legacy CPU FFT in sar_fft.c.</text>
+
+  <!-- DDR src -->
+  <rect x="24" y="120" width="104" height="76" rx="5" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.6"/>
+  <text x="76" y="146" text-anchor="middle" font-size="13" font-weight="600" fill="#4a3670">DDR src</text>
+  <text x="76" y="164" text-anchor="middle" font-size="10.5" fill="#6b4fa0">int16 I/Q</text>
+  <text x="76" y="180" text-anchor="middle" font-size="10.5" fill="#6b4fa0">4 B/px</text>
+
+  <path d="M 132 158 L 158 158" stroke="#444444" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="145" y="150" text-anchor="middle" font-size="9.5" fill="#666666">FIC0</text>
+
+  <!-- feeder -->
+  <rect x="162" y="112" width="146" height="92" rx="5" fill="#e6e0f0" stroke="#5a4a80" stroke-width="1.8"/>
+  <text x="235" y="136" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a1a1a">fft_feeder</text>
+  <text x="235" y="154" text-anchor="middle" font-size="10.5" fill="#333333">AXI4 read master</text>
+  <text x="235" y="169" text-anchor="middle" font-size="10.5" fill="#333333">mem -&gt; AXI4-Stream</text>
+  <text x="235" y="188" text-anchor="middle" font-size="10.5" font-style="italic" fill="#8a2f2f">hand-written Verilog</text>
+
+  <path d="M 312 158 L 338 158" stroke="#444444" stroke-width="2" marker-end="url(#a2)"/>
+
+  <!-- gearbox in -->
+  <rect x="342" y="112" width="120" height="92" rx="5" fill="#e6e0f0" stroke="#5a4a80" stroke-width="1.8"/>
+  <text x="402" y="136" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a1a1a">gearbox</text>
+  <text x="402" y="154" text-anchor="middle" font-size="10.5" fill="#333333">64-bit beat</text>
+  <text x="402" y="169" text-anchor="middle" font-size="10.5" fill="#333333">-&gt; 2 samples</text>
+  <text x="402" y="188" text-anchor="middle" font-size="10.5" fill="#333333">zero-loss</text>
+
+  <path d="M 466 158 L 492 158" stroke="#444444" stroke-width="2" marker-end="url(#a2)"/>
+
+  <!-- CoreFFT -->
+  <rect x="496" y="100" width="180" height="116" rx="5" fill="#dcedd6" stroke="#4a7c3f" stroke-width="2.4"/>
+  <text x="586" y="126" text-anchor="middle" font-size="15" font-weight="700" fill="#1a1a1a">CoreFFT</text>
+  <text x="586" y="145" text-anchor="middle" font-size="10.5" fill="#333333">Microchip hard IP</text>
+  <text x="586" y="161" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt, in-place radix-2 DIT</text>
+  <text x="586" y="177" text-anchor="middle" font-size="10.5" fill="#333333">block-floating-point mode</text>
+  <text x="586" y="196" text-anchor="middle" font-size="10.5" font-weight="600" fill="#4a7c3f">emits SCALE_EXP per row</text>
+  <text x="586" y="210" text-anchor="middle" font-size="9.5" fill="#666666">SLOWCLK &lt;= CLK/8</text>
+
+  <path d="M 680 158 L 706 158" stroke="#444444" stroke-width="2" marker-end="url(#a2)"/>
+
+  <!-- unloader -->
+  <rect x="710" y="112" width="152" height="92" rx="5" fill="#e6e0f0" stroke="#5a4a80" stroke-width="1.8"/>
+  <text x="786" y="136" text-anchor="middle" font-size="13.5" font-weight="600" fill="#1a1a1a">fft_unloader</text>
+  <text x="786" y="154" text-anchor="middle" font-size="10.5" fill="#333333">AXI4-Stream -&gt; mem</text>
+  <text x="786" y="169" text-anchor="middle" font-size="10.5" fill="#333333">AXI4 write master</text>
+  <text x="786" y="188" text-anchor="middle" font-size="10.5" font-style="italic" fill="#8a2f2f">hand-written Verilog</text>
+
+  <path d="M 866 158 L 892 158" stroke="#444444" stroke-width="2" marker-end="url(#a2)"/>
+  <text x="879" y="150" text-anchor="middle" font-size="9.5" fill="#666666">FIC0</text>
+
+  <!-- DDR dst -->
+  <rect x="896" y="120" width="104" height="76" rx="5" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.6"/>
+  <text x="948" y="146" text-anchor="middle" font-size="13" font-weight="600" fill="#4a3670">DDR dst</text>
+  <text x="948" y="164" text-anchor="middle" font-size="10.5" fill="#6b4fa0">int16 I/Q</text>
+  <text x="948" y="180" text-anchor="middle" font-size="10.5" fill="#6b4fa0">4 B/px</text>
+
+  <!-- SCALE_EXP path -->
+  <path d="M 586 220 L 586 262 L 300 262 L 300 292" stroke="#4a7c3f" stroke-width="2" fill="none" stroke-dasharray="6 3" marker-end="url(#a3)"/>
+  <text x="600" y="240" font-size="11" fill="#4a7c3f">SCALE_EXP per row -&gt; captured in sar_row_exp[]</text>
+
+  <!-- firmware renorm box -->
+  <rect x="150" y="296" width="300" height="76" rx="5" fill="#fbe3d6" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="300" y="320" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">Firmware global renormalize</text>
+  <text x="300" y="339" text-anchor="middle" font-size="11" fill="#333333">emax = max(exp_i); row_i &gt;&gt;= (emax - exp_i)</text>
+  <text x="300" y="357" text-anchor="middle" font-size="10.5" fill="#666666">brings all rows to one common block exponent</text>
+
+  <!-- BFP rationale -->
+  <rect x="474" y="296" width="526" height="76" rx="5" fill="#fff8e0" stroke="#c9a227" stroke-width="1.5"/>
+  <text x="488" y="318" font-size="11.5" font-weight="600" fill="#6b5400">Why block floating point, not per-stage &gt;&gt;1:</text>
+  <text x="488" y="336" font-size="11.5" fill="#5a4a10">a classic 1/N implemented as &gt;&gt;1 after each of the 13 butterfly stages truncates the small</text>
+  <text x="488" y="352" font-size="11.5" fill="#5a4a10">AC bins to zero, collapsing the image to DC-only (corr ~0). Full precision plus one block</text>
+  <text x="488" y="368" font-size="11.5" fill="#5a4a10">exponent preserves the AC content. This is what made the fixed-point path match float golden.</text>
+
+  <!-- footer notes -->
+  <text x="24" y="404" font-size="11" fill="#666666">Note: the IP's SCALE_EXP register is NOT the same quantity as a software BFP block exponent (the IP applies an ~unconditional 1/N scale). Do not compare the two directly.</text>
+  <text x="24" y="424" font-size="11" fill="#666666">The feeder and unloader are hand-written Verilog because SmartHLS synthesizes mem &lt;-&gt; stream kernels to dead RTL on this toolchain (mem -&gt; mem HLS kernels are fine).</text>
+  <text x="24" y="444" font-size="11" fill="#666666">An earlier HLS FFT (hls_fft/fft_in_place_bfp) dropped the twiddle term in generated RTL on silicon while every C-simulation passed at corr 0.9999 — it is not used. See SAR_PIPELINE_STATUS.md.</text>
+  <text x="24" y="462" font-size="11" fill="#666666">Re-arm hazard: the golden testbench only ran one transform. The MEMBUF overwrite and READ_OUTP/DATAO-latency traps appear only on the second and later frames.</text>
+</svg>

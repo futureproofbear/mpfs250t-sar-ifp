@@ -1,11 +1,15 @@
 # SAR Pipeline — Full Process (host → board → host)
 
-> **✅ STATUS 2026-07-04 (LATEST — supersedes the CoreFFT/HLS-FFT notes below):** Pipeline **VALIDATED
-> end-to-end on silicon, image corr=0.9923 vs golden**. The FFT now runs on the **MSS U54 CPU**
-> (`src/sar/sar_fft.c`, L1-BFP) — the HLS `K_FFT` butterfly is unsynthesizable on SmartHLS 2025.2 (drops
-> the twiddle term → passthrough). All other stages (resample/corner-turn/window/detect) stay on the
-> fabric. See **[`SAR_PIPELINE_STATUS.md`](SAR_PIPELINE_STATUS.md)** for current status, per-stage timing,
-> and the latency roadmap. The CoreFFT-era notes below are historical.
+> **✅ STATUS 2026-07-20 (LATEST — supersedes the HLS-FFT notes below):** Pipeline **VALIDATED
+> end-to-end on silicon, image corr=0.9923 vs golden**, total **110.8 s** per frame with the scene
+> loaded from the board's own eMMC in 78 s. The range/azimuth FFTs run on the **fabric CoreFFT** chain
+> (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected by `SAR_FFTMODE` @`0xB0059110` = 1 and
+> confirmed at runtime; the CPU `sar_fft.c` is the mode-0 legacy fallback. (History: the HLS `K_FFT`
+> butterfly is unsynthesizable on SmartHLS 2025.2 — it drops the twiddle term → passthrough — which is
+> why the HLS FFT was abandoned in favour of CoreFFT.) Resample/corner-turn/window run on the fabric;
+> **detect runs on the MSS CPU** (`detect_mode` @`0xB0059118`), the fabric detect being blocked by a
+> SmartHLS sign-extension miscompile. Per-stage timing: **[`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5**
+> (single source of truth). Detailed current design: [`../SAR_DESIGN.md`](../SAR_DESIGN.md).
 >
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
 > gearbox output skid FIFO; see [`PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md)
@@ -178,7 +182,7 @@ output skid FIFO. Firmware `fft_pass()` **arms the unloader, then the feeder, an
 
 > **Superseded (old DMA path, kept for context):** the removed DMA was armed before the feeder started
 > (descriptor 0: dst, byte-count `nbeats·8`, config `valid|dest-incr|src=stream`), polled via INTR0
-> (`0x10`, W1C at `0x18`), and required the CIC Slave-5 AXI4-Lite fix ([`dma_fix_plan.md`](dma_fix_plan.md)).
+> (`0x10`, W1C at `0x18`), and required the CIC Slave-5 AXI4-Lite fix ([`dma_fix_plan.md`](history/dma_fix_plan.md)).
 > None of that applies to the current `fft_unloader` path.
 
 ---

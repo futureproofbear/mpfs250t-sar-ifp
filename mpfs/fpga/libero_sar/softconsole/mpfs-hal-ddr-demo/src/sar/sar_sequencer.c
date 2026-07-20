@@ -29,6 +29,37 @@
 #define SAR_FRAME_BEATS   ((uint32_t)(SAR_FRAME_SAMPLES / 2u))   /* 2 samples / 64-bit beat */
 #define SAR_DEFAULT_SPINS 0x40000000u
 
+/* ---- targeted coefficient-bank writeback ----------------------------------
+ * The resample loop only needs the two coefficient tables the MSS just wrote to
+ * be visible in DDR to the non-coherent FIC0 kernel. The HAL's flush_l2_cache()
+ * is a way-by-way walk -- for each of the 16 ways it reads 131 KiB from the L2
+ * zero device (~268k volatile loads) and perturbs the WayMask allocation policy
+ * -- so using it per line evicts the whole 2 MiB L2 to publish 48 KiB. Instead
+ * write just the covering lines to the CCACHE FLUSH64 register (writeback +
+ * invalidate of the line containing the given physical address): ~768 stores.
+ *
+ * A bank is NOT 48 KiB contiguous: idx is Np*4 B at +0x0000 and wq is Np*2 B at
+ * +0x10000, with a hole between (see ddr_sar_layout.h). Flushing one 48 KiB run
+ * from the bank base would cover idx + half the hole and MISS wq entirely, so
+ * the kernel would gather with stale weights -- a still-focused but subtly wrong
+ * image. Flush the two ranges separately. */
+static inline void flush_range_to_ddr(uint64_t base, uint64_t bytes)
+{
+    uint64_t addr = base & ~(uint64_t)(CACHE_BLOCK_BYTE_LENGTH - 1u);
+    const uint64_t end = base + bytes;
+    for (; addr < end; addr += CACHE_BLOCK_BYTE_LENGTH)
+        CACHE_CTRL->FLUSH64 = addr;
+}
+
+/* Publish coefficient bank `b` (n entries: idx int32[n], wq int16[n]) to DDR. */
+static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
+{
+    __asm volatile ("fence rw, rw");   /* coeff stores land before the flush walk */
+    flush_range_to_ddr(SAR_COEF_IDX(b), (uint64_t)n * 4u);
+    flush_range_to_ddr(SAR_COEF_WQ(b),  (uint64_t)n * 2u);
+    __asm volatile ("fence rw, rw");   /* flush retires before the kernel is armed */
+}
+
 /* 32-bit address views the fabric masters drive onto FIC0 -> DDR. */
 #define BUF_SIG      ((uint32_t)SAR_SIG_ADDR)
 #define BUF_SCRATCH  ((uint32_t)SAR_SCRATCH_ADDR)
@@ -44,8 +75,14 @@
  * sidestepping the pipeline-context stall that wedged the CoreFFT streaming path.
  * HLS_ARG0 = src, HLS_ARG1 = dst, HLS_ARG2 = nrows, HLS_START = go/done. */
 #define SAR_PROG_ADDR     0xB0059100u   /* progress: [0]=pass(1/2) [1]=cur idx [2]=total [3]=heartbeat (JTAG-pollable) */
+/* The progress word must reach PHYSICAL DDR or a JTAG poll reads a stale value and the
+ * counter looks frozen -- indistinguishable from a hung pipeline. This used to happen for
+ * free, as a side effect of the per-line whole-L2 flush in resample_2pass(); that flush is
+ * now targeted at the coefficient banks only, so publish this line explicitly. The four
+ * words are 16 B at a 64 B-aligned address = exactly one cache line, so this is one store. */
 #define SAR_PROG(pass,idx,tot) do { volatile uint32_t *pg=(volatile uint32_t*)(uintptr_t)SAR_PROG_ADDR; \
-    pg[0]=(uint32_t)(pass); pg[1]=(uint32_t)(idx); pg[2]=(uint32_t)(tot); pg[3]++; } while (0)
+    pg[0]=(uint32_t)(pass); pg[1]=(uint32_t)(idx); pg[2]=(uint32_t)(tot); pg[3]++; \
+    __asm volatile ("fence rw, rw"); flush_range_to_ddr(SAR_PROG_ADDR, 16u); } while (0)
 
 /* Runtime FFT-mode selector (JTAG/host-writable DDR word): 0 = CPU sar_cpu_fft (default,
  * always-correct global-block-exponent path); 1 = fabric CoreFFT chain (fft_feeder ->
@@ -184,9 +221,9 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
         /* FIC0 non-coherent: the idx/wq coeffs just computed by the MSS (bank b) live in
-         * L2, not DDR. Flush before the kernel reads them via FIC0, else it gathers with
-         * stale coeffs. (Per-line; whole-L2 flush is the only granularity this HAL has.) */
-        flush_l2_cache(1u);
+         * L2, not DDR. Publish just that bank before the kernel reads it via FIC0, else
+         * it gathers with stale coeffs. */
+        flush_coef_bank_to_ddr(b, Np);
         sar_k_start(K_RESAMPLE);
         if (i + 1u < g->M)
             sar_coeffs_pass1(g, i + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
@@ -218,7 +255,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
         sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u);   /* out (Mp-wide) */
-        flush_l2_cache(1u);   /* flush just-computed coeffs L2 -> DDR (non-coherent FIC0) */
+        flush_coef_bank_to_ddr(b, Mp);   /* publish just-computed coeffs L2 -> DDR (non-coherent FIC0) */
         sar_k_start(K_RESAMPLE);
         if (j + 1u < Np)
             sar_coeffs_pass2(g, j + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),

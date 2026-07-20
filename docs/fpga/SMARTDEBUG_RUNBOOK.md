@@ -4,7 +4,7 @@
 completes a read (`RVALID` never asserts → hart-1 hangs). The RTL is deterministic, so a single
 flip-flop — the target FSM state register `currState` — plus `ARVALID` resolves the root cause.
 
-> Companion to [dma_fix_plan.md](dma_fix_plan.md). Background: §7b/§7c/§7d there.
+> Companion to [dma_fix_plan.md](history/dma_fix_plan.md). Background: §7b/§7c/§7d there.
 
 ---
 

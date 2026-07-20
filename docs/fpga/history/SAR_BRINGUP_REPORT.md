@@ -3,7 +3,7 @@
 > **▶ 2026-07-14:** repo now **standalone `mpfs250t-sar-ifp`**; the on-board **eMMC pipeline (M1–M3) is
 > proven on silicon** (scene stored on eMMC, loaded + focused on-board, output persisted — retiring the
 > ~3 h JTAG scene load). Current status:
-> [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md) + [`SILICON_ISO_TEST_RUNBOOK.md`](SILICON_ISO_TEST_RUNBOOK.md) § eMMC. Below is retained as bring-up history.
+> [`../PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md) + [`SILICON_ISO_TEST_RUNBOOK.md`](../SILICON_ISO_TEST_RUNBOOK.md) § eMMC. Below is retained as bring-up history.
 
 Target: Microchip PolarFire SoC Icicle Kit, **MPFS250T_ES** (engineering sample, FCVG484).
 Goal: GUI-free Synthetic Aperture Radar image formation (Polar Format Algorithm) with the
@@ -11,7 +11,7 @@ Goal: GUI-free Synthetic Aperture Radar image formation (Polar Format Algorithm)
 off-board prep/post — **JTAG is the only I/O path** (no Ethernet/SD/UART-bulk).
 
 > **Update 2026-07-04:** CoreFFT→DDR write-back is now the HLS `fft_unloader` (DMA removed) + a
-> gearbox output skid FIFO; see [`../PROJECT_SOURCE_OF_TRUTH.md`](../PROJECT_SOURCE_OF_TRUTH.md)
+> gearbox output skid FIFO; see [`../PROJECT_SOURCE_OF_TRUTH.md`](../../PROJECT_SOURCE_OF_TRUTH.md)
 > "CURRENT STATUS". The `CoreAXI4DMAController` (S2MM) / `DMA` instance described throughout this report
 > — including the "full DMA *transfer* test" open item and the `DMA` block in the §2 netlist / §1 data
 > plane — was **removed** (it deadlocked on the 2nd back-to-back S2MM transaction; 3 firmware/TDEST
@@ -298,7 +298,7 @@ synth → P&R (with `REPAIR_MIN_DELAY`, see §6.8) → bitstream → program →
    violations of 315,349 pins, 0 hold**, via the Libero VM-netlist custom flow (`mpfs/fpga/libero_vm`);
    the clock-lowering fix is confirmed. **Caveat:** a fully *bootable* bitstream still needs SAR_TOP
    rebuilt with the (already regenerated) 62.5 MHz CCC (the MSS is coupled to the SmartDesign flow and
-   resists the pure headless netlist flow) — verified recipe in [`SAR_TOP_RECOVERY.md`](SAR_TOP_RECOVERY.md).
+   resists the pure headless netlist flow) — verified recipe in [`SAR_TOP_RECOVERY.md`](../SAR_TOP_RECOVERY.md).
 
 ---
 
@@ -339,7 +339,7 @@ SoftConsole `C:\Microchip\SoftConsole-v2022.2-RISC-V-747`.
    (vs 25,847 setup violations at 125 MHz). The remaining step is producing a fully *bootable* bitstream:
    the SAR_TOP SmartDesign must be rebuilt with the (already regenerated) 62.5 MHz CCC, because the MSS
    is coupled to the SmartDesign flow and resists the pure headless netlist flow (verified recipe in
-   [`SAR_TOP_RECOVERY.md`](SAR_TOP_RECOVERY.md)). Then **reprogram** and re-run the `PIPE` pipeline,
+   [`SAR_TOP_RECOVERY.md`](../SAR_TOP_RECOVERY.md)). Then **reprogram** and re-run the `PIPE` pipeline,
    checking **correctness** (host golden compare), not just stage completion. Firmware is unchanged/valid
    (`PIPE`/`CRC` mailboxes, DMA external-stream-descriptor, bounded-wait harness). **Standing rule:**
    verify P&R timing closure before blaming logic/firmware.

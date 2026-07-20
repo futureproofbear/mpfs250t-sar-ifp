@@ -22,7 +22,7 @@ current implementation is a hybrid control-processor (MSS CPU) + FPGA-fabric rea
 PolarFire SoC MPFS250T_ES engineering-sample board, brought up JTAG-only.
 
 ## What is proven (on silicon)
-- Full pipeline runs end-to-end and forms a correctly focused image at full resolution — **corr ~0.97**
+- Full pipeline runs end-to-end and forms a correctly focused image at full resolution — **corr 0.9923**
   vs the CPHD-derived golden. Resample, window, and corner-turn are validated.
 - The fabric FFT chain is **phase-exact** (0.0° phase spread at 256 and 8192 points) and value-equals
   the CPU FFT (**corr 0.9999**); the feeder→FFT→gearbox→unloader path is zero-loss.
@@ -39,12 +39,12 @@ Latency (measured 2026-07-20: **110.8 s** per frame, not yet optimized; per-stag
 The range/azimuth FFTs already run on the fabric CoreFFT engine (phase-exact, and `fft_mode=1` is
 verified at runtime, see What is proven) — the dominant cost is the **resample** stage
 (**53.6 s of 110.8 s, 48%**), then **detect (19.7 s, 18%, still on the MSS CPU)**:
-1. Resample is the top target. Diagnose FIRST whether it is bound by **control-plane serialization**
-   (the kernel is armed once per line — ~16k processor→fabric arm/poll handshakes across both passes)
-   or by **DDR random-access latency** — the effective rate (~1 MB/s) is ~100× below DDR bandwidth, so
-   the loss is latency/orchestration, not bandwidth. Fixes, in order: batch the kernel to self-sequence
-   all lines on one arm (collapses ~16k handshakes to ~2); stage a row/tile in on-chip SRAM and
-   double-buffer (turns scattered DDR access into bursts); then parallel lanes across DDR banks.
+1. Resample is the top target, and one round is already banked: the fabric gather kernel was redesigned
+   (gather loop II 2→1, banked ~2.3×), taking resample 103.3 → 53.6 s. Stage-level measurement then
+   attributed the remainder to the kernel itself — **78% kernel-wait, 20% coefficient generation, 2% L2
+   flush** — so orchestration/coefficient work is no longer the lever. Next: the kernel's shared `m_axi`
+   port serialises the gather, so widen/split the interconnect; then stage a row/tile in on-chip SRAM and
+   double-buffer; then parallel lanes across DDR banks.
 2. Corner-turn is a DDR-hostile transpose — use a tiled block transpose through on-chip SRAM (bursts,
    bank-interleaved) and/or fuse it into the azimuth-FFT read to delete a whole DDR round-trip.
 3. A cache-coherent fabric interconnect removes the per-stage cache flushes (pure orchestration cost).
@@ -64,7 +64,10 @@ it in RTL or de-risk an `ap_int<16>` variant in simulation first. See `mpfs-plat
 ## Where to look
 Docs (source of truth — read before re-deriving):
 - `docs/PROJECT_SOURCE_OF_TRUTH.md` — authoritative index + anti-hallucination rules.
-- `docs/fpga/SAR_ARCHITECTURE_REPORT.md` — as-built pipeline, block usage, per-stage timing.
+- `docs/SAR_DESIGN.md` — the detailed current design (dataflow, buffer map, fixed-point contracts,
+  eMMC layout, register semantics, diagrams).
+- `docs/fpga/SAR_ARCHITECTURE_REPORT.md` — as-built pipeline, block usage, and the single numeric
+  source of truth for per-stage timing (§5).
 - `docs/fpga/SAR_PIPELINE_STATUS.md` — status + per-stage timing + latency roadmap.
 - `docs/fpga/SAR_PIPELINE_PROCESS.md` — pipeline math/orchestration.
 - `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`, `LIBERO_HEADLESS_PLAYBOOK.md`, `SMARTDEBUG_RUNBOOK.md`,

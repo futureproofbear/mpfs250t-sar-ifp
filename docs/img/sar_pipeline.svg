@@ -1,0 +1,131 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 430" width="1240" height="430" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1240" height="430" fill="#ffffff"/>
+
+  <text x="620" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">SAR image-formation pipeline — as built on MPFS250T_ES</text>
+  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-20: 110.8 s total.</text>
+
+  <!-- ============ input ============ -->
+  <rect x="24" y="96" width="118" height="86" rx="6" fill="#f2f2f2" stroke="#888888" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="83" y="123" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">eMMC LOAD</text>
+  <text x="83" y="142" text-anchor="middle" font-size="11" fill="#555555">SARI partition</text>
+  <text x="83" y="158" text-anchor="middle" font-size="11" fill="#555555">on-board</text>
+  <text x="83" y="175" text-anchor="middle" font-size="12" font-weight="600" fill="#b5651d">78 s</text>
+
+  <path d="M 146 139 L 172 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>
+
+  <defs>
+    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#444444"/>
+    </marker>
+  </defs>
+
+  <!-- ============ stage boxes ============ -->
+  <!-- 1 resample -->
+  <rect x="176" y="88" width="166" height="102" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="259" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Resample</text>
+  <text x="259" y="130" text-anchor="middle" font-size="10.5" fill="#333333">keystone / polar-format</text>
+  <text x="259" y="145" text-anchor="middle" font-size="10.5" fill="#333333">range + transpose + azimuth</text>
+  <text x="259" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric gather kernel</text>
+  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">53.6 s</text>
+
+  <!-- 2 window -->
+  <rect x="366" y="88" width="130" height="102" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="431" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Window</text>
+  <text x="431" y="130" text-anchor="middle" font-size="10.5" fill="#333333">2-D Hamming</text>
+  <text x="431" y="145" text-anchor="middle" font-size="10.5" fill="#333333">hamr[j] x hamc[k]</text>
+  <text x="431" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel</text>
+  <text x="431" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">6.0 s</text>
+
+  <!-- 3 range fft -->
+  <rect x="520" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
+  <text x="593" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Range FFT</text>
+  <text x="593" y="130" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt per row</text>
+  <text x="593" y="145" text-anchor="middle" font-size="10.5" fill="#333333">block floating point</text>
+  <text x="593" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
+  <text x="593" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.0 s</text>
+
+  <!-- 4 corner turn -->
+  <rect x="690" y="88" width="138" height="102" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
+  <text x="759" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Corner-turn</text>
+  <text x="759" y="130" text-anchor="middle" font-size="10.5" fill="#333333">global transpose</text>
+  <text x="759" y="145" text-anchor="middle" font-size="10.5" fill="#333333">tiled via LSRAM</text>
+  <text x="759" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel</text>
+  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">7.3 s</text>
+
+  <!-- 5 azimuth fft -->
+  <rect x="852" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
+  <text x="925" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Azimuth FFT</text>
+  <text x="925" y="130" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt per row</text>
+  <text x="925" y="145" text-anchor="middle" font-size="10.5" fill="#333333">same engine reused</text>
+  <text x="925" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
+  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.2 s</text>
+
+  <!-- 6 detect -->
+  <rect x="1022" y="88" width="130" height="102" rx="6" fill="#fbe3d6" stroke="#b5651d" stroke-width="1.8"/>
+  <text x="1087" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Detect</text>
+  <text x="1087" y="130" text-anchor="middle" font-size="10.5" fill="#333333">sqrt(I^2 + Q^2)</text>
+  <text x="1087" y="145" text-anchor="middle" font-size="10.5" fill="#333333">saturate to uint16</text>
+  <text x="1087" y="163" text-anchor="middle" font-size="11" fill="#b5651d">MSS U54 (CPU)</text>
+  <text x="1087" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">19.7 s</text>
+
+  <!-- arrows between stages -->
+  <path d="M 346 139 L 362 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>
+  <path d="M 500 139 L 516 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>
+  <path d="M 670 139 L 686 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>
+  <path d="M 832 139 L 848 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>
+  <path d="M 1002 139 L 1018 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>
+
+  <!-- ============ buffer lane ============ -->
+  <text x="24" y="238" font-size="12" font-weight="600" fill="#333333">DDR buffer</text>
+  <text x="24" y="253" font-size="12" font-weight="600" fill="#333333">holding result</text>
+
+  <rect x="176" y="222" width="166" height="40" rx="4" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.4"/>
+  <text x="259" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#4a3670">SCRATCH</text>
+  <text x="259" y="254" text-anchor="middle" font-size="10" fill="#6b4fa0">0x9800_0000</text>
+
+  <rect x="366" y="222" width="130" height="40" rx="4" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.4"/>
+  <text x="431" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#4a3670">SCRATCH</text>
+  <text x="431" y="254" text-anchor="middle" font-size="10" fill="#6b4fa0">in place</text>
+
+  <rect x="520" y="222" width="146" height="40" rx="4" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.4"/>
+  <text x="593" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#4a3670">SCRATCH</text>
+  <text x="593" y="254" text-anchor="middle" font-size="10" fill="#6b4fa0">in place</text>
+
+  <rect x="690" y="222" width="138" height="40" rx="4" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.4"/>
+  <text x="759" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#4a3670">SIG</text>
+  <text x="759" y="254" text-anchor="middle" font-size="10" fill="#6b4fa0">0x8800_0000</text>
+
+  <rect x="852" y="222" width="146" height="40" rx="4" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.4"/>
+  <text x="925" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#4a3670">SIG</text>
+  <text x="925" y="254" text-anchor="middle" font-size="10" fill="#6b4fa0">in place</text>
+
+  <rect x="1022" y="222" width="130" height="40" rx="4" fill="#f7dede" stroke="#a03535" stroke-width="1.4"/>
+  <text x="1087" y="240" text-anchor="middle" font-size="12" font-weight="600" fill="#7a2626">OUT</text>
+  <text x="1087" y="254" text-anchor="middle" font-size="10" fill="#a03535">0xA800_0000</text>
+
+  <text x="24" y="290" font-size="11" fill="#666666">Buffers ping-pong SIG &lt;-&gt; SCRATCH so an in-place FFT never reads and writes the same page. Corner-turn is the only stage that must fully materialize the frame.</text>
+
+  <!-- ============ coherency note ============ -->
+  <rect x="176" y="306" width="976" height="42" rx="5" fill="#fff8e0" stroke="#c9a227" stroke-width="1.4"/>
+  <text x="190" y="324" font-size="11.5" font-weight="600" fill="#6b5400">FIC0 is non-coherent:</text>
+  <text x="316" y="324" font-size="11.5" fill="#5a4a10">every CPU-&gt;fabric handoff needs an L2 writeback, and every fabric-&gt;CPU handoff needs an invalidate. Stages run sequentially</text>
+  <text x="190" y="340" font-size="11.5" fill="#5a4a10">(arm kernel, poll DONE, arm next) — this is not a fused concurrent pipeline. See SAR_DESIGN.md "Cache coherency" for the flush contract.</text>
+
+  <!-- ============ legend ============ -->
+  <rect x="24" y="368" width="17" height="14" rx="3" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.4"/>
+  <text x="48" y="380" font-size="11.5" fill="#333333">fabric HLS kernel</text>
+
+  <rect x="168" y="368" width="17" height="14" rx="3" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.4"/>
+  <text x="192" y="380" font-size="11.5" fill="#333333">fabric CoreFFT hard IP</text>
+
+  <rect x="344" y="368" width="17" height="14" rx="3" fill="#fbe3d6" stroke="#b5651d" stroke-width="1.4"/>
+  <text x="368" y="380" font-size="11.5" fill="#333333">MSS U54 CPU</text>
+
+  <rect x="484" y="368" width="17" height="14" rx="3" fill="#ece7f5" stroke="#6b4fa0" stroke-width="1.4"/>
+  <text x="508" y="380" font-size="11.5" fill="#333333">DDR complex buffer (int16 I/Q, 4 B/px)</text>
+
+  <rect x="756" y="368" width="17" height="14" rx="3" fill="#f7dede" stroke="#a03535" stroke-width="1.4"/>
+  <text x="780" y="380" font-size="11.5" fill="#333333">DDR magnitude image (uint16, 2 B/px)</text>
+
+  <text x="24" y="406" font-size="11" fill="#777777">Times are wall-clock per stage from sar_stage_ts[0..6] (MTIME, 1 us/tick), full deci-1 Centerfield scene, fabric at 62.5 MHz. Re-read with mpfs/host/run_stage_timing.sh</text>
+</svg>

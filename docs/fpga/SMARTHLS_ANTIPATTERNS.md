@@ -42,8 +42,10 @@ identity/passthrough on silicon: the generated RTL **contains** the 1703 multipl
 but the twiddle product never reaches the butterfly store. C-sim passes at corr
 0.9999 every time; silicon output is `input >> out_shift`. Proven across three
 independent FFT structures (ping-pong DoubleBuffer, explicit static ping-pong,
-single-array in-place). **Resolution:** FFT runs on the MSS U54, not fabric
-(`src/sar/sar_fft.c`). See SAR_PIPELINE_STATUS.md §"Why the FFT is on the CPU".
+single-array in-place). **Resolution:** the HLS FFT was abandoned. The shipping FFT is the
+fabric CoreFFT hard-IP streaming chain (`SAR_FFTMODE` @`0xB0059110` = 1); the MSS FFT
+(`src/sar/sar_fft.c`) was the interim path and remains as the mode-0 fallback. See
+SAR_PIPELINE_STATUS.md §"Engine history".
 Guard: do not re-enable a fabric radix-2 FFT top without a board-free phase-exact
 cosim (`sar-verification-methodology` §4) proving the twiddle survives.
 

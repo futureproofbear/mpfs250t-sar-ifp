@@ -6,11 +6,12 @@ A Synthetic Aperture Radar (SAR) image-formation pipeline on a Microchip PolarFi
 so the system is bare-metal C on the MSS + fabric kernels + host-offload over a FlashPro6.
 
 ## Architecture (source of truth: `docs/PROJECT_SOURCE_OF_TRUTH.md`)
-- **MSS (bare-metal C, `src/`)** — control, the shipping FFT (`src/sar/sar_fft.c`, L1-BFP
-  full-precision radix-2 on the CPU, validated end-to-end at corr 0.9923), and JTAG mailboxes.
-- **Fabric kernels (`mpfs/fpga/`)** — resample, corner-turn, window, detect (HLS), plus the
-  in-progress CoreFFT range-FFT path (Verilog feeder + gearbox + CoreFFT IP + Verilog/HLS
-  unloader). Data moves DDR -> kernel -> DDR over FIC_0 (non-coherent).
+- **MSS (bare-metal C, `src/`)** — control, the shipping detect (the fabric detect is bypassed —
+  SmartHLS mis-synthesizes its sign extension), the legacy mode-0 CPU FFT fallback
+  (`src/sar/sar_fft.c`), and JTAG mailboxes.
+- **Fabric kernels (`mpfs/fpga/`)** — resample, corner-turn, window (HLS), plus the shipping
+  range/azimuth FFT path (Verilog feeder + gearbox + CoreFFT IP + HLS `fft_unloader`), selected by
+  `SAR_FFTMODE` @`0xB0059110` = 1. Data moves DDR -> kernel -> DDR over FIC_0 (non-coherent).
 - **Host (`mpfs/host/`)** — gdb/openocd iso-test harnesses, golden-vector generators, correlators.
 
 ## Conventions
@@ -29,5 +30,6 @@ so the system is bare-metal C on the MSS + fabric kernels + host-offload over a 
 - Reusable agents: `.claude/agents/`. Skills: `.claude/skills/`.
 
 ## Status
-The CPU-FFT pipeline is the shipping product. CoreFFT-on-fabric is the acceleration path in
-progress — see `openspec/specs/fabric-range-fft/` and the open changes.
+The CoreFFT-on-fabric pipeline is the shipping product — complete and proven on silicon
+(`fft_mode=1` confirmed at runtime, 110.8 s per frame, corr 0.9923 vs golden). The CPU FFT remains
+only as the mode-0 fallback. See `openspec/specs/fabric-range-fft/` and `docs/SAR_DESIGN.md`.

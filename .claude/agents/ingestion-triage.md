@@ -21,7 +21,7 @@ What you ingest:
   0xB005xxxx / mailbox 0xB0058000 blocks, the sequencer progress/debug words
   (`SAR_PROG_ADDR 0xB0059100`, fft dbg `0xB0058020`, DMADBG `0xB0059200`, `sar_stage_ts`), and
   any ILA/SmartDebug capture text.
-- Hardware-description dictionaries: register maps (`docs/regmap.md`), the address/struct
+- Hardware-description dictionaries: register maps (`docs/fpga/history/regmap.md`), the address/struct
   definitions in `ddr_sar_layout.h` / `ddr_layout.py`, and mailbox/record layouts.
 
 What you produce — a JSON state map, e.g.:

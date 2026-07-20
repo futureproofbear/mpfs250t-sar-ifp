@@ -3,7 +3,7 @@
 Definitive reference for the on-chip AMBA (AXI4 / AXI4-Lite / AXI4-Stream) architecture of the SAR
 fabric accelerator (`SAR_TOP` SmartDesign, Libero SoC 2025.2, MPFS250T_ES Icicle Kit). Canonical
 wiring source: [`mpfs/fpga/build_sartop.tcl`](../../mpfs/fpga/build_sartop.tcl) (+ the later `ID_FIX`
-and AXI4-Lite-target edits — see [dma_fix_plan.md](dma_fix_plan.md), [id_restore_integration.md](history/id_restore_integration.md)).
+and AXI4-Lite-target edits — see [dma_fix_plan.md](history/dma_fix_plan.md), [id_restore_integration.md](history/id_restore_integration.md)).
 
 > **Update 2026-07-04:** the `DMA` (`AXIDMA_C0` / CoreAXI4DMAController) documented below as the
 > FFT-stream S2MM writeback is **removed** — it deadlocked on the 2nd back-to-back AXI4-Stream S2MM
@@ -134,11 +134,12 @@ The address must be wired with an explicit slice (`sd_create_pin_slices` → `sd
 
 ## 9. Software contract
 The bare-metal sequencer (`sar_sequencer.c`) drives the pipeline via the CIC control windows: configure
-each kernel's args (DDR buffer addresses, dims) + START, poll done, advance stage. The DMA is programmed
-via its control window (`0x6000_5000`: VER `0x00`, START `0x04`, INTR `0x10`/`0x18`, descriptors `0x60+`).
-Verification harness + register map: [SAR_BRINGUP_REPORT.md](SAR_BRINGUP_REPORT.md),
+each kernel's args (DDR buffer addresses, dims) + START, poll done, advance stage. Slave 5 at
+`0x6000_5000` is now `fft_unloader`; the `CoreAXI4DMAController` that formerly occupied it (VER `0x00`,
+START `0x04`, INTR `0x10`/`0x18`, descriptors `0x60+`) was removed — see §10.2.
+Verification harness + register map: [SAR_BRINGUP_REPORT.md](history/SAR_BRINGUP_REPORT.md),
 [dataplane_bringup_vplan.md](history/dataplane_bringup_vplan.md). (Historic host-offload HLS register map
-in [../regmap.md](../regmap.md) describes the *earlier* single-accelerator model, not this multi-kernel fabric.)
+in [../regmap.md](history/regmap.md) describes the *earlier* single-accelerator model, not this multi-kernel fabric.)
 
 ## 10. End-to-end data flows & complete address map
 
@@ -167,11 +168,12 @@ Sources: `sar/ddr_sar_layout.h` (DDR map + register offsets), `sar/sar_kernels.h
 | `DET` (detect) | `0x6000_2000` | 2 | kernel |
 | `RES` (resample) | `0x6000_3000` | 3 | kernel |
 | `FEED` (fft_feeder) | `0x6000_4000` | 4 | kernel |
-| `DMA` control | `0x6000_5000` | 5 | **AXI4-Lite** (§8) |
+| `FFT_UNLOADER` (was `DMA` control) | `0x6000_5000` | 5 | **AXI4-Lite** (§8) |
 
 Per-kernel HLS registers (offset from window base): `START 0x08` (write 1 = go, read 0 = done),
-`ARG0 0x0C`, `ARG1 0x10`, `ARG2 0x14`, `ARG3 0x18`. DMA registers: `VER 0x00`, `START 0x04`,
-`INTR 0x10/0x18`, descriptors `0x60+`.
+`ARG0 0x0C`, `ARG1 0x10`, `ARG2 0x14`, `ARG3 0x18`. `FFT_UNLOADER` is a SmartHLS kernel and uses the
+same register layout — the `CoreAXI4DMAController` that formerly owned slave 5 (registers `VER 0x00`,
+`START 0x04`, `INTR 0x10/0x18`, descriptors `0x60+`) was removed; there are no descriptors/TLAST.
 
 ### 10.3 The five data flows
 ```
@@ -179,7 +181,7 @@ Per-kernel HLS registers (offset from window base): `START 0x08` (write 1 = go, 
                        └► MSS L2/system bus ─► DDR   (load.gdb: sig→0x88000000, coeffs→0xB01xxxxx, job→0xB0040000)
 (2) CONTROL  U54 sar_sequencer.c ─► MSS FIC_0 initiator ─► CIC ─► kernel/DMA windows (set ARGs + START, poll done)
 (3) COMPUTE  kernel AXI4 data master ─► DIC ─► ID_FIX ─► FIC_0_AXI4_S ─► DDR  (SIG⇄SCRATCH working set; →OUT)
-(4) FFT      FEED ─AXI4-Stream─► GBX ─► CoreFFT ─► GBX ─AXI4-Stream─► DMA ─►(DIC→ID_FIX→FIC)─► DDR
+(4) FFT      FEED ─AXI4-Stream─► GBX ─► CoreFFT ─► GBX ─AXI4-Stream─► fft_unloader ─►(DIC→ID_FIX→FIC)─► DDR
 (5) EGRESS   host dump_image 0xA8000000 (OUT) ◄─JTAG◄─ MSS ◄─ DDR     (compare to golden image)
 ```
 
@@ -196,16 +198,9 @@ earlier version of this table wrongly interleaved the FFTs between the two resam
 complete *before* any FFT; the window sits between resample and FFT; the single 2-D FFT is factored
 into range-FFT → corner-turn → azimuth-FFT. Full walk-through: [`SAR_PIPELINE_PROCESS.md`](SAR_PIPELINE_PROCESS.md).
 
-| # | Stage | Kernel | Reads | Writes |
-|---|---|---|---|---|
-| 1 | range resample (per pulse ×M) | `RES` | `SIG` + COEF `IDX/WQ` | `SCRATCH` (row `INVORDER[i]`, tan φ-sorted) |
-| 2 | corner-turn (transpose) | `CT` | `SCRATCH` | `SIG` |
-| 3 | azimuth resample (per range bin ×Np) | `RES` | `SIG` + COEF | `SCRATCH` (uniform k-space) |
-| 4 | window (2-D Hamming) | `WIN` | `SCRATCH` + `HAMR/HAMC` | `SCRATCH` (in-place taper) |
-| 5 | range FFT | `FEED`→CoreFFT→`fft_unloader` (was `DMA`) | `SCRATCH` (stream) | `SCRATCH` (AXI4 write) |
-| 6 | corner-turn (transpose) | `CT` | `SCRATCH` | `SIG` |
-| 7 | azimuth FFT | `FEED`→CoreFFT→`fft_unloader` (was `DMA`) | `SIG` (stream) | `SIG` (AXI4 write) |
-| 8 | detect (magnitude) | `DET` | `SIG` | **`OUT`** (final image) |
+The per-stage table (stage → kernel → implementation) lives in
+[`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §2 — read it there rather than duplicating it
+here. What this section adds is the buffer-aliasing rule:
 
 `SIG` and `SCRATCH` **ping-pong** as the working set (corner-turn transposes between them); coeffs/geometry/
 tables are **read-only** inputs. ⚠ `SIG` is *reused as transpose scratch* once the raw input is consumed —

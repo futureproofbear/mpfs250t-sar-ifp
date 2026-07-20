@@ -82,7 +82,7 @@ is exactly why they burn so much time.
 
 The goal of this whole line of work: **stop paying the ~3 h JTAG scene load every run.** Put the
 CPHD scene on the board's soldered eMMC once, then at run-time the board loads it into DDR itself
-(~63 s), focuses it (the SAR pipeline), and can persist the output image back to the eMMC so it
+(78 s), focuses it (the SAR pipeline), and can persist the output image back to the eMMC so it
 survives power-cycle. All of M1/M2/M3 below are PROVEN on silicon (2026-07-14) except the final
 re-run after a crash-safety fix (see "WHERE TO RESUME").
 
@@ -209,7 +209,7 @@ bash run_program.sh                                        # ~4 min, fpgenprog
 #    re-boot the U54 on this ES silicon -- only a power-cycle. Check the pc before trusting a run.
 
 # 1) LOAD scene from eMMC -> DDR (+ JOB). PASS: verdict 0, nseg=10, sig_crc_exp==got
-bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # ~77 s
+bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 78 s
 
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
 #    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
@@ -254,7 +254,7 @@ bash run_emmc_prov_iso.sh 97553408 1100000 0x88000000   # write DDR->eMMC INPUT 
 ## Measured rates & what eMMC does / doesn't solve
 
 Single-block (LEGACY/25 MHz/8-bit): **write 0.13 MB/s** (~3.9 ms/block; per-CMD24 program/busy),
-**read 1.5 MB/s**. So: scene LOAD (eMMC→DDR) ~63–77 s; SAVEOUT (128 MB) ~16 min; provision write ~12 min.
+**read 1.5 MB/s**. So: scene LOAD (eMMC→DDR) 78 s; SAVEOUT (128 MB) ~16 min; provision write ~12 min.
 
 - eMMC ELIMINATES the recurring ~3 h JTAG INPUT load (data lives on-board). This is the win.
 - eMMC does NOT speed host↔PC transfer. Dumping OUT to the PC is STILL ~3 h — the bottleneck is

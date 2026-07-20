@@ -9,7 +9,7 @@
 > "current DMA control" example is stale.
 
 Conventions + tooling that prevent the silent-integration failures that cost the DMA control-slave
-bring-up many build cycles. See [dma_fix_plan.md](dma_fix_plan.md) §7 for the full root-cause saga.
+bring-up many build cycles. See [dma_fix_plan.md](history/dma_fix_plan.md) §7 for the full root-cause saga.
 
 ## Why this exists — two silent failures Libero allowed
 1. **Protocol-inference mismatch.** A 32-bit reduced-AXI4-Lite peripheral (CoreAXI4DMAController's

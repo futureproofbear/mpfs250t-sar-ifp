@@ -11,7 +11,8 @@ debugging time; check here before assuming your design is at fault. Detail + evi
   kernels (corner_turn, resample, the trivial stream→mem unloader `dst[i]=in.read()`) are FINE. FIX:
   hand-write the mem↔stream piece in Verilog (see `fft_feeder_v.v`). [[corefft-feeder-fix-validated]]
 - The **K_FFT butterfly is unsynthesizable** here (drops the twiddle term; DoubleBuffer/wide-ap_fixpt
-  hazard) despite cosim PASS — the reason the shipping FFT is on the CPU. [[m3-pipeline-silicon-status]]
+  hazard) despite cosim PASS — the reason the shipping FFT is the CoreFFT hard IP on fabric, not HLS.
+  (An MSS CPU FFT was the interim path and survives as the mode-0 fallback.) [[m3-pipeline-silicon-status]]
 - **SIGN-EXTENSION miscompile (2026-07-10):** `(int16_t)(x >> 16)` in the detect kernel was synthesized
   with the high-16 (I) treated as UNSIGNED → every negative-I pixel overflowed `isqrt` → clamped 0xFFFF
   (~50% of image saturated). The low-16 `(int16_t)(x & 0xFFFF)` path was FINE — SmartHLS mis-handles

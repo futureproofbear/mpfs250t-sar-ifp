@@ -21,11 +21,11 @@
 > SUPERSEDED.** The two standalone `.cpp` files below do remain unsynthesized
 > templates. See [`AMBA_ARCHITECTURE.md`](AMBA_ARCHITECTURE.md),
 > [`FABRIC_INTERCONNECT_CONVENTIONS.md`](FABRIC_INTERCONNECT_CONVENTIONS.md) and
-> [`SAR_BRINGUP_REPORT.md`](SAR_BRINGUP_REPORT.md).
+> [`SAR_BRINGUP_REPORT.md`](history/SAR_BRINGUP_REPORT.md).
 
 Offloads the compute-dominant SAR focusing datapath from the U54 CPUs:
 **range resample → window → 2-D FFT (range FFT → corner-turn → azimuth FFT) →
-detect**. The CPU host drives it over AXI4-Lite (see [../regmap.md](../regmap.md))
+detect**. The CPU host drives it over AXI4-Lite (see [../regmap.md](history/regmap.md))
 and shares DDR buffers with it.
 
 ## Status — read this first
@@ -44,15 +44,17 @@ as the dataflow spec, not as drop-in RTL.
 
 ## Datapath
 ```
-signal[M,N] ─DMA─► resample(KR) ─► window× ─► 1-D FFT ─┐
-                                                       ▼
-                                              corner-turn (tiled BRAM)
-                                                       │
-detected[M,N] ◄─DMA─ detect|·| ◄─ 1-D FFT ◄─ resample(KC) ◄┘
+signal[M,N] ──► resample(KR) ─► window× ─► 1-D FFT ─┐
+                                                    ▼
+                                           corner-turn (tiled BRAM)
+                                                    │
+detected[M,N] ◄─ detect|·| ◄─ 1-D FFT ◄─ resample(KC) ◄┘
 ```
-- **Power-of-2 FFT lengths** (`FFT_LEN_R`, `FFT_LEN_A`, e.g. 4096 × 8192): the
-  raw 5634 × 4319 sizes are slow/odd, so the host zero-pads. Padding also
-  improves the focus (free image-domain interpolation).
+FFT stages are the fabric CoreFFT chain `fft_feeder → gearbox → CoreFFT → fft_unloader`
+(no DMA — the `CoreAXI4DMAController` was removed); detect runs on the MSS CPU.
+- **A single native 8192-point FFT length.** The raw 5634 × 4319 sizes are odd, so
+  the host zero-pads to the 8192 grid. Padding also improves the focus (free
+  image-domain interpolation). 16384-point / multi-length FFT paths were dropped.
 - **Block floating point, 18-bit** fixed point → matches the 784 18×18 DSP
   blocks and holds the ~50 dB scene dynamic range. `BFP_SHIFT` is reported back
   so the host can scale consistently with the laptop reference.
@@ -64,10 +66,10 @@ detected[M,N] ◄─DMA─ detect|·| ◄─ 1-D FFT ◄─ resample(KC) ◄┘
 2. **HLS**: `shls` build of the kernels (or instantiate CoreFFT instead of
    `fft1d`). Verify with C/RTL co-simulation against the CPU golden output
    (`host` numpy backend) using the speckle-smoothed correlation check.
-3. **Libero**: build the fabric design — accelerator + `CoreAXI4DMAController`
-   (or a SmartHLS datamover) + AXI4-Lite control, connected to the SoC's
-   **cache-coherent** AXI port (FIC). Add the FFT cores' DSP/RAM.
-4. **Place/route/timing** at the chosen fabric clock (~150 MHz target).
+3. **Libero**: build the fabric design — accelerator + the `fft_unloader` SmartHLS
+   datamover + AXI4-Lite control, connected to the SoC's AXI port (FIC, non-coherent).
+   Add the FFT cores' DSP/RAM.
+4. **Place/route/timing** at the fabric clock: **62.5 MHz, timing MET** (setup and hold).
 5. Export the bitstream and program the board via the embedded **FlashPro6 on
    J33**. The U54_1 bare-metal firmware drives the kernels over the MSS FIC0
    AXI4-Lite slaves (no Linux, no device-tree/UIO/CMA — JTAG-only).
@@ -76,9 +78,13 @@ detected[M,N] ◄─DMA─ detect|·| ◄─ 1-D FFT ◄─ resample(KC) ◄┘
 The fabric is driven by **bare-metal RISC-V firmware on U54_1**, which writes the
 AXI4-Lite control registers over MSS FIC0, sets the shared DDR buffer addresses
 (signal/KR/KC/tanphi/window), starts each kernel, polls done, and reads the
-detected image back. The host PC stages DDR and reads results over JTAG; the rest
-of the pipeline (parse, table prep, geocode, GeoTIFF) is unchanged host code in
-`host/sar_pipeline.py`.
+detected image back. The scene is no longer staged by the host: it is loaded from
+the board's own eMMC into DDR in 78 s, and the focused output is persisted back to
+the card — the host reads only small ROI crops over JTAG (a full-image dump is still
+~3 h, FlashPro6-bound). The rest of the pipeline (parse, table prep, geocode,
+GeoTIFF) is unchanged host code in `host/sar_pipeline.py`. Pipeline total: 110.8 s —
+per-stage breakdown in [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5;
+detailed current design in [`../SAR_DESIGN.md`](../SAR_DESIGN.md).
 
 ## Verification oracle
 The CPU reference (`--backend numpy`) is **pixel-identical to the laptop

@@ -10,6 +10,56 @@ description: >-
   on silicon", "sar_emmc_*", "SARI / SARO partition", "MBX_CMD_EMMC*", "run_m3_iso.sh".
 ---
 
+# CRITICAL RULES — evaluate these BEFORE any board action
+
+These are preconditions, not advice. Each cost real hours when skipped. Do not reason your way
+past a HALT: the symptoms all mimic *other* faults (dead eMMC, wedged FlashPro6, bad data), which
+is exactly why they burn so much time.
+
+### Rule: Fabric Program → App Re-flash
+- **TRIGGER**: Any fabric program completes (`PROGRAMDEVICE`, a `.job`) — **including FABRIC-ONLY
+  and fabric+sNVM that never touch eNVM**.
+- **ACTION**: Run `bash mpfs/host/run_program.sh` (~4 min), then power-cycle the board.
+- **HALT**: Do NOT run any JTAG/mailbox command until this is done. "I only programmed the fabric,
+  so the app is fine" is FALSE.
+
+### Rule: App Flash → Power-Cycle → Verify PC
+- **TRIGGER**: `run_program.sh` reports `mpfsBootmodeProgrammer completed successfully`.
+- **ACTION**: Power-cycle the board. Then confirm `hart1 pc ≈ 0x0a00xxxx` (the u54_1 mailbox loop).
+- **HALT**: If `hart1 pc ≈ 0x20220xxx` the hart is parked at the eNVM reset vector — the app has
+  NOT started. Mailbox commands will arm and silently never execute. A JTAG reset will NOT fix it
+  on this ES silicon; only a power-cycle will.
+
+### Rule: Mailbox Result Validation
+- **TRIGGER**: Any `MBX_CMD_*` was armed and the wait elapsed.
+- **ACTION**: Read the dedicated result record (`0xB005Exxx`) and check its magic first
+  (LOAD `0xE3C0FF30`, SAVE `0xE3C0FF40`, ROI `0xE3C0FF50`, VERIFY `0xE3C0FF60`).
+- **HALT**: If the record is still `0x00000000` / `0xdeadbeef`, the command **did not execute**.
+  Do NOT interpret this as an eMMC/data/hardware failure — go check the two rules above.
+
+### Rule: Never Raw-Probe the Fabric over JTAG
+- **TRIGGER**: Any impulse to `x/` (read) `0x6000_xxxx` FIC0 kernel control registers "just to see
+  if the fabric is alive".
+- **ACTION**: Don't. Infer fabric health from firmware-side bounded operations: LOAD `init_status`,
+  a `PIPE` that returns `SAR_SEQ_TIMEOUT_*` rather than hanging, or SmartDebug (out-of-band).
+- **HALT**: On an unprogrammed/unclocked fabric that read NEVER RETURNS — the hart freezes mid-load,
+  openocd spins `Timed out waiting for busy to go low`, and recovery costs a power-cycle (plus an FP6
+  USB replug if you then force-kill openocd).
+
+### Rule: Decode `ERR_INIT` Before Blaming the eMMC
+- **TRIGGER**: LOAD/SAVE/ROI returns verdict `2` (`ERR_INIT`).
+- **ACTION**: Read `init_status` (record +4). `9` = `MSS_MMC_OP_COND_ERR` (CMD1 silent).
+- **HALT**: `OP_COND_ERR` almost always means **the fabric is not programmed** (the eMMC/SD mux
+  select is the fabric `SDIO_SW` tie), NOT that the card or its data is bad. DDR probes pass in this
+  state and will mislead you.
+
+### Rule: JTAG Teardown Order
+- **TRIGGER**: A gdb/openocd session is hung or must be stopped.
+- **ACTION**: 1) telnet `4444` → `shutdown`. 2) If that fails, kill the **gdb CLIENT only**.
+  3) Only if openocd is orphaned AND idle (log not growing), terminate it.
+- **HALT**: NEVER `taskkill /F` openocd while it holds a DMI operation — that wedges the FlashPro6
+  DM, and a board power-cycle alone will NOT clear it (needs a USB replug).
+
 # eMMC on-board SAR pipeline (provision → boot-load → focus → persist)
 
 The goal of this whole line of work: **stop paying the ~3 h JTAG scene load every run.** Put the

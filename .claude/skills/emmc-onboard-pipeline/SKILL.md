@@ -118,7 +118,12 @@ All from `mpfs/host` (this repo). The generic runner:
 `run_m3_iso.sh CMD BASE LEN SLEEP_MS REC_ADDR [DUMP_ADDR DUMP_BYTES DUMP_FILE]` (hex ok).
 
 ```
-# 0) reflash (after any firmware change)
+# 0) ⛔ MANDATORY, NOT OPTIONAL: re-flash the APP after ANY fabric program OR firmware change.
+#    "I only programmed the FABRIC (or fabric+sNVM), so the eNVM app is fine" is WRONG and is the
+#    single easiest way to lose an hour. Skipping it leaves the hart in a state where JTAG reports
+#    `unable to halt hart 1`, mailbox commands ARM BUT NEVER EXECUTE (result records stay
+#    0x00000000/0xdeadbeef), and openocd starts segfaulting/disconnecting -- symptoms that look
+#    exactly like a wedged FlashPro6 and send you chasing USB replugs. (Cost ~1 h on 2026-07-20.)
 bash run_program.sh                                        # ~4 min, fpgenprog
 
 # 1) LOAD scene from eMMC -> DDR (+ JOB). PASS: verdict 0, nseg=10, sig_crc_exp==got
@@ -174,6 +179,14 @@ Single-block (LEGACY/25 MHz/8-bit): **write 0.13 MB/s** (~3.9 ms/block; per-CMD2
 
 ## Gotchas earned (read before debugging)
 
+- **`unable to halt hart 1` + mailbox commands that ARM BUT NEVER RUN = YOU SKIPPED THE APP RE-FLASH.**
+  After ANY fabric program (even FABRIC-ONLY or fabric+sNVM that never touches eNVM) you MUST run
+  `bash mpfs/host/run_program.sh` before any JTAG/mailbox work. Tell-tale set: gdb attaches but
+  reports `unable to halt hart 1` (dmcontrol=0x80010001, dmstatus=0x00030c82) and falls back to
+  another thread; `>>> armed cmd; resume + wait...` prints but the result record at 0xB005Exxx stays
+  `0x00000000`/`0xdeadbeef`; openocd segfaults or drops with `Remote communication error. Target
+  disconnected` mid-wait. This MIMICS a wedged FlashPro6 — do NOT start replugging USB and
+  power-cycling until you have confirmed the app was re-flashed. (2026-07-20.)
 - **`ERR_INIT` + `init_status=9` (`MSS_MMC_OP_COND_ERR`) usually means the FABRIC IS NOT PROGRAMMED,
   not a bad eMMC.** The eMMC/SD demux select is driven by the **fabric** `SDIO_SW_SEL0/1/EN_N` ties
   (see the comment in `prov_emmc_init`: *"the real select is the fabric SDIO_SW tie"*); the MSS

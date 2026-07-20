@@ -36,3 +36,12 @@ authoring from scratch), run it, parse the timing reports, and report SYN/PNR/VT
 hold violation counts + whether a bitstream was exported and where. If timing is NOT met, do NOT
 export — report the worst paths and stop. Never program the device (that is a separate, user-
 authorized step).
+
+⛔ **When you hand back a bitstream, ALWAYS state this in your report:** *"After programming this
+bitstream the caller MUST re-flash the boot-mode-1 debug app (`bash mpfs/host/run_program.sh`,
+~4 min) before any JTAG/mailbox work — required after ANY fabric program, including FABRIC-ONLY
+and fabric+sNVM that never touch eNVM."* Skipping it does not fail loudly: gdb attaches but reports
+`unable to halt hart 1`, mailbox commands arm yet never execute (result records stay
+`0x00000000`/`0xdeadbeef`), and openocd segfaults/disconnects — which mimics a wedged FlashPro6 and
+sends the caller chasing USB replugs and power-cycles instead of the real cause. (Cost ~1 h on
+2026-07-20.) Program FABRIC-ONLY; never flash an HSS eNVM (HSS refuses JTAG halt).

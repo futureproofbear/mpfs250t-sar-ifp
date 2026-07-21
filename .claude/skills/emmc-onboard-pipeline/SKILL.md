@@ -93,6 +93,8 @@ un-wedging JTAG use `jtag-recover`; for the pipeline internals use `sar-pipeline
 
 `mpfs250t-sar-ifp` is self-contained for **firmware, SoftConsole project + build config, board
 harnesses, host tooling, and docs** — all here, no sibling checkout needed to build firmware or run
+the board. (FABRIC BITSTREAM IS THE EXCEPTION: there is no Libero project in this repo; synth/P&R
+runs from the `sarProcessor` sibling, and the `.v` files are duplicated there — sync before building.)
 the JTAG harnesses. (Consolidated 2026-07-14; firmware source is byte-identical to the silicon-proven
 state.) All paths below are relative to the repo root.
 

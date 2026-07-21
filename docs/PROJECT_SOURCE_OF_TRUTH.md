@@ -4,7 +4,8 @@
 > **`mpfs250t-sar-ifp`** (made **standalone** on 2026-07-14 — see the status block below), is the
 > **canonical home** for the algorithm, FPGA design, host tooling, **and** the board
 > firmware (the SoftConsole project under `mpfs/fpga/libero_sar/softconsole/`). (Historical note: this
-> was a clean fork of `sarProcessor`; it is now self-contained and no sibling checkout is needed.) Read this before
+> was a clean fork of `sarProcessor`; it is self-contained for FIRMWARE, but the Libero fabric build
+> still runs from the `sarProcessor` sibling — see the duplicate-RTL warning below.) Read this before
 > answering, and prefer the facts here (and the cited source files) over training data. PolarFire
 > SoC details — register maps, Libero/SmartHLS Tcl, MSS config, boot flow — are **poorly
 > represented in public training data and drift between tool versions**, so treat recalled
@@ -14,11 +15,28 @@
 > out-of-sync mirror whose `src/sar/` and `src/ddr_test/` were byte-identical to this repo's
 > SoftConsole copies (its hart apps were older stubs) — has been **removed**. Its unique assets
 > (this index, `docs/FLOW.md`, the PCB board file, the board-design PDF) were migrated here. Nothing
-> outside this repo is a build input.
+> outside this repo is a *firmware* build input. (That sentence used to read "no build input" without
+> qualification and was wrong — the Libero fabric build runs from the `sarProcessor` sibling. See the
+> 2026-07-14 block below.)
 >
 > **▶ CURRENT STATUS (2026-07-14 — NEWEST; supersedes the 2026-07-04 notes below for repo layout + eMMC).**
-> **Repo standalone:** `mpfs250t-sar-ifp` was consolidated 2026-07-14 to build + run on its own
-> (firmware source == the silicon-proven state; standalone build verified). No `sarProcessor` checkout needed.
+> **Repo standalone — FIRMWARE ONLY. The FABRIC BITSTREAM IS NOT BUILT FROM THIS REPO.**
+> `mpfs250t-sar-ifp` was consolidated 2026-07-14 so the *firmware* builds + runs on its own
+> (firmware source == the silicon-proven state; standalone build verified). That is where the
+> "standalone" claim ends. Corrected 2026-07-21 after it nearly caused a wrong-bitstream build:
+> this repo contains **no Libero project at all** (`mpfs/fpga/libero_sar/` holds only
+> `softconsole/`). Every `.prjx` — including the shipping **`libero_ffv/sar_accel.prjx`** — lives in
+> the sibling **`sarProcessor`** checkout, and that is where synth/P&R/bitstream export must run.
+>
+> **Duplicate-RTL hazard, read before any fabric change.** The 9 `.v` files under `mpfs/fpga/` exist
+> in BOTH repos, and `feeder_v_core.tcl` links `"$here/fft_feeder_v.v"` — *its own* directory. So the
+> **`sarProcessor` copy is what actually gets synthesized**; editing the RTL here changes nothing in a
+> bitstream until it is copied across. The two had silently drifted (sibling stuck at a 2026-07-12
+> `fft_feeder_v.v` while this repo's was 6.8 KB larger). Failure mode if you forget: the build
+> succeeds, timing closes, and the bitstream quietly contains the OLD RTL — which, paired with
+> firmware that assumes the new RTL, produces wrong-but-plausible output rather than an error.
+> Before any fabric build: `diff -q mpfs/fpga/*.v ../sarProcessor/mpfs/fpga/` and sync, or fix the
+> duplication properly by pointing the Tcl at a single source.
 > **On-board eMMC pipeline (M1–M3) PROVEN on silicon** — the scene lives on the board eMMC and is loaded +
 > focused entirely on-board, retiring the recurring ~3 h JTAG scene load: **M1** bring-up (write→read→CRC);
 > **M2** provision a CPHD scene to the INPUT partition (`crcE==crcR==0x58d0ea66`, Centerfield 97.6 MB); **M3**

@@ -140,6 +140,19 @@ catch { sd_connect_pins_to_constant -sd_name $sd -pin_names {MSS:MSS_INT_F2M} -v
 sd_mark_pins_unused -sd_name $sd -pin_names {MSS:MSS_INT_M2F}
 sd_connect_instance_pins_to_ports -sd_name $sd -instance_name {MSS}
 
+## ---------------- Icicle eMMC/SD demux select (U44/U29 = TS3A27518E) ----------------
+## The shared SDMMC controller reaches the on-board eMMC only when the demux is set to
+## COM-NC: EN#=L (enabled), IN1=IN2=L. Board pins: SDIO_SW_SEL0=D7, SDIO_SW_SEL1=C7,
+## SDIO_SW_EN_N=B7 (100K pulldowns default them low, but our unused-I/O state was not
+## letting the pulldowns win -> eMMC silent). We only ever use eMMC, so tie all three
+## LOW from the fabric. (SD would need these = 1,1,0.) See ICICLE_SDIO.pdc for pins.
+sd_create_scalar_port -sd_name $sd -port_name {SDIO_SW_SEL0} -port_direction {OUT}
+sd_create_scalar_port -sd_name $sd -port_name {SDIO_SW_SEL1} -port_direction {OUT}
+sd_create_scalar_port -sd_name $sd -port_name {SDIO_SW_EN_N} -port_direction {OUT}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {SDIO_SW_SEL0} -value {GND}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {SDIO_SW_SEL1} -value {GND}
+sd_connect_pins_to_constant -sd_name $sd -pin_names {SDIO_SW_EN_N} -value {GND}
+
 ## ---------------- generate ----------------
 save_smartdesign -sd_name $sd
 generate_component -component_name $sd

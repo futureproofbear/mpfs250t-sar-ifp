@@ -43,9 +43,9 @@ burst FIFOs.
 | 3 | Range FFT | fabric CoreFFT | SCRATCH | SCRATCH |
 | 4 | Corner-turn (transpose) | fabric kernel | SCRATCH | SIG |
 | 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
-| 6 | Detect (magnitude) | MSS U54 CPU | SIG | OUT |
+| 6 | Detect (magnitude) | *fused into the azimuth-FFT unloader (fabric)* | — | — |
 
-Total 79.79 s (2026-07-21); the per-stage breakdown is in
+Total 58.12 s (2026-07-21); the per-stage breakdown is in
 [`fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5, which is the single numeric
 source of truth. Orchestration is `sar_form_image()` in `src/sar/sar_sequencer.c`.
 
@@ -66,7 +66,7 @@ correct; this is the one to use when reasoning about buffer traffic or arming or
 | 5 | range FFT | `FEED` -> CoreFFT -> `fft_unloader` | SCRATCH (stream) | SCRATCH (AXI4 write) | rangeFFT |
 | 6 | corner-turn (transpose) | `CT` | SCRATCH | SIG | cornerturn |
 | 7 | azimuth FFT | `FEED` -> CoreFFT -> `fft_unloader` | SIG (stream) | SIG (AXI4 write) | azFFT |
-| 8 | detect (magnitude) | CPU (`DET` bypassed) | SIG | OUT (final image) | detect |
+| 8 | ~~detect (magnitude)~~ | *fused into `UNLD`* | — | OUT (final image) | detect (now 0.00 s) |
 
 Note that the corner-turn appears twice — once inside resample and once between the two FFT passes —
 and that steps 2 and 6 both write SIG while steps 1 and 3 both write SCRATCH. This is the SIG/SCRATCH
@@ -169,11 +169,29 @@ tiled through on-chip LSRAM and is the reason the buffer plan needs a distinct d
 
 Per-pixel magnitude `sqrt(I² + Q²)`, saturated to uint16.
 
-This runs on the CPU, not in fabric. The fabric detect kernel is bypassed because SmartHLS
-mis-synthesized its sign extension: source-correct C (`(int16_t)(x >> 16)`) was read as unsigned in
-the generated RTL, so every negative-I pixel overflowed and saturated to 0xFFFF — about half the
-image — collapsing correlation. Both `shls` cosim and a correlation check passed anyway; only a
-value-level comparison caught it.
+This runs IN FABRIC (since 2026-07-21), fused into the azimuth-FFT unloader: `fft_unloader_v.v`
+takes the magnitude as the second FFT streams to DDR, so there is no separate detect stage and no
+CPU involvement in the datapath at all. Cost went 19.24 s -> 0.00 s, and the azimuth FFT itself got
+1.50 s faster because the unloader now writes uint16 magnitudes instead of complex int32 — half the
+write traffic on that pass.
+
+It is hand-written Verilog, NOT HLS, and that is not a style preference. The HLS detect kernel was
+bypassed for months because SmartHLS mis-synthesized its sign extension: source-correct C
+(`(int16_t)(x >> 16)`) was read as UNSIGNED in the generated RTL, so every negative-I pixel
+overflowed and saturated to 0xFFFF — about half the image — collapsing correlation. Both `shls`
+cosim and a correlation check passed anyway; only a value-level comparison caught it. The Verilog
+declares the operands explicitly `signed`, and `tb/tb_fft_unloader_det.v` mutation-tests exactly
+this: stripping the `signed` qualifiers reproduces the failure at 2035/2048 mismatches.
+
+The global block exponent forces one residual CPU pass: `emax` is not known until every row is
+transformed, so the unloader emits magnitudes at each row's NATIVE exponent and firmware applies
+`>>(emax - exp_i)` afterwards. That sweep is a uint16 shift over 128 MB — no sqrt, no sign
+handling — rather than the old complex-to-magnitude pass over 512 MB.
+
+Validated by A/B against the known-good CPU detect on identical input (the pipeline CRC gate does
+not apply — the rounding order changes deliberately): max |diff| 2 LSB, ZERO pixels beyond that
+over 1,048,576, correlation 0.999866. `mpfs/host/model_detect_fusion.py` predicted that ≤2 LSB
+bound before any RTL existed.
 
 I and Q must be read as signed int16 before squaring. The branchless reference formula is:
 
@@ -484,7 +502,7 @@ problem, which is why the order is stated explicitly.
 | 2 | Flash the application to eNVM (`run_program.sh`) | Programming the fabric requires re-flashing the app afterwards |
 | 3 | Power-cycle | The freshly flashed app must actually boot |
 | 4 | `ELOD` — load the scene from eMMC (81.5 s) | DDR was wiped by step 3; SIG must be populated |
-| 5 | `PIPE` — run the pipeline (79.79 s) | Needs SIG and the geometry tables in DDR |
+| 5 | `PIPE` — run the pipeline (58.12 s) | Needs SIG and the geometry tables in DDR |
 | 6 | `EROI` / `ESAV` — crop or persist the result | Needs OUT populated |
 
 Steps 4-6 may repeat freely without re-flashing, provided the board is not power-cycled between
@@ -553,7 +571,8 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 
 | Deviation | Reason |
 |---|---|
-| Detect runs on the CPU, not fabric | SmartHLS sign-extension miscompile; costs 18.88 s, the largest structural target |
+| Detect is fabric, in the FFT unloader (not a kernel of its own) | The standalone HLS detect kernel is unusable (sign-extension miscompile). Fusing it into `fft_unloader_v.v` in Verilog both fixes that and deletes the 19.24 s pass (§2.4) |
+| Resample gather emits SINGLE-BEAT AXI reads | SmartHLS refuses burst conversion: the two-tap interpolation issues two AXI loads per iteration (`hls.log`: "cannot be converted into an AXI burst transfer: resample.cpp:41,43"). ~880 us/line against a 131 us II=1 schedule, and the AR-burst FIFO has "2 uses per cycle but only 1 units available", which is why `max_outstanding` 1->8 did nothing. Largest remaining target |
 | FFT feeder/unloader are hand-written Verilog | SmartHLS mem <-> stream kernels synthesize to dead RTL |
 | Window is fused into the FFT feeder (Verilog), not into resample (HLS) | Two distinct SmartHLS miscompiles on the resample-fusion route; the Verilog feeder route works and is silicon-proven (§2.2) |
 | `silicon_emulator.window_fixed()` is NOT bit-exact vs `window.cpp` | It applies the two tapers as two separate `>>15` rounds; the kernel folds them into one `cw` first. Differs in the low bit. Pre-existing, found 2026-07-21, unresolved — the mirror's docstring claims bit-accuracy, so one of the two should change |

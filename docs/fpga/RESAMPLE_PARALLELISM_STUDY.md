@@ -1,6 +1,9 @@
 # Resample: parallel fabric paths — design study
 
-Resample is the largest pipeline stage (28.53 s of 79.79 s). This study asks what it would take to
+Resample is the largest pipeline stage (26.92 s of 58.12 s -- 46.3%, after window and detect were
+fused away). NOTE this study predates the root-cause finding: the gather runs ~880 us/line against
+a 131 us II=1 schedule because SmartHLS refuses burst conversion (two AXI loads per iteration), so
+the parallelism options below are not the first thing to try. This study asks what it would take to
 parallelise it in fabric, and concludes that the answer differs sharply across its three parts.
 
 Status: **study only.** Nothing here is built. The one prerequisite — measuring the three parts
@@ -117,7 +120,7 @@ Two consequences:
 1. Tile-size and locality work on the corner-turn may return more than replicating gather instances,
    and it is a smaller change.
 2. It pays **twice**. The pipeline runs two corner-turns — one inside resample, one between the FFT
-   passes (stage 4, also 7.3 s) — totalling ~14.6 s, about 18% of the 79.79 s pipeline. Both
+   passes (stage 4, also 7.3 s) — totalling ~14.6 s, about 25% of the 58.12 s pipeline. Both
    use the same kernel, so one fix improves both.
 
 Whether the transpose can be avoided rather than optimised is a separate question. Having azimuth

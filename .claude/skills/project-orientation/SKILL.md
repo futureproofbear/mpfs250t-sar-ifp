@@ -36,7 +36,7 @@ target-neutral (see `sar-pipeline-design`); the FPGA/toolchain specifics are sco
 ## What is PROVEN vs OPEN
 Proven (on silicon):
 - **Full autonomous on-board run (re-confirmed 2026-07-20):** scene loaded from the board's own eMMC
-  (81.5 s, `sig_crc 0x89fa12dc` verified) → focused in **79.79 s** (`SAR_SEQ_OK`, `fft_mode=1` FABRIC
+  (81.5 s, `sig_crc 0x89fa12dc` verified) → focused in **58.12 s** (`SAR_SEQ_OK`, `fft_mode=1` FABRIC
   CoreFFT confirmed at runtime) → ROI crop rendered to a coherent focused image. No host JTAG data load.
   Reproducible: the superseded 88.1 s baseline ran 88.04 s / 88.11 s, output byte-identical to the previous
   88.1 s pre-flush-fix build had the same top-left 1024² ROI crc `0xd596c9eb`).
@@ -51,11 +51,14 @@ Proven (on silicon):
   a correct-signed CPU detect (see `sar-pipeline-design` + `mpfs-platform-gotchas`).
 
 Open / next (image is already correct; these are latency + hardening):
-- Latency reduction (79.79 s). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
+- Latency reduction (58.12 s). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
   FLUSH64 writeback is now DONE and measured (resample 53.6 → 29.2 s, frame 110.8 → 88.1 s, output bits
   unchanged) — do not treat the per-line L2 flush as a pending lever, and disregard the old "2% L2
   flush" split, which came from a profile of a since-reverted experiment. The live levers, in order:
-  (1) **detect at 18.88 s (23.7%) — the largest structural target and the only stage still on the CPU**;
+  (1) **resample at 26.92 s (46.3%) — the largest target by far**, root cause known: SmartHLS emits
+  SINGLE-BEAT reads for the gather because the two-tap interpolation issues two AXI loads per
+  iteration (see `hls_silicon_stats.jsonl`, phenomenon `axi_ii_lie`). Window and detect are FUSED
+  into the FFT passes and no longer exist as stages;
   moving it to fabric is blocked on the SmartHLS sign-extension miscompile, so the firmware-only path is
   splitting CPU detect across the 4 U54 harts; (2) the resample fabric kernel's interconnect — its shared
   `m_axi` port serialises the gather; (3) the corner-turn's DDR round-trip.

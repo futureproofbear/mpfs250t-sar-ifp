@@ -71,7 +71,7 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-79.79 s is a bring-up baseline, not optimised. Levers in measured-ROI order. **Detect (18.88 s,
+58.12 s is the current baseline (2026-07-21). Levers in measured-ROI order. **Detect (18.88 s,
 23.7%) is the largest structural target** and the only stage still running on the CPU (resample is
 the larger stage at 28.53 s, but far more studied — three data-movement hypotheses falsified, and
 DDR training ruled out). The FFTs are already on fabric and are not a

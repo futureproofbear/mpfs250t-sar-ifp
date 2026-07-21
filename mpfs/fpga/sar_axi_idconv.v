@@ -14,8 +14,31 @@
 //   M_AXI : AXI4 *initiator*(connect MSS:FIC_0_AXI4_S here)
 // Then it is ONE delete + TWO bus drags in SmartDesign.
 //
-// Assumption (true here): <=1 outstanding txn per distinct low-4 tag (sequential kernels,
-// NUM_THREADS=1) so the keyed store is lossless.
+// ---------------------------------------------------------------------------------------
+// 2026-07-22 FIX: forward master_number, not master_id.
+//
+// The 11-bit target ID is {master_number[2:0], master_id[7:0]}. The previous version forwarded
+// ARID[3:0] -- i.e. master_id[3:0] -- and stashed the upper 7 bits keyed by that tag. But EVERY
+// SmartHLS kernel on this design presents master_id = 0, so every master produced
+// ARID = {master_number, 8'h00}: the low 4 bits were 0 for ALL of them, every master aliased onto
+// tag 0, and the stash kept only the last writer. The keyed store was indexed by the one field
+// that carries no information.
+//
+// That is why the old header could only claim safety for "sequential kernels": with one master
+// active at a time the aliasing is invisible. Run two fabric masters concurrently and the
+// sequence RES AW (stash<-0x30), RES2 AW (stash<-0x60), RES B reconstructs 0x600 -- the response
+// routes to the wrong master. It builds clean, closes timing, and fails only on silicon.
+//
+// Now: forward master_number[2:0] as the tag (that IS the master-select the interconnect routes
+// on), and stash master_id[7:0] keyed by master_number. The remaining assumption is only
+// "<=1 outstanding txn per MASTER with a differing master_id", which is trivially true here
+// because each kernel presents a single fixed master_id. Up to 8 masters are distinguishable;
+// the DIC has 6 initiators.
+//
+// This unblocks running fabric kernels CONCURRENTLY -- multi-instance FFT, multi-instance
+// resample, and overlapping resample with the first FFT all sit behind this one change.
+// Verified by tb/tb_sar_axi_idconv.v, which specifically drives two masters that share
+// master_id and differ only in master_number, and returns responses out of order.
 
 module sar_axi_idconv (
     input  wire         ACLK,
@@ -104,21 +127,22 @@ module sar_axi_idconv (
     input  wire         M_AXI_RVALID,
     output wire         M_AXI_RREADY
 );
-    // ---- ID stash: upper 7 bits keyed by low-4 tag ----
-    reg [6:0] ar_tab [0:15];
-    reg [6:0] aw_tab [0:15];
+    // ---- ID stash: master_id[7:0] keyed by master_number[2:0] (8 masters max) ----
+    // Keyed by the field that DISCRIMINATES masters, so two masters can be in flight at once.
+    reg [7:0] ar_tab [0:7];
+    reg [7:0] aw_tab [0:7];
     integer i;
     always @(posedge ACLK or negedge ARESETN) begin
         if (!ARESETN) begin
-            for (i=0;i<16;i=i+1) begin ar_tab[i]<=7'h0; aw_tab[i]<=7'h0; end
+            for (i=0;i<8;i=i+1) begin ar_tab[i]<=8'h0; aw_tab[i]<=8'h0; end
         end else begin
-            if (S_AXI_ARVALID & S_AXI_ARREADY) ar_tab[S_AXI_ARID[3:0]] <= S_AXI_ARID[10:4];
-            if (S_AXI_AWVALID & S_AXI_AWREADY) aw_tab[S_AXI_AWID[3:0]] <= S_AXI_AWID[10:4];
+            if (S_AXI_ARVALID & S_AXI_ARREADY) ar_tab[S_AXI_ARID[10:8]] <= S_AXI_ARID[7:0];
+            if (S_AXI_AWVALID & S_AXI_AWREADY) aw_tab[S_AXI_AWID[10:8]] <= S_AXI_AWID[7:0];
         end
     end
 
     // ---- AR (S->M): downsize ID, zero-extend addr, pass the rest ----
-    assign M_AXI_ARID    = S_AXI_ARID[3:0];
+    assign M_AXI_ARID    = {1'b0, S_AXI_ARID[10:8]};   // master_number is the routing key
     assign M_AXI_ARADDR  = {6'b0, S_AXI_ARADDR};
     assign M_AXI_ARLEN   = S_AXI_ARLEN;   assign M_AXI_ARSIZE  = S_AXI_ARSIZE;
     assign M_AXI_ARBURST = S_AXI_ARBURST; assign M_AXI_ARLOCK  = S_AXI_ARLOCK[0];
@@ -126,7 +150,7 @@ module sar_axi_idconv (
     assign M_AXI_ARQOS   = S_AXI_ARQOS;   assign M_AXI_ARVALID = S_AXI_ARVALID;
     assign S_AXI_ARREADY = M_AXI_ARREADY;
     // ---- AW (S->M) ----
-    assign M_AXI_AWID    = S_AXI_AWID[3:0];
+    assign M_AXI_AWID    = {1'b0, S_AXI_AWID[10:8]};   // master_number is the routing key
     assign M_AXI_AWADDR  = {6'b0, S_AXI_AWADDR};
     assign M_AXI_AWLEN   = S_AXI_AWLEN;   assign M_AXI_AWSIZE  = S_AXI_AWSIZE;
     assign M_AXI_AWBURST = S_AXI_AWBURST; assign M_AXI_AWLOCK  = S_AXI_AWLOCK[0];
@@ -138,12 +162,12 @@ module sar_axi_idconv (
     assign M_AXI_WLAST = S_AXI_WLAST;
     assign M_AXI_WVALID= S_AXI_WVALID; assign S_AXI_WREADY = M_AXI_WREADY;
     // ---- R (M->S): restore ID ----
-    assign S_AXI_RID   = { ar_tab[M_AXI_RID[3:0]], M_AXI_RID[3:0] };
+    assign S_AXI_RID   = { M_AXI_RID[2:0], ar_tab[M_AXI_RID[2:0]] };
     assign S_AXI_RDATA = M_AXI_RDATA; assign S_AXI_RRESP = M_AXI_RRESP;
     assign S_AXI_RLAST = M_AXI_RLAST; assign S_AXI_RVALID= M_AXI_RVALID;
     assign M_AXI_RREADY= S_AXI_RREADY;
     // ---- B (M->S): restore ID ----
-    assign S_AXI_BID   = { aw_tab[M_AXI_BID[3:0]], M_AXI_BID[3:0] };
+    assign S_AXI_BID   = { M_AXI_BID[2:0], aw_tab[M_AXI_BID[2:0]] };
     assign S_AXI_BRESP = M_AXI_BRESP; assign S_AXI_BVALID= M_AXI_BVALID;
     assign M_AXI_BREADY= S_AXI_BREADY;
 endmodule

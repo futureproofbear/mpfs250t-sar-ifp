@@ -34,7 +34,7 @@ PolarFire SoC MPFS250T_ES engineering-sample board, brought up JTAG-only.
 ## What is open / next
 The image is already correct; these are latency and quality items.
 
-Latency (measured 2026-07-21: **79.79 s** per frame, two runs 79.794/79.683; per-stage timing in
+Latency (measured 2026-07-21: **58.12 s** per frame, window+detect fused; per-stage timing in
 `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5, re-readable via `bash mpfs/host/run_stage_timing.sh`).
 The range/azimuth FFTs already run on the fabric CoreFFT engine (phase-exact, and `fft_mode=1` is
 verified at runtime, see What is proven). Two rounds of resample work are now banked: the fabric gather

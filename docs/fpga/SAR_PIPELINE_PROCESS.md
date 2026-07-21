@@ -1,13 +1,15 @@
 # SAR Pipeline — Full Process (host → board → host)
 
 > **✅ STATUS 2026-07-20 (LATEST — supersedes the HLS-FFT notes below):** Pipeline **VALIDATED
-> end-to-end on silicon, image corr=0.9923 vs golden**, total **79.79 s** per frame with the scene
+> end-to-end on silicon, image corr=0.9923 vs golden**, total **58.12 s** per frame with the scene
 > loaded from the board's own eMMC in 81.5 s. The range/azimuth FFTs run on the **fabric CoreFFT** chain
 > (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected by `SAR_FFTMODE` @`0xB0059110` = 1 and
 > confirmed at runtime; the CPU `sar_fft.c` is the mode-0 legacy fallback. (History: the HLS `K_FFT`
 > butterfly is unsynthesizable on SmartHLS 2025.2 — it drops the twiddle term → passthrough — which is
 > why the HLS FFT was abandoned in favour of CoreFFT.) Resample/corner-turn/window run on the fabric;
-> **detect runs on the MSS CPU** (`detect_mode` @`0xB0059118`), the fabric detect being blocked by a
+> **detect runs IN FABRIC**, fused into the azimuth-FFT unloader since 2026-07-21 (`detect_mode`
+> @`0xB0059118` = 3; modes 0/1 keep the CPU path reachable for A/B). Historically it ran on the MSS
+> CPU, the standalone fabric detect kernel being blocked by a
 > SmartHLS sign-extension miscompile. Per-stage timing: **[`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5**
 > (single source of truth). Detailed current design: [`../SAR_DESIGN.md`](../SAR_DESIGN.md).
 >

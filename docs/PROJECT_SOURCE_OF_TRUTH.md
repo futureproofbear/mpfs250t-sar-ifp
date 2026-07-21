@@ -54,16 +54,25 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
-> **Pipeline total: 79.79 s** (measured 2026-07-21, window-fused-feeder build; two consecutive runs
-> 79.794 / 79.683 s, 0.14% spread; output image still
-> byte-identical — top-left 1024² ROI crc `0xd596c9eb`, unchanged across every build back to the
-> 110.8 s one). Two steps got here from 88.1 s: replacing the per-line whole-L2 flush in
-> `resample_2pass()` with a targeted CCACHE `FLUSH64` writeback of the coefficient banks only
-> (110.8 → 88.1 s), then fusing the 2-D Hamming window into the range-FFT feeder so the standalone
-> 6.0 s full-frame pass disappears (88.1 → 79.79 s, of which 6.0 s is directly attributable —
-> see the detect anomaly noted in the architecture report §5). The per-stage breakdown lives in exactly one place,
-> [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current design
-> (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
+> **Pipeline total: 58.12 s** (measured 2026-07-21, detect-fused-unloader build). Window AND detect
+> are now fused into the FFT passes; no CPU stage remains in the datapath.
+> How it got here: 110.8 s -> 88.1 s (targeted CCACHE `FLUSH64` writeback of the coefficient banks
+> replacing a per-line whole-L2 flush) -> 79.79 s (2-D Hamming window fused into the range-FFT
+> feeder, deleting a 512 MB-read + 512 MB-write pass) -> ~78.6 s (resample coefficient closed form)
+> -> 58.12 s (magnitude detect fused into the azimuth-FFT unloader, deleting a 512 MB-read +
+> 128 MB-write pass AND halving that pass's write traffic).
+> **The CRC gate no longer applies.** ROI crc `0xd596c9eb` held from the 110.8 s build through the
+> window fusion, but the coefficient rewrite and the detect fusion change values deliberately (both
+> are MORE accurate). Correctness is now gated by an A/B against the known-good CPU detect on
+> identical input: max |diff| 2 LSB, ZERO pixels beyond that over 1,048,576, corr 0.999866 --
+> matching a bound `model_detect_fusion.py` predicted before any RTL existed.
+> **Largest remaining target: resample, 26.92 s (46.3%)**, and its root cause is now known --
+> SmartHLS refuses burst conversion for the gather loop because the two-tap interpolation issues
+> two AXI loads per iteration, so it emits SINGLE-BEAT reads (~880 us/line against a 131 us II=1
+> schedule). See `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5 and the `axi_ii_lie` entries in
+> `docs/fpga/hls_silicon_stats.jsonl`. The per-stage breakdown lives in exactly one place,
+> [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current
+> design (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
 > [`docs/SAR_DESIGN.md`](SAR_DESIGN.md). Open next: the NDSU production scene; and automating the
 > closed-loop sim→HIL gate.
 >
@@ -71,7 +80,9 @@
 > corr=0.9923 vs golden.** The HLS `K_FFT` butterfly is unsynthesizable on SmartHLS 2025.2 (drops the
 > twiddle term → passthrough; 3 structural fixes failed, cosim blocked), so the HLS FFT was abandoned;
 > the shipping FFT is the fabric CoreFFT chain (see the 2026-07-14 block above). Fabric does
-> resample/corner-turn/window/FFT; **detect runs on the MSS CPU** (`detect_mode` @`0xB0059118`) because
+> resample/corner-turn/window/FFT; *(2026-07-04 note, SUPERSEDED: detect now runs IN FABRIC, fused
+> into the FFT unloader -- see the status block above)* detect ran on the MSS CPU (`detect_mode`
+> @`0xB0059118`) because
 > SmartHLS mis-synthesizes the fabric detect's sign extension. Full status + per-stage timing + latency roadmap:
 > [`docs/fpga/SAR_PIPELINE_STATUS.md`](fpga/SAR_PIPELINE_STATUS.md); silicon-debug harness + learnings:
 > [`docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md). The CoreFFT note below is historical.

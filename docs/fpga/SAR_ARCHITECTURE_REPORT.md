@@ -31,7 +31,7 @@ path at run time. This is the shipping configuration, proven end-to-end on silic
 |---|---|---:|
 | Scene resident on eMMC | `SARI` partition @ LBA `0x80000` (superblock + TOC + per-scene blob, 10 role segments) | one-time provision |
 | **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **81.5 s** |
-| **PIPE** focus | `sar_form_image`, fabric CoreFFT (`fft_mode=1`) | **79.79 s** (§5) |
+| **PIPE** focus | `sar_form_image`, fabric CoreFFT + fused window/detect | **58.12 s** (§5) |
 | **SAVEOUT** DDR → eMMC | `ESAV`, commit-last ordering (crash-safe) | ~16 min |
 | Verify / inspect | `EVOU` full-image CRC; `EROI` crop + small JTAG dump | ~63 s / ~4 min |
 
@@ -100,7 +100,7 @@ slaves, each a 4 KiB window at `0x6000_n000` (`sar_kernels.h`): `K_CORNER_TURN` 
 | # | Stage | Kernel | Implementation | What it does |
 |---|---|---|---|---|
 | 1 | **Resample** | `K_RESAMPLE` | HLS mem→mem, AXI-initiator | 2-pass keystone. MSS computes quantized source `idx[]` + Q15 weight `wq[]`; the fabric **gathers + linearly interpolates**: `out = in[idx]·(1−w) + in[idx+1]·w`. Pulse reorder via `inv_order`. |
-| 2 | **Window** | *(none — fused)* | Verilog, in `fft_feeder_v` | 2-D Hamming taper (`hamr[j]·hamc[k]`), fixed-point, zero in the zero-pad. Applied as data streams into the range FFT; no standalone pass. The `K_WINDOW` HLS kernel is still instantiated in the fabric but is never armed. |
+| 2 | **Window** | *(none - fused)* | Verilog, in `fft_feeder_v` | 2-D Hamming taper (`hamr[j]·hamc[k]`), fixed-point, zero in the zero-pad. Applied as data streams into the range FFT; no standalone pass. The `K_WINDOW` HLS kernel is still instantiated in the fabric but is never armed. |
 | 3 | **Range FFT** | `K_FFT_FEEDER` → gearbox → **CoreFFT** → `K_FFT_UNLOADER` | Verilog feeder + Verilog gearbox + DirectCore CoreFFT 8.1.100 (in-place, 8192-pt, BFP) + HLS unloader | 8192-pt row FFT with per-row block-floating-point (SCALE_EXP). |
 | 4 | **Corner-turn** | `K_CORNER_TURN` | HLS mem→mem, tiled transpose | Transpose SIG→SCRATCH (LSRAM-tiled) between the two FFT passes. |
 | 5 | **Azimuth FFT** | same CoreFFT chain | (reused) | Second 8192-pt FFT pass over the transposed frame. |
@@ -161,7 +161,7 @@ gained the CoreFFT chain and deeper AXI FIFOs. The immediately preceding build m
 | Block | 4LUT | DFF | LSRAM | µSRAM | Math | Notes |
 |---|---:|---:|---:|---:|---:|---|
 | **CoreFFT** (`FFT`) | 4,093 | 1,061 | 21 | 0 | 4 | twiddle ROM + butterfly datapath; 4 MACCs |
-| **Detect** (`DET`) | 3,809 | 2,959 | 0 | 25 | 2 | I²+Q² (2 MACC) + integer sqrt — **kernel is instantiated but BYPASSED at runtime** (detect runs on the MSS, §6); reclaimable ~3.8k LUT if stripped |
+| **Detect** (`DET`) | 3,809 | 2,959 | 0 | 25 | 2 | I²+Q² (2 MACC) + integer sqrt — **kernel is instantiated but BYPASSED at runtime** -- detect is now fused into the FFT unloader (§5), NOT on the MSS; this standalone `DET` kernel is dead weight, ~3.8k LUT reclaimable if stripped |
 | **Window** (`WIN`) | 3,361 | 2,098 | 16 | 23 | 6 | 2-D Hamming multiply |
 | **Resample** (`RES`) | 3,125 | 1,834 | 32 | 25 | 6 | **linear-interp gather** (2 MACC/output) |
 | **Gearbox** (`GBX`) | 3,083 | 4,144 | 0 | 0 | 0 | CoreFFT stream rate-match; register-based elastic FIFO |
@@ -215,17 +215,44 @@ re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
 **Current (measured 2026-07-20, eMMC boot-load path, `fft_mode=1` fabric CoreFFT verified at runtime):**
 
-CURRENT BASELINE — measured 2026-07-21, window-fused-feeder build:
+CURRENT BASELINE — measured 2026-07-21, detect-fused-unloader build:
 
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
-| Resample (2-pass keystone) | **28.53 s** | 35.8% | fabric gather, 5634 pulses (dominant) |
-| Detect | 18.88 s | 23.7% | **MSS CPU** (see §6) |
-| Azimuth FFT | 12.57 s | 15.8% | CoreFFT (fabric) |
-| Range FFT | 12.49 s | 15.7% | CoreFFT (fabric) |
-| Corner-turn | 7.32 s | 9.2% | fabric transpose |
-| Window | **0.00 s** | 0% | fused into the range-FFT feeder (§ below) |
-| **Total** | **79.79 s** | | `SAR_SEQ_OK`, ROI crc `0xd596c9eb` |
+| Resample (2-pass keystone) | **26.92 s** | **46.3%** | fabric gather, dominant by a wide margin |
+| Range FFT | 12.60 s | 21.7% | CoreFFT (fabric) |
+| Azimuth FFT | 11.27 s | 19.4% | CoreFFT + **fused detect** (fabric) |
+| Corner-turn | 7.33 s | 12.6% | fabric transpose |
+| Window | **0.00 s** | 0% | fused into the range-FFT feeder |
+| Detect | **0.00 s** | 0% | fused into the azimuth-FFT unloader |
+| **Total** | **58.12 s** | | `SAR_SEQ_OK` |
+
+Both CPU stages are now gone from the datapath. The whole pipeline is fabric except coefficient
+generation, which the MSS still computes per line.
+
+MEASURED A/B, same bitstream and scene (`DETMODE=1` CPU detect vs `DETMODE=3` fused):
+
+| | CPU detect | fused | Δ |
+|---|---:|---:|---:|
+| azimuth-FFT | 12.777 s | 11.274 s | −1.50 |
+| detect | 19.241 s | 0.000 s | −19.24 |
+| TOTAL | 78.557 s | 58.121 s | **−20.44 s (−26%)** |
+
+The azimuth FFT itself sped up, which was not predicted: the unloader writes uint16 magnitudes
+instead of complex int32, halving that pass's DDR write traffic.
+
+Correctness is NOT gated by the pipeline CRC here — the fusions change rounding order and
+coefficient values deliberately. The gate is an A/B against the known-good CPU path on identical
+input: max |diff| **2 LSB**, **zero** pixels beyond that over 1,048,576, correlation 0.999866.
+`model_detect_fusion.py` predicted ≤2 LSB before any RTL existed. A model that states a bound in
+advance and silicon that respects it exactly is stronger evidence than a CRC match, which only
+says "same as before".
+
+DETECT VARIANCE — an earlier revision of this document claimed detect "reproduces to 0.1%, so it
+is not variance". That was wrong, and based on two runs that happened to agree. Four samples read
+18.88 / 18.86 / 20.65 / 19.24 s, spanning 1.8 s (~9%). Detect's run-to-run noise EXCEEDED several
+of the optimisations being chased, so any single-run comparison of a ~1 s change here was
+uninterpretable. The fusion removes the stage and the variance together.
 
 Two changes since the 88.1 s baseline, both output-bit-identical (same `0xd596c9eb`):
 
@@ -235,16 +262,11 @@ Two changes since the 88.1 s baseline, both output-bit-identical (same `0xd596c9
    into `fft_feeder_v.v` and applied as data streams into the range FFT. 6.0 s → 0.00 s, and the
    FFT passes did not slow down (25.06 s combined vs 25.07 s before), so the taper is free.
 
-Reproducible: two consecutive runs at **79.794 s / 79.683 s** (0.14% spread), stage-for-stage —
-resample 28.533/28.532, detect 18.883/18.864, corner-turn 7.320/7.320.
-
-UNEXPLAINED, but NOT variance: detect sits at 18.87 s against the 20.6 s recorded for the 88.1 s
-build — −1.72 s, −8.3%. It reproduces to 0.1% across both runs, so it is a stable property of this
-build, not noise. Nothing in either change touches detect, which is pure CPU `sqrt(I²+Q²)` over the
-same 512 MB. So either the 20.6 s figure never described this code path, or something non-obvious
-couples the stages. **Attribute only 6.0 s (window pass) + 0.67 s (resample packing) to the two
-changes; the remaining ~1.64 s is real and measured but unexplained.** Anyone optimising detect
-should re-derive its cost from this baseline rather than from the 20.6 s figure.
+Superseded stanza removed 2026-07-21. It recorded the 79.79 s window-fused baseline and asserted
+that detect's 18.87 s "reproduces to 0.1%, so it is NOT variance". Both are obsolete: the baseline
+is now 58.12 s (detect fused away), and the variance claim was WRONG -- it rested on two runs that
+happened to agree, and four samples now span 1.8 s. The corrected account is in the CURRENT
+BASELINE block above.
 
 Getting here took two steps. The resample fabric kernel redesign (gather loop II 2→1, plus the
 hoisted window taper) took resample 103.3 → 53.6 s and the pipeline to 110.8 s. Replacing the
@@ -259,8 +281,13 @@ docs claimed. The 2% figure came from an mcycle profile taken while an experimen
 (16× fewer flushes) was active; that experiment was later reverted by a `git checkout`, but the
 number outlived the code it described. Measure the shipping path, not a branch.
 
-Detect remains the #1 structural target: at 18.88 s it is 23.7% of the run and the only stage still
-on the CPU, bypassed because of the HLS sign-extension miscompile (§6). Resample is still the single
+Detect is GONE from the datapath (fused into the FFT unloader, §5). Resample is now the target by
+a wide margin: 26.92 s, 46.3% of the run. Its ROOT CAUSE is identified -- SmartHLS refuses burst
+conversion for the gather loop because the two-tap interpolation issues TWO AXI loads per
+iteration (`hls.log`: "cannot be converted into an AXI burst transfer: resample.cpp:41,43"), so it
+emits SINGLE-BEAT reads at ~880 us/line against a 131 us II=1 schedule. The AR-burst FIFO also has
+"2 uses per cycle but only 1 units available", which serialises requests -- that is why
+`max_outstanding` 1->8 changed nothing. Resample is still the single
 largest stage (28.53 s, 35.8%), but it is the more stubborn of the two — three data-movement
 hypotheses have now been falsified on it (burst length, outstanding depth, beat packing), and DDR
 training has been ruled out as a cause.

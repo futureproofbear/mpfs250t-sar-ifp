@@ -33,10 +33,19 @@ fi
 # PIPE ('PIPE'=0x50495045): select the FABRIC CoreFFT chain (FFTMODE @0xB0059110 = 1) -- the
 # shipping FFT path (feeder->gearbox->CoreFFT->unloader). Without this the pipeline silently runs
 # the LEGACY CPU-FFT fallback (mode 0). Detect stays CPU (default; detect_mode @0xB0059118 != 2).
+# detect_mode @0xB0059118 is settable via the DETMODE env var so the CPU-vs-fabric A/B can be run
+# without editing this script:  0/1 = CPU detect (shipping), 2 = the broken HLS detect kernel
+# (test only), 3 = detect FUSED into the FFT unloader (fft_unloader_v.v). The fused path forfeits
+# the pipeline CRC gate -- it changes rounding order deliberately -- so diffing mode 3 against
+# mode 1 on the SAME scene IS the correctness check.
 FFTSET=""; FFTECHO=""
 if [ "$CMD" = "0x50495045" ]; then
   FFTSET='set {unsigned int}0xB0059110 = 1'
-  FFTECHO='printf ">>> fft_mode=%u (1=fabric CoreFFT) detect_mode=%u\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118'
+  if [ -n "${DETMODE:-}" ]; then
+    FFTSET="$FFTSET
+set {unsigned int}0xB0059118 = $DETMODE"
+  fi
+  FFTECHO='printf ">>> fft_mode=%u (1=fabric CoreFFT) detect_mode=%u (3=fused into unloader)\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118'
 fi
 
 cat > "$GDBSCRIPT" <<GDBEOF

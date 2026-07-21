@@ -144,6 +144,13 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
 #define SAR_ROW_BEATS   (SAR_GRID / 2u)      /* 8192 samples / 2 samples-per-beat = 4096 beats/row */
 #define SAR_ROW_BYTES   (SAR_GRID * 4u)      /* 8192 samples * 4 bytes = 32768 bytes/row */
 #define K_FFT_SCALE_EXP 0x14u                /* feeder reg: last frame's latched CoreFFT SCALE_EXP */
+/* Fused magnitude-detect in the FFT unloader (fft_unloader_v.v). Deletes the separate detect
+ * pass -- 20.6 s, 512 MB read + 128 MB written -- by computing |z| as the second FFT's output
+ * streams to DDR. Only the AZIMUTH pass may enable it; the range pass must stay complex.
+ * In detect mode a row is uint16 (16384 B), not complex int32 (32768 B). */
+#define K_UNL_DET_CTRL  0x18u                /* unloader reg: [0] = fused detect enable */
+#define K_UNL_STATUS2   0x14u                /* unloader sticky AXI/protocol error latches */
+#define SAR_ROW_BYTES_U16 (SAR_GRID * 2u)    /* detect-mode output row */
 /* Fused 2-D Hamming window in the feeder (fft_feeder_v.v) -- replaces the standalone window
  * pass, which cost 6.0 s reading and rewriting the whole 512 MB frame for an element-wise
  * multiply on data the feeder already reads. Bit-identical to hls_window/window.cpp; proven
@@ -186,7 +193,7 @@ static void fft_win_cpu(uint32_t buf, uint32_t rows)
     }
 }
 
-static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en)
+static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en, int det_en)
 {
     uint32_t budget = spins ? spins : SAR_DEFAULT_SPINS;
     const int16_t *hamr = (const int16_t *)(uintptr_t)SAR_HAMR_ADDR;
@@ -196,9 +203,13 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
     /* ---- PASS 1: per-row fabric FFT; capture each row's actual CoreFFT exponent ---- */
     for (uint32_t row = 0; row < SAR_GRID; row++) {
         uint32_t s = src + row * SAR_ROW_BYTES;
-        uint32_t d = dst + row * SAR_ROW_BYTES;
+        /* detect mode halves the output row: uint16 magnitudes, not complex int32 */
+        uint32_t d = dst + row * (det_en ? SAR_ROW_BYTES_U16 : SAR_ROW_BYTES);
+        /* Written unconditionally (0 when disabled) so the enable cannot leak from the azimuth
+         * pass into a later range pass -- same discipline as the fused window below. */
+        sar_reg_w(K_FFT_UNLOADER, K_UNL_DET_CTRL, det_en ? 1u : 0u);
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, d);
-        sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);
+        sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);   /* INPUT beats, both modes */
         sar_k_start(K_FFT_UNLOADER);
         /* Arm the fused window for THIS row. Written unconditionally (0 when disabled) so the
          * enable can never persist from a previous pass into the azimuth FFT or a debug entry. */
@@ -235,12 +246,24 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
     for (uint32_t row = 0; row < SAR_GRID; row++) {
         uint32_t sh = (uint32_t)(emax - sar_row_exp[row]) + headroom;
         if (sh == 0u) continue;
-        uint32_t *d = (uint32_t *)(uintptr_t)(dst + row * SAR_ROW_BYTES);
-        for (uint32_t i = 0; i < SAR_GRID; i++) {
-            uint32_t v = d[i];
-            int32_t re = (int32_t)(int16_t)(v >> 16)     >> sh;
-            int32_t im = (int32_t)(int16_t)(v & 0xFFFFu) >> sh;
-            d[i] = (((uint32_t)(uint16_t)(int16_t)re) << 16) | (uint16_t)(int16_t)im;
+        if (det_en) {
+            /* The unloader already took the magnitude, at the row's NATIVE exponent -- it cannot
+             * do better, because emax is not known until every row is transformed. Magnitude is
+             * linear in the operand scale, so shifting it here is algebraically the same global
+             * renormalize; only the truncation point moves. Modelled in
+             * mpfs/host/model_detect_fusion.py: never worse than the old order, <=2 LSB apart,
+             * because CoreFFT's BFP exponent is nearly always 0. Half the data, no sqrt, no sign
+             * handling -- this is what remains of the 20.6 s detect stage. */
+            uint16_t *d = (uint16_t *)(uintptr_t)(dst + row * SAR_ROW_BYTES_U16);
+            for (uint32_t i = 0; i < SAR_GRID; i++) d[i] = (uint16_t)(d[i] >> sh);
+        } else {
+            uint32_t *d = (uint32_t *)(uintptr_t)(dst + row * SAR_ROW_BYTES);
+            for (uint32_t i = 0; i < SAR_GRID; i++) {
+                uint32_t v = d[i];
+                int32_t re = (int32_t)(int16_t)(v >> 16)     >> sh;
+                int32_t im = (int32_t)(int16_t)(v & 0xFFFFu) >> sh;
+                d[i] = (((uint32_t)(uint16_t)(int16_t)re) << 16) | (uint16_t)(int16_t)im;
+            }
         }
         if ((row & 0x7Fu) == 0u) SAR_PROG(5u, row, SAR_GRID);
     }
@@ -255,7 +278,7 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
 /* `win_en` applies the fused 2-D Hamming window on the way into the FFT (range pass only --
  * the azimuth pass must NOT re-window). Mode 0 does not go through the feeder, so it applies
  * the same taper on the CPU first, keeping the fallback path correct. */
-static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en)
+static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en, int det_en)
 {
     /* FIC0 non-coherent: flush so `src` is in DDR (not stale L2) before the FFT, then flush
      * so `dst` reaches DDR for the next fabric kernel's FIC0 read. */
@@ -263,7 +286,7 @@ static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en)
     __asm volatile ("fence rw, rw");
     int rc;
     if (*(volatile uint32_t *)(uintptr_t)SAR_FFTMODE_ADDR == 1u) {
-        rc = fft_fabric_pass(src, dst, spins, win_en);
+        rc = fft_fabric_pass(src, dst, spins, win_en, det_en);
     } else {
         if (win_en) {
             fft_win_cpu(src, SAR_GRID);           /* in place, before the CPU transform */
@@ -438,7 +461,7 @@ __attribute__((used)) int sar_fft_pass_test(void)
 {
     __asm volatile ("fence rw, rw");
     /* DECOUPLED src/dst (SIG -> SCRATCH) so range-FFT input and output never alias. */
-    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u, 0);   /* streaming-path test: no window */
+    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u, 0, 0);   /* streaming-path test: no window */
 }
 
 /* Debug: SCALE_EXP-capture + renormalize ISOLATION test (set fft mode=1 first). Fill SIG with
@@ -458,7 +481,7 @@ __attribute__((used)) int sar_fabric_scale_test(void)
     __asm volatile ("fence rw, rw");
     /* SCALE_EXP isolation test: window OFF, or the taper would scale the two DC rows and
      * destroy the 16:1 ratio this test exists to measure. */
-    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u, 0);    /* fabric path when mode=1 */
+    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u, 0, 0);    /* fabric path when mode=1 */
 }
 
 /* CPU magnitude detect: sqrt(I^2+Q^2) over `n` complex-int16 words (I<<16|Q), SIG -> OUT. Correct
@@ -530,7 +553,7 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
      *    SIG is free after resample, so ping-pong SCRATCH<->SIG keeps read/write on
      *    separate 256 MB pages. VALIDATED on silicon: decoupled fft_pass streams past
      *    transform 1 (in-place stalled at idx=1). */
-    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 1);  /* window FUSED into this pass */
+    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 1, 0);  /* window FUSED into this pass */
       if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;          /* feeder stalled */
       if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (range) */
     sar_stage_ts[3] = readmtime();
@@ -543,7 +566,11 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     sar_stage_ts[4] = readmtime();
 
     /* 5) azimuth FFT: SCRATCH -> SIG (DECOUPLED, same ping-pong as range FFT) */
-    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 0);  /* NO window on the azimuth pass */
+    /* FUSED DETECT (runtime, DETECTMODE 3): the unloader takes |z| as the azimuth FFT streams
+     * out, so this pass writes uint16 magnitudes DIRECTLY to OUT and step 6 disappears. Deletes
+     * a 512 MB read + 128 MB write. The range pass above must never enable it. */
+    const int det_fused = (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR == 3u);
+    { int r = fft_pass(BUF_SCRATCH, det_fused ? BUF_OUT : BUF_SIG, spins, 0, det_fused);
       if (r == 1) return SAR_SEQ_TIMEOUT_FFT2;          /* feeder stalled */
       if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (azimuth) */
     sar_stage_ts[5] = readmtime();
@@ -552,7 +579,10 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
      * DEFAULT = CPU detect (correct sqrt, corr 0.97 on silicon -- the SHIPPING path). The fabric
      * detect HLS is UNFIXABLE via SmartHLS (it mis-synthesizes the negative-I sign extension no
      * matter how detect.cpp is written -> ~50% saturation); DETECTMODE 2 selects it for testing only. */
-    if (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR != 2u) {
+    if (det_fused) {
+        /* nothing to do: the unloader produced OUT during step 5, and the uint16 renormalize
+         * inside fft_fabric_pass already applied the global block exponent. */
+    } else if (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR != 2u) {
         flush_l2_cache(1u);                                  /* read fabric-written SIG from DDR */
         cpu_detect(BUF_SIG, BUF_OUT, SAR_GRID * SAR_GRID);
         flush_l2_cache(1u);                                  /* push OUT to DDR for JTAG readback */

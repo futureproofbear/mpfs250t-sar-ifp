@@ -59,12 +59,17 @@ catch { generate_design_initialization_data }
 
 ## ---------------- HDL+ cores (created FRESH -- the whole point of the new project) ----------------
 set_root -module {COREFFT_C0::work}       ;# temp root so create_hdl_plus's SYNTHESIZE config applies
-foreach hls {hls_corner_turn hls_window hls_detect hls_resample hls_fft_unloader} {
+## hls_fft_unloader DROPPED: replaced by the hand-written Verilog fft_unloader_top (fused
+## magnitude detect). Detect cannot be done in SmartHLS -- it mis-synthesizes the signed
+## narrowing (int16_t)(x>>16) as UNSIGNED, saturating ~50% of the image, and that passed both
+## cosim and a correlation check. Same reason hls_fft_feeder was dropped for fft_feeder_top.
+foreach hls {hls_corner_turn hls_window hls_detect hls_resample} {
     source "$here/$hls/hls_output/scripts/libero/create_hdl_plus.tcl"
 }
 ## gearbox (corefft_stream64_adapter, now WITH m_axis_tlast) + sar_axi_idconv (S_AXI/M_AXI bifs)
 source "$here/gearbox_idconv_cores.tcl"
 source "$here/feeder_v_core.tcl"
+source "$here/unloader_v_core.tcl"
 build_design_hierarchy
 
 ## ---------------- assemble SAR_TOP (instantiate + wire, incl GBX:m_axis -> UNLD:in_var stream) ----------------

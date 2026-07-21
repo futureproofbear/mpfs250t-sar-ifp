@@ -12,9 +12,10 @@ The full PFA (polar-format) SAR pipeline runs on the PolarFire SoC MPFS250T_ES (
 JTAG/FlashPro6) and produces the correct focused image, autonomously from the board's own eMMC:
 
 - Scene loads eMMC → DDR in **81.5 s** (`sig_crc 0x89fa12dc` verified), retiring the ~3 h JTAG input load.
-- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **88.1 s**, with `fft_mode=1`
-  (fabric CoreFFT) confirmed at runtime. Reproducible across consecutive runs (88.04 / 88.11 s), with
-  the output image byte-identical between runs and to the previous build.
+- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **79.79 s** (2026-07-21,
+  window-fused-feeder build), with `fft_mode=1` (fabric CoreFFT) confirmed at runtime. Output
+  image byte-identical to every prior build back to 110.8 s — top-left 1024² ROI crc `0xd596c9eb`.
+  Reproducible: two consecutive runs at 79.794 s / 79.683 s (0.14% spread), stage-for-stage.
 - Correlation vs golden reference = **0.9923** (Centerfield decimated 705×540 scene, band rows
   896:1152, 1.05 M unsaturated pixels; a point-target crop hits 0.9962). The board image matches
   `golden_small_mag.npy` in the **`T.rot180`** orientation (`board == golden.T[::-1,::-1]`) — exactly
@@ -70,12 +71,13 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-88.1 s is a bring-up baseline, not optimised. Levers in measured-ROI order. The ordering changed on
-2026-07-20: with resample down to 29.2 s, **detect (20.6 s, 23%) is now the largest structural
-target** and the only stage still running on the CPU. The FFTs are already on fabric and are not a
+79.79 s is a bring-up baseline, not optimised. Levers in measured-ROI order. **Detect (18.88 s,
+23.7%) is the largest structural target** and the only stage still running on the CPU (resample is
+the larger stage at 28.53 s, but far more studied — three data-movement hypotheses falsified, and
+DDR training ruled out). The FFTs are already on fabric and are not a
 lever. Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5.
 
-**1. Detect — 20.6 s, and it is on the CPU.**
+**1. Detect — 18.88 s, and it is on the CPU.**
 The fabric detect kernel is bypassed because SmartHLS mis-synthesised its sign extension
 (`(int16_t)(x>>16)` read unsigned → ~50% saturation); the shipping path is a correct-signed CPU
 detect selected by `detect_mode` @`0xB0059118`. Two routes: fix or replace the fabric detect (largest
@@ -83,7 +85,7 @@ win, needs a rebuild and a value-gate), or split the CPU detect across the 4 U54
 rows are independent, no bitstream risk). The multi-hart split is the best effort-to-payoff ratio
 available today.
 
-**2. Resample fabric-kernel interconnect — 29.2 s, still the single largest stage.**
+**2. Resample fabric-kernel interconnect — 28.53 s, still the single largest stage.**
 Measured on-silicon mcycle profiling of the azimuth pass (counters in `resample_2pass`, JTAG-read
 @`0xB0059120`) gives the per-line split: kernel-wait 78% / coeff-compute 20% / flush 2%. The CPU
 spends 78% of resample spinning in `sar_k_wait` for the fabric gather kernel, and the coeff compute is
@@ -205,9 +207,12 @@ below), and what remains is a handful of once-per-stage flushes, not a per-line 
 mechanism is the DDR address alias a fabric master drives (cached `0x8000_0000` vs non-cached
 `0xC000_0000`), not the FIC index — verify against the MSS User Guide before building.
 
-**4. Corner-turn (7.3 s) and window (6.0 s).** Small absolute costs; not worth a rebuild alone. Note
-that fusing the window into the resample gather was attempted and is SmartHLS-infeasible — see
-[`SMARTHLS_ANTIPATTERNS.md`](SMARTHLS_ANTIPATTERNS.md).
+**4. Corner-turn (7.32 s). Window is DONE — 0.00 s.** The window pass was fused into the range-FFT
+feeder on 2026-07-21 (hand-written Verilog in `fft_feeder_v.v`), deleting a 512 MB-read +
+512 MB-write full-frame pass for 6.0 s with bit-identical output. Note the earlier attempt to fuse
+it into the resample gather is SmartHLS-infeasible and must not be retried — see
+[`SMARTHLS_ANTIPATTERNS.md`](SMARTHLS_ANTIPATTERNS.md). The Verilog-feeder route is the one that
+works. Corner-turn remains a small absolute cost, not worth a rebuild alone.
 
 **Recommended next step:** multi-hart CPU detect (lever 1) — the largest firmware-only win, no
 bitstream risk.

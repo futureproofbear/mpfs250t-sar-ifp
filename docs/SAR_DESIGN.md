@@ -39,20 +39,21 @@ burst FIFOs.
 | # | Stage | Engine | In | Out |
 |---|---|---|---|---|
 | 1 | Resample (range + transpose + azimuth) | fabric gather kernel + MSS coefficients | SIG | SCRATCH |
-| 2 | Window (2-D Hamming) | fabric kernel | SCRATCH | SCRATCH |
+| 2 | Window (2-D Hamming) | *fused into the range-FFT feeder* | — | — |
 | 3 | Range FFT | fabric CoreFFT | SCRATCH | SCRATCH |
 | 4 | Corner-turn (transpose) | fabric kernel | SCRATCH | SIG |
 | 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
 | 6 | Detect (magnitude) | MSS U54 CPU | SIG | OUT |
 
-Total 88.1 s; the per-stage breakdown is in
+Total 79.79 s (2026-07-21); the per-stage breakdown is in
 [`fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5, which is the single numeric
 source of truth. Orchestration is `sar_form_image()` in `src/sar/sar_sequencer.c`.
 
 ### 2.0 Kernel-level decomposition
 
 The table above is the *timing* view: six instrumented stages matching `sar_stage_ts[0..6]`. At kernel
-granularity there are eight arm/wait cycles, because the resample stage internally runs
+granularity there are now seven arm/wait cycles (the window kernel is no longer armed), because the
+resample stage internally runs
 range-resample, a corner-turn, and azimuth-resample before reporting one timestamp. Both views are
 correct; this is the one to use when reasoning about buffer traffic or arming order.
 
@@ -61,7 +62,7 @@ correct; this is the one to use when reasoning about buffer traffic or arming or
 | 1 | range resample (per pulse, xM) | `RES` | SIG + COEF idx/wq | SCRATCH (row `invorder[i]`, tan φ-sorted) | resample |
 | 2 | corner-turn (transpose) | `CT` | SCRATCH | SIG | resample |
 | 3 | azimuth resample (per range bin, xNp) | `RES` | SIG + COEF | SCRATCH (uniform k-space) | resample |
-| 4 | window (2-D Hamming) | `WIN` | SCRATCH + hamr/hamc | SCRATCH (in-place taper) | window |
+| 4 | ~~window (2-D Hamming)~~ | *fused into `FEED`* | — | — | window (now 0.00 s) |
 | 5 | range FFT | `FEED` -> CoreFFT -> `fft_unloader` | SCRATCH (stream) | SCRATCH (AXI4 write) | rangeFFT |
 | 6 | corner-turn (transpose) | `CT` | SCRATCH | SIG | cornerturn |
 | 7 | azimuth FFT | `FEED` -> CoreFFT -> `fft_unloader` | SIG (stream) | SIG (AXI4 write) | azFFT |
@@ -129,14 +130,31 @@ The corner-turn is the one part that does not parallelise along the same axis, a
 **twice** in the pipeline — once here and once between the FFT passes (stage 4, also ~7.3 s) — so the
 two together are ~14.6 s, about 17% of the whole run, from a single shared kernel.
 
-### 2.2 Window
+### 2.2 Window — FUSED into the range-FFT feeder (2026-07-21)
 
 Separable Hamming taper applied as the on-the-fly product `hamr[j] · hamc[k]` from two Q15 1-D
 tapers, rather than a materialized 2-D table. Zero inside the zero-pad region.
 
-Do not attempt to fuse this into the resample gather. It was tried, was bit-exact in `shls sw` and
-II=1 in `shls hw`, and hit two distinct SmartHLS miscompiles on silicon — see
-[`fpga/SMARTHLS_ANTIPATTERNS.md`](fpga/SMARTHLS_ANTIPATTERNS.md).
+There is no longer a standalone window pass. The taper is applied inside `fft_feeder_v.v` as data
+streams into the range FFT: `hamc` lives in a 4096×32b on-chip table (2 taps/word, so table entry
+n serves beat n 1:1), `hamr[row]` arrives as a scalar in the same register write that arms the row,
+and a 3-stage registered multiply sits on the FIFO write side. Runtime-enabled (reg 0x18 bit16) —
+ON for the range pass, OFF for the azimuth pass, which shares the same feeder instance.
+
+Measured on silicon: window stage 6.0 s → 0.000 s, pipeline 87.58 → 79.79 s, and the FFT passes
+did not slow down (25.06 s vs ~25.07 s before), so the fused multiplies cost no wall-clock. ROI crc
+`0xd596c9eb` unchanged.
+
+Two things this depends on, both deliberate:
+
+- The arithmetic reproduces `hls_window/window.cpp` bit-for-bit, including its truncation ORDER
+  (`cw = (hamr*hamc)>>15` first, then `(sample*cw)>>15`). That is what keeps the crc a valid gate.
+  Note `silicon_emulator.window_fixed()` uses the OTHER order (two independent `>>15` rounds) and
+  is therefore NOT bit-exact against the silicon it mirrors — unresolved, see §11.
+- It is in hand-written Verilog, not HLS. Fusing the window into the resample gather was tried
+  twice, was bit-exact in `shls sw` and II=1 in `shls hw`, and hit two distinct SmartHLS
+  miscompiles on silicon — see [`fpga/SMARTHLS_ANTIPATTERNS.md`](fpga/SMARTHLS_ANTIPATTERNS.md).
+  Do not retry that route.
 
 ### 2.3 Range FFT, corner-turn, azimuth FFT
 
@@ -213,7 +231,7 @@ combinational pass-through and does **not** throttle outstanding transactions.
 | Resample, azimuth | 114,692 / line | 1.652 ms | 69 MB/s |
 | Resample, range | 114,692 / line | 1.475 ms | 78 MB/s |
 | Corner-turn | 512 MB | 7.33 s | 70 MB/s |
-| Window | 512 MB | 6.0 s | 85 MB/s |
+| Window | *(fused into the range FFT; no standalone pass since 2026-07-21)* | 0.00 s | — |
 
 FIC_0 at 64-bit × 62.5 MHz has a 500 MB/s ceiling, so every kernel sits at 14–17% of it. Four
 independent kernels converging on the same figure is evidence that the limit is this shared path
@@ -466,7 +484,7 @@ problem, which is why the order is stated explicitly.
 | 2 | Flash the application to eNVM (`run_program.sh`) | Programming the fabric requires re-flashing the app afterwards |
 | 3 | Power-cycle | The freshly flashed app must actually boot |
 | 4 | `ELOD` — load the scene from eMMC (81.5 s) | DDR was wiped by step 3; SIG must be populated |
-| 5 | `PIPE` — run the pipeline (88.1 s) | Needs SIG and the geometry tables in DDR |
+| 5 | `PIPE` — run the pipeline (79.79 s) | Needs SIG and the geometry tables in DDR |
 | 6 | `EROI` / `ESAV` — crop or persist the result | Needs OUT populated |
 
 Steps 4-6 may repeat freely without re-flashing, provided the board is not power-cycled between
@@ -535,9 +553,10 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 
 | Deviation | Reason |
 |---|---|
-| Detect runs on the CPU, not fabric | SmartHLS sign-extension miscompile; costs 20.6 s, now the largest structural target |
+| Detect runs on the CPU, not fabric | SmartHLS sign-extension miscompile; costs 18.88 s, the largest structural target |
 | FFT feeder/unloader are hand-written Verilog | SmartHLS mem <-> stream kernels synthesize to dead RTL |
-| Window is a separate pass, not fused into resample | Two distinct SmartHLS miscompiles on fusion |
+| Window is fused into the FFT feeder (Verilog), not into resample (HLS) | Two distinct SmartHLS miscompiles on the resample-fusion route; the Verilog feeder route works and is silicon-proven (§2.2) |
+| `silicon_emulator.window_fixed()` is NOT bit-exact vs `window.cpp` | It applies the two tapers as two separate `>>15` rounds; the kernel folds them into one `cw` first. Differs in the low bit. Pre-existing, found 2026-07-21, unresolved — the mirror's docstring claims bit-accuracy, so one of the two should change |
 | eMMC uses single-block transfers, not SDMA | Interrupts are off on hart1; SDMA would hang unhaltably |
 | Fabric runs at 62.5 MHz | 75 MHz effort stopped at marginal ROI; the HLS window/resample kernels are the Fmax limiter, not CoreFFT or the DDR bridge |
 | ~50% of OUT saturates at 65535 | Detect BFP shift headroom; cosmetic, correlation is measured on unsaturated pixels |

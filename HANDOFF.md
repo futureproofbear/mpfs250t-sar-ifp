@@ -34,7 +34,7 @@ PolarFire SoC MPFS250T_ES engineering-sample board, brought up JTAG-only.
 ## What is open / next
 The image is already correct; these are latency and quality items.
 
-Latency (measured 2026-07-20: **88.1 s** per frame; per-stage timing in
+Latency (measured 2026-07-21: **79.79 s** per frame, two runs 79.794/79.683; per-stage timing in
 `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5, re-readable via `bash mpfs/host/run_stage_timing.sh`).
 The range/azimuth FFTs already run on the fabric CoreFFT engine (phase-exact, and `fft_mode=1` is
 verified at runtime, see What is proven). Two rounds of resample work are now banked: the fabric gather
@@ -46,10 +46,10 @@ figure came from an `mcycle` profile taken while an experimental per-chunk flush
 number outlived the reverted code.
 
 With resample no longer dominant, the ranking has changed:
-1. **Detect (20.6 s, 23%) is now the largest structural target** and the only stage still on the CPU.
+1. **Detect (18.88 s, 23.7%) is the largest structural target** and the only stage still on the CPU.
    Moving it back to fabric is blocked on the SmartHLS sign-extension miscompile (see below); the
    firmware-only alternative is splitting CPU detect across the 4 U54 harts.
-2. Resample (29.2 s) is still the largest single stage but is now bound by the fabric gather kernel
+2. Resample (28.53 s) is still the largest single stage but is now bound by the fabric gather kernel
    itself — its shared `m_axi` port serialises the gather, so widen/split the interconnect; then stage
    a row/tile in on-chip SRAM and double-buffer; then parallel lanes across DDR banks.
 3. Corner-turn is a DDR-hostile transpose — use a tiled block transpose through on-chip SRAM (bursts,

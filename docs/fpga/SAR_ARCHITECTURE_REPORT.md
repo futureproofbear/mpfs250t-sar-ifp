@@ -31,7 +31,7 @@ path at run time. This is the shipping configuration, proven end-to-end on silic
 |---|---|---:|
 | Scene resident on eMMC | `SARI` partition @ LBA `0x80000` (superblock + TOC + per-scene blob, 10 role segments) | one-time provision |
 | **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **81.5 s** |
-| **PIPE** focus | `sar_form_image`, fabric CoreFFT (`fft_mode=1`) | **88.1 s** (§5) |
+| **PIPE** focus | `sar_form_image`, fabric CoreFFT (`fft_mode=1`) | **79.79 s** (§5) |
 | **SAVEOUT** DDR → eMMC | `ESAV`, commit-last ordering (crash-safe) | ~16 min |
 | Verify / inspect | `EVOU` full-image CRC; `EROI` crop + small JTAG dump | ~63 s / ~4 min |
 
@@ -54,15 +54,13 @@ a buffer); the buffers **ping-pong SIG↔SCRATCH** so an in-place FFT never feed
 flowchart LR
   SIG0[("SIG<br/>raw signal")] -->|read| R["1 · Resample<br/>keystone interp"]
   R -->|write| SCR1[("SCRATCH")]
-  SCR1 -->|read| W["2 · Window<br/>2-D Hamming"]
-  W -->|write| SCR2[("SCRATCH")]
-  SCR2 -->|read| RF["3 · Range FFT<br/>CoreFFT chain"]
+  SCR1 -->|read| RF["2+3 · Window x Range FFT<br/>taper fused into the feeder"]
   RF -->|write| SIG1[("SIG<br/>range-FFT'd")]
   classDef ddr fill:#f1f5f9,stroke:#475569,color:#334155;
   classDef fab fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
   classDef ip fill:#ede9fe,stroke:#7c3aed,color:#5b21b6;
-  class SIG0,SCR1,SCR2,SIG1 ddr;
-  class R,W fab;
+  class SIG0,SCR1,SIG1 ddr;
+  class R fab;
   class RF ip;
 ```
 
@@ -102,7 +100,7 @@ slaves, each a 4 KiB window at `0x6000_n000` (`sar_kernels.h`): `K_CORNER_TURN` 
 | # | Stage | Kernel | Implementation | What it does |
 |---|---|---|---|---|
 | 1 | **Resample** | `K_RESAMPLE` | HLS mem→mem, AXI-initiator | 2-pass keystone. MSS computes quantized source `idx[]` + Q15 weight `wq[]`; the fabric **gathers + linearly interpolates**: `out = in[idx]·(1−w) + in[idx+1]·w`. Pulse reorder via `inv_order`. |
-| 2 | **Window** | `K_WINDOW` | HLS mem→mem | 2-D Hamming taper (`hamr[j]·hamc[k]`), fixed-point, zero in the zero-pad. |
+| 2 | **Window** | *(none — fused)* | Verilog, in `fft_feeder_v` | 2-D Hamming taper (`hamr[j]·hamc[k]`), fixed-point, zero in the zero-pad. Applied as data streams into the range FFT; no standalone pass. The `K_WINDOW` HLS kernel is still instantiated in the fabric but is never armed. |
 | 3 | **Range FFT** | `K_FFT_FEEDER` → gearbox → **CoreFFT** → `K_FFT_UNLOADER` | Verilog feeder + Verilog gearbox + DirectCore CoreFFT 8.1.100 (in-place, 8192-pt, BFP) + HLS unloader | 8192-pt row FFT with per-row block-floating-point (SCALE_EXP). |
 | 4 | **Corner-turn** | `K_CORNER_TURN` | HLS mem→mem, tiled transpose | Transpose SIG→SCRATCH (LSRAM-tiled) between the two FFT passes. |
 | 5 | **Azimuth FFT** | same CoreFFT chain | (reused) | Second 8192-pt FFT pass over the transposed frame. |
@@ -137,15 +135,21 @@ magnitude (`fft_fabric_pass`).
 
 ## 3. Fabric resource usage (MPFS250T_ES, timing MET @ 62.5 MHz)
 
-**Overall** (`SAR_TOP_compile_netlist_resources.rpt`, current build 2026-07-20):
+**Overall** (window-fused-feeder build, 2026-07-21):
 
-| Type | Used | Device total | % |
-|---|---|---|---|
-| 4LUT (logic) | 29,857 | 254,196 | **11.75 %** |
-| DFF (registers) | 25,274 | 254,196 | **9.94 %** |
-| LSRAM (20 Kb blocks) | 127 | 812 | **15.64 %** |
-| µSRAM (64×12) | 72 | 2,352 | 3.06 % |
-| Math (18×18 MACC) | 13 | 784 | **1.66 %** |
+| Type | Used | Device total | % | Δ vs prev build |
+|---|---|---|---|---|
+| 4LUT (logic) | 30,377 | 254,196 | **11.95 %** | +644 |
+| DFF (registers) | 26,045 | 254,196 | **10.25 %** | +762 |
+| LSRAM (20 Kb blocks) | 132 | 812 | **16.26 %** | **+7** (fused-window taper table) |
+| µSRAM (64×12) | 71 | 2,352 | 3.02 % | 0 |
+| Math (18×18 MACC) | 19 | 784 | **2.42 %** | **+6** (fused-window multiplies) |
+
+The +7 LSRAM / +6 MACC are exactly the fused window: a 4096×32b taper table (inferred as block RAM,
+not LUTs — that was the thing to check) and 6 signed 16×16 multiplies across two pipeline stages.
+Timing after the change: setup worst slack **+6.865 ns** at 62.5 MHz, hold **"No Path"** across three
+corners post-layout. The critical path is in the DIC interconnect (`rdata_interleave_fifo` →
+`FIC_0_AXI4_S_ARVALID`), not the feeder — feeder worst pin slack 6,544 ps.
 
 <sub>Prior figures in this document (4LUT 12.85 %, LSRAM 10.22 %, MACC 2.30 %) were from the
 2026-07-11 milestone build and had gone stale — the design has since dropped the DMA datamover and
@@ -211,18 +215,36 @@ re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
 **Current (measured 2026-07-20, eMMC boot-load path, `fft_mode=1` fabric CoreFFT verified at runtime):**
 
+CURRENT BASELINE — measured 2026-07-21, window-fused-feeder build:
+
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
-| Resample (2-pass keystone) | **29.2 s** | 33% | fabric gather, 5634 pulses (dominant) |
-| Detect | 20.6 s | 23% | **MSS CPU** (see §6) |
-| Azimuth FFT | 12.6 s | 14% | CoreFFT (fabric) |
-| Range FFT | 12.4 s | 14% | CoreFFT (fabric) |
-| Corner-turn | 7.3 s | 8% | fabric transpose |
-| Window | 6.0 s | 7% | fabric |
-| **Total** | **88.1 s** | | `SAR_SEQ_OK` |
+| Resample (2-pass keystone) | **28.53 s** | 35.8% | fabric gather, 5634 pulses (dominant) |
+| Detect | 18.88 s | 23.7% | **MSS CPU** (see §6) |
+| Azimuth FFT | 12.57 s | 15.8% | CoreFFT (fabric) |
+| Range FFT | 12.49 s | 15.7% | CoreFFT (fabric) |
+| Corner-turn | 7.32 s | 9.2% | fabric transpose |
+| Window | **0.00 s** | 0% | fused into the range-FFT feeder (§ below) |
+| **Total** | **79.79 s** | | `SAR_SEQ_OK`, ROI crc `0xd596c9eb` |
 
-Reproducible across two consecutive runs (88.04 s and 88.11 s, 0.08% spread), image byte-identical
-between them and to the pre-change build (top-left 1024×1024 ROI crc `0xd596c9eb`).
+Two changes since the 88.1 s baseline, both output-bit-identical (same `0xd596c9eb`):
+
+1. Resample AXI beat packing (`idx`/`wq` read 64-bit): resample 29.17 → 28.58 s. 31% fewer beats
+   bought only 2% — the evidence that resample is not beat-bound.
+2. **Window fusion**: the standalone 2-D Hamming pass (512 MB read + 512 MB written) was folded
+   into `fft_feeder_v.v` and applied as data streams into the range FFT. 6.0 s → 0.00 s, and the
+   FFT passes did not slow down (25.06 s combined vs 25.07 s before), so the taper is free.
+
+Reproducible: two consecutive runs at **79.794 s / 79.683 s** (0.14% spread), stage-for-stage —
+resample 28.533/28.532, detect 18.883/18.864, corner-turn 7.320/7.320.
+
+UNEXPLAINED, but NOT variance: detect sits at 18.87 s against the 20.6 s recorded for the 88.1 s
+build — −1.72 s, −8.3%. It reproduces to 0.1% across both runs, so it is a stable property of this
+build, not noise. Nothing in either change touches detect, which is pure CPU `sqrt(I²+Q²)` over the
+same 512 MB. So either the 20.6 s figure never described this code path, or something non-obvious
+couples the stages. **Attribute only 6.0 s (window pass) + 0.67 s (resample packing) to the two
+changes; the remaining ~1.64 s is real and measured but unexplained.** Anyone optimising detect
+should re-derive its cost from this baseline rather than from the 20.6 s figure.
 
 Getting here took two steps. The resample fabric kernel redesign (gather loop II 2→1, plus the
 hoisted window taper) took resample 103.3 → 53.6 s and the pipeline to 110.8 s. Replacing the
@@ -237,10 +259,16 @@ docs claimed. The 2% figure came from an mcycle profile taken while an experimen
 (16× fewer flushes) was active; that experiment was later reverted by a `git checkout`, but the
 number outlived the code it described. Measure the shipping path, not a branch.
 
-Detect is now the #1 structural target: at 20.6 s it is 23% of the run and the only stage still on
-the CPU, bypassed because of the HLS sign-extension miscompile (§6).
+Detect remains the #1 structural target: at 18.88 s it is 23.7% of the run and the only stage still
+on the CPU, bypassed because of the HLS sign-extension miscompile (§6). Resample is still the single
+largest stage (28.53 s, 35.8%), but it is the more stubborn of the two — three data-movement
+hypotheses have now been falsified on it (burst length, outstanding depth, beat packing), and DDR
+training has been ruled out as a cause.
 
-<sub>Earlier baselines (superseded): 2026-07-20 pre-flush-fix — Resample 53.6 s · Detect 19.7 s ·
+<sub>Earlier baselines (superseded): 2026-07-21 packed-resample — Resample 28.58 s · Window 6.0 s ·
+Total 87.58 s. 2026-07-20 flush-fix — Resample 29.2 s · Detect 20.6 s · Azimuth FFT 12.6 s ·
+Range FFT 12.4 s · Corner-turn 7.3 s · Window 6.0 s · Total 88.1 s (two runs, 88.04 / 88.11 s).
+2026-07-20 pre-flush-fix — Resample 53.6 s · Detect 19.7 s ·
 Azimuth FFT 12.2 s · Range FFT 12.0 s · Corner-turn 7.3 s · Window 6.0 s · Total 110.8 s.
 2026-07-04 — Resample 103.3 s · Window 5.1 s · Range FFT 13.2 s · Corner-turn 8.2 s ·
 Azimuth FFT 13.7 s · Detect 18.7 s · Total ~162 s.</sub>
@@ -357,7 +385,7 @@ plumbing rivals the compute kernels. All are live; only the fabric detect is byp
 - **Fabric FFT chain**: phase-exact vs bit-accurate golden (0.0° spread @ 256 & 8192); fabric == CPU FFT
   (corr 0.9999); zero-loss gearbox.
 - **Full pipeline on silicon**: corr **0.9923** vs the CPHD-derived golden; **runs
-  end-to-end at full deci-1 resolution** (RETURN=0, 88.1 s — §5), producing a correctly focused Centerfield
+  end-to-end at full deci-1 resolution** (RETURN=0, 79.79 s — §5), producing a correctly focused Centerfield
   image (river + fields resolved, matches the emulator).
 - **Bit-accurate silicon mirror** (`silicon_emulator.py`) == float golden (corr 1.0), used to isolate
   the detect bug and predict full-resolution output.

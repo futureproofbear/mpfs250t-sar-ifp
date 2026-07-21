@@ -1,7 +1,7 @@
 # SAR Pipeline — Full Process (host → board → host)
 
 > **✅ STATUS 2026-07-20 (LATEST — supersedes the HLS-FFT notes below):** Pipeline **VALIDATED
-> end-to-end on silicon, image corr=0.9923 vs golden**, total **88.1 s** per frame with the scene
+> end-to-end on silicon, image corr=0.9923 vs golden**, total **79.79 s** per frame with the scene
 > loaded from the board's own eMMC in 81.5 s. The range/azimuth FFTs run on the **fabric CoreFFT** chain
 > (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected by `SAR_FFTMODE` @`0xB0059110` = 1 and
 > confirmed at runtime; the CPU `sar_fft.c` is the mode-0 legacy fallback. (History: the HLS `K_FFT`

@@ -36,10 +36,14 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
-> **Pipeline total: 88.1 s** (measured 2026-07-20; two consecutive runs 88.04 s / 88.11 s, and the
-> output image is byte-identical to the previous 110.8 s build — top-left 1024² ROI crc `0xd596c9eb`).
-> The −20.6% came from replacing the per-line whole-L2 flush in `resample_2pass()` with a targeted
-> CCACHE `FLUSH64` writeback of the coefficient banks only. The per-stage breakdown lives in exactly one place,
+> **Pipeline total: 79.79 s** (measured 2026-07-21, window-fused-feeder build; two consecutive runs
+> 79.794 / 79.683 s, 0.14% spread; output image still
+> byte-identical — top-left 1024² ROI crc `0xd596c9eb`, unchanged across every build back to the
+> 110.8 s one). Two steps got here from 88.1 s: replacing the per-line whole-L2 flush in
+> `resample_2pass()` with a targeted CCACHE `FLUSH64` writeback of the coefficient banks only
+> (110.8 → 88.1 s), then fusing the 2-D Hamming window into the range-FFT feeder so the standalone
+> 6.0 s full-frame pass disappears (88.1 → 79.79 s, of which 6.0 s is directly attributable —
+> see the detect anomaly noted in the architecture report §5). The per-stage breakdown lives in exactly one place,
 > [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current design
 > (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
 > [`docs/SAR_DESIGN.md`](SAR_DESIGN.md). Open next: the NDSU production scene; and automating the
@@ -366,7 +370,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 
 > ⚠ The list below is the 2026-07-01 snapshot and is **superseded** by the status blocks at the top of
 > this file: the full PFA pipeline now runs end-to-end on silicon at 62.5 MHz with timing MET
-> (88.1 s, corr 0.9923, scene loaded from on-board eMMC in 81.5 s), the DMA has been removed in favour of
+> (79.79 s, corr 0.9923, scene loaded from on-board eMMC in 81.5 s), the DMA has been removed in favour of
 > `fft_unloader`, and the fabric CoreFFT path is confirmed at runtime. It is kept for the root-cause
 > history (the timing-closure lesson), not as a to-do list.
 

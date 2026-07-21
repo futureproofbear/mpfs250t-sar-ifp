@@ -123,12 +123,54 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
 #define SAR_ROW_BEATS   (SAR_GRID / 2u)      /* 8192 samples / 2 samples-per-beat = 4096 beats/row */
 #define SAR_ROW_BYTES   (SAR_GRID * 4u)      /* 8192 samples * 4 bytes = 32768 bytes/row */
 #define K_FFT_SCALE_EXP 0x14u                /* feeder reg: last frame's latched CoreFFT SCALE_EXP */
+/* Fused 2-D Hamming window in the feeder (fft_feeder_v.v) -- replaces the standalone window
+ * pass, which cost 6.0 s reading and rewriting the whole 512 MB frame for an element-wise
+ * multiply on data the feeder already reads. Bit-identical to hls_window/window.cpp; proven
+ * by tb/tb_fft_feeder_win.v against vectors generated from that arithmetic. */
+#define K_FFT_WIN_CTRL  0x18u                /* [15:0]=hamr[row] Q15, [16]=enable, [17]=rewind tab */
+#define K_FFT_WIN_TAB   0x1cu                /* {hamc[2i+1],hamc[2i]}, pointer auto-increments */
+#define WIN_TAB_WORDS   (SAR_GRID / 2u)      /* 8192 taps / 2 per word = 4096 words */
 
 static uint8_t sar_row_exp[SAR_GRID];        /* per-row captured exponent (static, off-stack) */
 
-static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins)
+/* Push the cross taper into the feeder's on-chip table (once per pass, ~4096 AXI4-Lite writes
+ * ~= 1.3 ms -- free against the 6.0 s the window pass cost). Deliberately not a fabric DMA:
+ * a second mode in the feeder's read FSM would have to arbitrate for AR/R against the row feed. */
+static void fft_win_load_taper(void)
+{
+    const int16_t *hamc = (const int16_t *)(uintptr_t)SAR_HAMC_ADDR;
+    sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL, 1u << 17);        /* rewind the write pointer */
+    for (uint32_t i = 0; i < WIN_TAB_WORDS; i++)
+        sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_TAB,
+                  ((uint32_t)(uint16_t)hamc[2u * i + 1u] << 16) | (uint16_t)hamc[2u * i]);
+}
+
+/* CPU-side equivalent for the mode-0 (CPU FFT) fallback, which does not go through the feeder
+ * and would otherwise silently transform UNWINDOWED data now that the window pass is gone.
+ * Same arithmetic and truncation order as window.cpp / the fused feeder. */
+static void fft_win_cpu(uint32_t buf, uint32_t rows)
+{
+    const int16_t *hamr = (const int16_t *)(uintptr_t)SAR_HAMR_ADDR;
+    const int16_t *hamc = (const int16_t *)(uintptr_t)SAR_HAMC_ADDR;
+    for (uint32_t j = 0; j < rows; j++) {
+        uint32_t *d = (uint32_t *)(uintptr_t)(buf + j * SAR_ROW_BYTES);
+        int32_t hr = hamr[j];
+        for (uint32_t k = 0; k < SAR_GRID; k++) {
+            int16_t cw = (int16_t)((hr * (int32_t)hamc[k]) >> 15);
+            uint32_t v = d[k];
+            int16_t re = (int16_t)(((int32_t)(int16_t)(v >> 16)      * cw) >> 15);
+            int16_t im = (int16_t)(((int32_t)(int16_t)(v & 0xFFFFu)  * cw) >> 15);
+            d[k] = (((uint32_t)(uint16_t)re) << 16) | (uint16_t)im;
+        }
+    }
+}
+
+static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en)
 {
     uint32_t budget = spins ? spins : SAR_DEFAULT_SPINS;
+    const int16_t *hamr = (const int16_t *)(uintptr_t)SAR_HAMR_ADDR;
+
+    if (win_en) fft_win_load_taper();
 
     /* ---- PASS 1: per-row fabric FFT; capture each row's actual CoreFFT exponent ---- */
     for (uint32_t row = 0; row < SAR_GRID; row++) {
@@ -137,6 +179,10 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins)
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, d);
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);
         sar_k_start(K_FFT_UNLOADER);
+        /* Arm the fused window for THIS row. Written unconditionally (0 when disabled) so the
+         * enable can never persist from a previous pass into the azimuth FFT or a debug entry. */
+        sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL,
+                  win_en ? ((1u << 16) | (uint16_t)hamr[row]) : 0u);
         sar_reg_w(K_FFT_FEEDER,   HLS_ARG0, s);
         sar_reg_w(K_FFT_FEEDER,   HLS_ARG1, SAR_ROW_BEATS);
         sar_k_start(K_FFT_FEEDER);
@@ -185,7 +231,10 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins)
 /* One FFT pass over the whole frame: transform all SAR_GRID rows of `src` (each an 8192-pt
  * row FFT) into `dst`. Mode 0 = CPU sar_cpu_fft (HLS K_FFT butterfly was broken on silicon;
  * see m3 memory). Mode 1 = the now-working fabric CoreFFT chain. Returns 0 = OK. */
-static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins)
+/* `win_en` applies the fused 2-D Hamming window on the way into the FFT (range pass only --
+ * the azimuth pass must NOT re-window). Mode 0 does not go through the feeder, so it applies
+ * the same taper on the CPU first, keeping the fallback path correct. */
+static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_en)
 {
     /* FIC0 non-coherent: flush so `src` is in DDR (not stale L2) before the FFT, then flush
      * so `dst` reaches DDR for the next fabric kernel's FIC0 read. */
@@ -193,8 +242,12 @@ static int fft_pass(uint32_t src, uint32_t dst, uint32_t spins)
     __asm volatile ("fence rw, rw");
     int rc;
     if (*(volatile uint32_t *)(uintptr_t)SAR_FFTMODE_ADDR == 1u) {
-        rc = fft_fabric_pass(src, dst, spins);
+        rc = fft_fabric_pass(src, dst, spins, win_en);
     } else {
+        if (win_en) {
+            fft_win_cpu(src, SAR_GRID);           /* in place, before the CPU transform */
+            __asm volatile ("fence rw, rw");
+        }
         sar_cpu_fft((const uint32_t *)(uintptr_t)src, (uint32_t *)(uintptr_t)dst, SAR_GRID);
         rc = 0;
     }
@@ -296,6 +349,11 @@ void sar_fft_hold(void)
     sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_FRAME_BEATS);
     sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, BUF_SCRATCH);
     sar_k_start(K_FFT_UNLOADER);
+    /* Clear the fused window explicitly. A range pass that returned early (spin-budget
+     * timeout) leaves win_en=1 and win_scale=hamr[last row], which would stream the whole
+     * frame tapered by one near-zero scalar -- misleading telemetry in exactly the
+     * SmartDebug session this entry point exists to serve. */
+    sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL, 0u);
     sar_reg_w(K_FFT_FEEDER, HLS_ARG1, SAR_FRAME_BEATS);
     sar_reg_w(K_FFT_FEEDER, HLS_ARG0, BUF_SCRATCH);
     sar_k_start(K_FFT_FEEDER);
@@ -309,7 +367,7 @@ __attribute__((used)) int sar_fft_pass_test(void)
 {
     __asm volatile ("fence rw, rw");
     /* DECOUPLED src/dst (SIG -> SCRATCH) so range-FFT input and output never alias. */
-    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u);
+    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u, 0);   /* streaming-path test: no window */
 }
 
 /* Debug: SCALE_EXP-capture + renormalize ISOLATION test (set fft mode=1 first). Fill SIG with
@@ -327,7 +385,9 @@ __attribute__((used)) int sar_fabric_scale_test(void)
     for (uint32_t i = 0; i < SAR_GRID; i++) sig[SAR_GRID + i] = ((uint32_t)(uint16_t)500u)  << 16; /* row1 DC */
     for (uint64_t i = 2u * SAR_GRID; i < (uint64_t)SAR_GRID * SAR_GRID; i++) sig[i] = 0u;          /* zero rows 2..N */
     __asm volatile ("fence rw, rw");
-    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u);       /* fabric path when mode=1 */
+    /* SCALE_EXP isolation test: window OFF, or the taper would scale the two DC rows and
+     * destroy the 16:1 ratio this test exists to measure. */
+    return fft_pass(BUF_SIG, BUF_SCRATCH, 0x00200000u, 0);    /* fabric path when mode=1 */
 }
 
 /* CPU magnitude detect: sqrt(I^2+Q^2) over `n` complex-int16 words (I<<16|Q), SIG -> OUT. Correct
@@ -384,13 +444,12 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     if (!resample_2pass(&g, spins)) return SAR_SEQ_TIMEOUT_RESAMPLE;
     sar_stage_ts[1] = readmtime();
 
-    /* 2) window (2-D Hamming: fabric forms hamr[j]*hamc[k]): SCRATCH -> SCRATCH */
-    sar_reg_w(K_WINDOW, HLS_ARG0, BUF_SCRATCH);                  /* in  */
-    sar_reg_w(K_WINDOW, HLS_ARG1, (uint32_t)SAR_HAMR_ADDR);      /* range taper [Np] */
-    sar_reg_w(K_WINDOW, HLS_ARG2, (uint32_t)SAR_HAMC_ADDR);      /* cross taper [Mp] */
-    sar_reg_w(K_WINDOW, HLS_ARG3, BUF_SCRATCH);                  /* out */
-    sar_k_start(K_WINDOW);
-    if (!sar_k_wait(K_WINDOW, spins)) return SAR_SEQ_TIMEOUT_WINDOW;
+    /* 2) window: FUSED into the range-FFT feeder (step 3), so there is no longer a standalone
+     *    pass here. It was a full-frame SCRATCH->SCRATCH element-wise multiply -- 512 MB read +
+     *    512 MB written, 6.0 s -- on data the feeder already streams. The taper is now applied
+     *    in fft_feeder_v.v, bit-identically (tb/tb_fft_feeder_win.v). The K_WINDOW kernel is
+     *    still instantiated in the fabric but is no longer armed.
+     *    The timestamp slot is kept (readers index it) and now reads as ~0. */
     sar_stage_ts[2] = readmtime();
 
     /* 3) range FFT: SCRATCH -> SIG (DECOUPLED src/dst -- an in-place FFT feeding-and-
@@ -400,7 +459,7 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
      *    SIG is free after resample, so ping-pong SCRATCH<->SIG keeps read/write on
      *    separate 256 MB pages. VALIDATED on silicon: decoupled fft_pass streams past
      *    transform 1 (in-place stalled at idx=1). */
-    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins);
+    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 1);  /* window FUSED into this pass */
       if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;          /* feeder stalled */
       if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (range) */
     sar_stage_ts[3] = readmtime();
@@ -413,7 +472,7 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     sar_stage_ts[4] = readmtime();
 
     /* 5) azimuth FFT: SCRATCH -> SIG (DECOUPLED, same ping-pong as range FFT) */
-    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins);
+    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 0);  /* NO window on the azimuth pass */
       if (r == 1) return SAR_SEQ_TIMEOUT_FFT2;          /* feeder stalled */
       if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (azimuth) */
     sar_stage_ts[5] = readmtime();

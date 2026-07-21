@@ -213,7 +213,7 @@ bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 81.5 s
 
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
 #    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
-#      TOTAL 88.1 s, reproducible (88.04 / 88.11 s over two runs). Per-stage breakdown lives in
+#      TOTAL 79.79 s (2026-07-21, window fused into the range-FFT feeder). Per-stage breakdown lives in
 #      exactly one place -- SAR_ARCHITECTURE_REPORT.md section 5 -- do not restate it here.
 #    A 300000 ms (5 min) budget is ample; the runner POLLS and returns as soon as it completes.
 #    For CMD 0x50495045 the runner sets FFTMODE @0xB0059110 = 1 (FABRIC CoreFFT chain -- the

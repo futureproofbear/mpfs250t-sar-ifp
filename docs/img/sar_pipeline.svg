@@ -2,7 +2,7 @@
   <rect width="1240" height="430" fill="#ffffff"/>
 
   <text x="620" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">SAR image-formation pipeline — as built on MPFS250T_ES</text>
-  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-20: 88.1 s total (reproducible to 0.08% across runs).</text>
+  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-21: 79.79 s total (window fused into the range-FFT feeder; ROI crc 0xd596c9eb unchanged).</text>
 
   <!-- ============ input ============ -->
   <rect x="24" y="96" width="118" height="86" rx="6" fill="#f2f2f2" stroke="#888888" stroke-width="1.5" stroke-dasharray="5 3"/>
@@ -26,15 +26,15 @@
   <text x="259" y="130" text-anchor="middle" font-size="10.5" fill="#333333">keystone / polar-format</text>
   <text x="259" y="145" text-anchor="middle" font-size="10.5" fill="#333333">range + transpose + azimuth</text>
   <text x="259" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric gather kernel</text>
-  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">29.2 s</text>
+  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">28.53 s</text>
 
   <!-- 2 window -->
-  <rect x="366" y="88" width="130" height="102" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
+  <rect x="366" y="88" width="130" height="102" rx="6" fill="#eeeeee" stroke="#999999" stroke-width="1.6" stroke-dasharray="5 3"/>
   <text x="431" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Window</text>
   <text x="431" y="130" text-anchor="middle" font-size="10.5" fill="#333333">2-D Hamming</text>
   <text x="431" y="145" text-anchor="middle" font-size="10.5" fill="#333333">hamr[j] x hamc[k]</text>
-  <text x="431" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel</text>
-  <text x="431" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">6.0 s</text>
+  <text x="431" y="163" text-anchor="middle" font-size="10.5" fill="#777777">fused into range FFT</text>
+  <text x="431" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#777777">0.00 s</text>
 
   <!-- 3 range fft -->
   <rect x="520" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
@@ -42,7 +42,7 @@
   <text x="593" y="130" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt per row</text>
   <text x="593" y="145" text-anchor="middle" font-size="10.5" fill="#333333">block floating point</text>
   <text x="593" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
-  <text x="593" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.4 s</text>
+  <text x="593" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.49 s</text>
 
   <!-- 4 corner turn -->
   <rect x="690" y="88" width="138" height="102" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
@@ -50,7 +50,7 @@
   <text x="759" y="130" text-anchor="middle" font-size="10.5" fill="#333333">global transpose</text>
   <text x="759" y="145" text-anchor="middle" font-size="10.5" fill="#333333">tiled via LSRAM</text>
   <text x="759" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel</text>
-  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">7.3 s</text>
+  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">7.32 s</text>
 
   <!-- 5 azimuth fft -->
   <rect x="852" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
@@ -58,7 +58,7 @@
   <text x="925" y="130" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt per row</text>
   <text x="925" y="145" text-anchor="middle" font-size="10.5" fill="#333333">same engine reused</text>
   <text x="925" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
-  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.6 s</text>
+  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.57 s</text>
 
   <!-- 6 detect -->
   <rect x="1022" y="88" width="130" height="102" rx="6" fill="#fbe3d6" stroke="#b5651d" stroke-width="1.8"/>
@@ -66,7 +66,7 @@
   <text x="1087" y="130" text-anchor="middle" font-size="10.5" fill="#333333">sqrt(I^2 + Q^2)</text>
   <text x="1087" y="145" text-anchor="middle" font-size="10.5" fill="#333333">saturate to uint16</text>
   <text x="1087" y="163" text-anchor="middle" font-size="11" fill="#b5651d">MSS U54 (CPU)</text>
-  <text x="1087" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">20.6 s</text>
+  <text x="1087" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">18.88 s</text>
 
   <!-- arrows between stages -->
   <path d="M 346 139 L 362 139" stroke="#444444" stroke-width="2" marker-end="url(#ah)"/>

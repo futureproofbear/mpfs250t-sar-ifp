@@ -1,6 +1,6 @@
 # Resample: parallel fabric paths — design study
 
-Resample is the largest pipeline stage (29.2 s of 88.1 s). This study asks what it would take to
+Resample is the largest pipeline stage (28.53 s of 79.79 s). This study asks what it would take to
 parallelise it in fabric, and concludes that the answer differs sharply across its three parts.
 
 Status: **study only.** Nothing here is built. The one prerequisite — measuring the three parts
@@ -83,7 +83,7 @@ Assuming N independent gather instances and an unchanged corner-turn:
 
 | Instances | Range | Corner-turn | Azimuth | Resample | Pipeline |
 |---:|---:|---:|---:|---:|---:|
-| 1 (today) | 8.31 | 7.33 | 13.53 | **29.17 s** | **88.04 s** |
+| 1 (baseline at time of study) | 8.31 | 7.33 | 13.53 | **29.17 s** | **88.04 s** |
 | 2 | 4.16 | 7.33 | 6.77 | 18.26 s | 77.1 s |
 | 4 | 2.08 | 7.33 | 3.38 | 12.79 s | 71.7 s |
 | 8 | 1.04 | 7.33 | 1.69 | 10.06 s | 68.9 s |
@@ -117,7 +117,7 @@ Two consequences:
 1. Tile-size and locality work on the corner-turn may return more than replicating gather instances,
    and it is a smaller change.
 2. It pays **twice**. The pipeline runs two corner-turns — one inside resample, one between the FFT
-   passes (stage 4, also 7.3 s) — totalling ~14.6 s, about 17% of the entire 88.1 s pipeline. Both
+   passes (stage 4, also 7.3 s) — totalling ~14.6 s, about 18% of the 79.79 s pipeline. Both
    use the same kernel, so one fix improves both.
 
 Whether the transpose can be avoided rather than optimised is a separate question. Having azimuth

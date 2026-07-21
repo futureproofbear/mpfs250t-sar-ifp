@@ -1,9 +1,9 @@
 /*
  * sar_kernels.h -- register map for the SAR fabric accelerator as actually built
  * in Libero (SAR_TOP). The control plane is the MSS FIC0 initiator -> AXIIC_CTRL
- * (1 master -> 7 slaves); each slave is a 4 KiB window at 0x6000_n000.
+ * (1 master -> 6 slaves); each slave is a 4 KiB window at 0x6000_n000.
  *
- * Six of the slaves are SmartHLS kernels; each exposes the SmartHLS control
+ * Five of the slaves are SmartHLS kernels; each exposes the SmartHLS control
  * register layout (see each kernel's generated accelerator_drivers driver):
  *     +0x08  START / STATUS  -- write 1 to start; reads back 0 when idle/done
  *     +0x0c  arg0 pointer/scalar, then +0x10 arg1, +0x14 arg2, +0x18 arg3 ...
@@ -23,7 +23,6 @@
 #define K_FFT_FEEDER         (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (CoreFFT build: fft_feeder) */
 #define K_FFT_UNLOADER       (SAR_FIC0_CTRL_BASE + 0x5000u)  /* SLAVE5 (CoreFFT build: fft_unloader) */
 #define K_FFT                (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (HLS-FFT build: fft_kernel, replaces feeder+unloader chain) */
-#define K_RESAMPLE2          (SAR_FIC0_CTRL_BASE + 0x6000u)  /* SLAVE6 (2nd resample instance; same arg map as K_RESAMPLE) */
 
 /* SmartHLS control register offsets (common across all kernels). */
 #define HLS_START            0x08u   /* write 1 = start; read == 0 = done */

@@ -139,6 +139,24 @@ regexp {referenceId="NUM_INITIATORS" value="([0-9]+)"} $cxf_text -> got
    **cannot be added incrementally**; it needs the one-session `create_fresh_project_*.tcl` path
    (all cores created + SAR_TOP assembled in a single session).
 
+4. **`smartgen/<IP>_work.ixf` is the definition SmartDesign actually reads — not the `.cxf`.**
+   Rolling back an interconnect width can regenerate `component/work/<IP>/<IP>.cxf` **and** `<IP>.v`
+   to the new (smaller) size while leaving `smartgen/<IP>_work.ixf` **stale at the old size**. Every
+   `sd_update_instance` then faithfully re-adds the phantom 7th bus interface (`AXI4mtarget6` /
+   `AXI4minitiator6`), and the generated `SAR_TOP.v` ties off ports the regenerated `<IP>.v` no longer
+   declares → synthesis `@E: CS168 Port TARGET6_AWREADY does not exist`. Symptoms that identify this
+   exactly: the `.cxf` says `NUM_TARGETS=6`, `<IP>.v`'s module port list stops at `TARGET5_*`, the
+   `.sdb` contains **zero** `TARGET6` strings — and `SAR_TOP.v` *still* comes back with the tie-offs
+   after `sd_update_instance`. Restoring a clean `.sdb` does **not** help (the phantom is re-added from
+   the `.ixf`, not carried in the `.sdb`).
+   Fix: `delete_component` + `create_and_configure_core` + `generate_component` on BOTH interconnects
+   (that is what rewrites the `.ixf`), then `sd_update_instance`. Gate on the `.ixf`, not the `.cxf`:
+   ```tcl
+   if {[string first "AXI4mtarget6" $ixf_text] >= 0} { error "stale .ixf" }
+   ```
+   Then gate the result: `SAR_TOP.v` must contain **zero** `TARGET6`/`INITIATOR6` matches.
+   (`repair_res2_rollback.tcl` implements the whole sequence with all three gates.)
+
 ### 2.5 libero.exe console output is lost on exit
 Redirected stdout is buffered and gets **truncated mid-line** when the process exits, so `puts`
 markers vanish exactly when you need them. Append every marker to a file with an explicit flush:
@@ -221,6 +239,15 @@ export_prog_job -job_file_name {SAR_TOP_62p5} -export_dir "$pd/export" -bitstrea
 - **Timing gate from reports** (robust; parse instead of trusting exit status):
   - setup: `designer/SAR_TOP/pinslacks.txt`, col 2 < 0 ⇒ violation.
   - hold: `designer/SAR_TOP/SAR_TOP_mindelay_repair_report.rpt`, regex `min-delay slack:\s*(-?\d+) ps`.
+- **The timing gate can pass on STALE reports (hole found 2026-07-21).** The gate reads
+  `pinslacks.txt` + the multi-corner violation XMLs off disk. If a *previous* successful run left
+  them there and this run's P&R/VERIFYTIMING dies early, the gate re-validates the OLD reports and
+  exports a bitstream that was never timed. Existence + content checks are not enough. Fix, at the
+  TOP of the build script: capture `set RUN_START [clock seconds]`, **delete** all four artifacts
+  (`pinslacks.txt`, `SAR_TOP_mindelay_repair_report.rpt`, `SAR_TOP_{max,min}_timing_violations_multi_corner.xml`),
+  and in the gate require each one to exist AND have `[file mtime $f] >= $RUN_START-2`. Implemented
+  as `proc fresh {f}` in `build_pack_ffv.tcl`; it prints `PURGED_STALE:` / `FRESH_OK:` lines so the
+  log itself proves the reports belong to this run.
 - **`derive_constraints` is NOT a valid Tcl command.** Supply a pre-made SDC and overwrite
   `constraint/SAR_TOP_derived_constraints.sdc` so the flow picks it up.
 - **62.5 MHz CDC:** CoreFFT `CLK`↔`SLOWCLK` (=CLK/8) is async → needs `set_false_path` both dirs

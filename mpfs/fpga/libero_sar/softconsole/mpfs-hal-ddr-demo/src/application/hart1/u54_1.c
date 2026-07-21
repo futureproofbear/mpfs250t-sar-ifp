@@ -27,12 +27,14 @@
 #define SOFT_RESET_CR    (MSS_SYSREG_BASE + 0x88u)  /* bit24-27 = FIC0-3 reset (1=held) */
 #define FIC_BITS_MASK    0x0F000000u                /* FIC0..FIC3 (bits 24..27) */
 
-/* FIC0_S transaction monitor (sar_fic0s_mon.v) -- NEVER BUILT, and its slot is now TAKEN.
- * AXIIC_CTRL slave6 at 0x6000_6000 is K_RESAMPLE2, the second resample kernel instance
- * (see sar_kernels.h). Enabling M2_PROBE_MON would poke a LIVE kernel's SmartHLS control
- * registers mid-gather -- MON_STATUS aliases its START/busy word -- so the #error below
- * makes that fail at compile time instead of corrupting an image on silicon. To resurrect
- * the monitor, give it a free slave window first; do not reuse 0x6000_6000. */
+/* FIC0_S transaction monitor (sar_fic0s_mon.v) -- NEVER BUILT. Do not enable it blind.
+ * 0x6000_6000 is AXIIC_CTRL slave6, which is NOT in the shipping fabric: reading an
+ * unmapped slave window hangs the AXI un-haltably. The slot is also earmarked for a second
+ * resample instance (K_RESAMPLE2) if the ID_FIX response-routing limitation is ever fixed,
+ * in which case MON_STATUS would alias that kernel's START/busy word and enabling this
+ * would corrupt an image mid-gather. Either way the #error below makes it fail at compile
+ * time. To resurrect the monitor, give it its own free window and confirm it is in the
+ * programmed bitstream first. */
 #define MON_BASE         0x60006000u
 #define MON_STATUS       (MON_BASE + 0x00u)   /* [0]ar_valid [1]ar_accepted [2]r_valid [3]r_accepted [4]r_last [6:5]rresp [15:8]ar_cnt [23:16]r_cnt [31:24]0xA5 */
 #define MON_ARADDR_LO    (MON_BASE + 0x04u)

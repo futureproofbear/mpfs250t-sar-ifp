@@ -96,18 +96,42 @@ def resample_fixed(signal_i16, tables, grid):
     return g2, (m, n)
 
 
+def _trunc16(x):
+    """C's (int16_t) cast: wrap to 16 bits, not saturate."""
+    x = np.asarray(x).astype(np.int64) & 0xFFFF
+    return np.where(x >= 0x8000, x - 0x10000, x)
+
+
 def window_fixed(g2, m, n):
-    """2-D Hamming in fixed point: int16 taper (val/32768), two >>15, truncate int16.
-    Tapers span the data extent (n range, m cross), zero in the pad -- matches the board."""
+    """2-D Hamming in fixed point. Tapers span the data extent (n range, m cross), zero in the
+    pad.
+
+    TRUNCATION ORDER MATTERS and this used to be WRONG (fixed 2026-07-21). The board folds the
+    two tapers into a single Q15 coefficient FIRST and then applies it once:
+
+        cw = (int16)((hamr[j]*hamc[k]) >> 15)        <- hls_window/window.cpp:63
+        out = (int16)((x * cw) >> 15)                <- window.cpp:67-68
+
+    This mirror instead applied the tapers as two INDEPENDENT >>15 rounds
+    ((x*hamr)>>15 then *hamc>>15), which differs in the low bit and made the "bit-accurate"
+    claim in this file's docstring false. It matters now because the pipeline CRC gate
+    (0xd596c9eb) is being forfeited by the coefficient and detect fusions, so this mirror
+    becomes the reference of record -- it has to actually match the silicon.
+
+    The same arithmetic is now also implemented in fabric (the fused window in
+    fft_feeder_v.v), verified bit-identical by mpfs/fpga/tb/tb_fft_feeder_win.v.
+    """
     Np, Mp = g2.shape
     hr = np.zeros(Np); hr[:n] = np.hamming(n)
     hc = np.zeros(Mp); hc[:m] = np.hamming(m)
     hr_i = np.floor(hr * 32768).astype(np.int64)          # int16 tapers (as the board loads)
     hc_i = np.floor(hc * 32768).astype(np.int64)
-    out_r = _shr_floor(g2.real * hr_i[:, None], 15)
-    out_i = _shr_floor(g2.imag * hr_i[:, None], 15)
-    out_r = _shr_floor(out_r * hc_i[None, :], 15)
-    out_i = _shr_floor(out_i * hc_i[None, :], 15)
+    out_r = np.empty(g2.shape, np.float64)
+    out_i = np.empty(g2.shape, np.float64)
+    for j in range(Np):                                   # row-wise: the 2-D cw is 128 MB
+        cw = _trunc16((hr_i[j] * hc_i) >> 15)             # combined Q15 taper, int16-truncated
+        out_r[j] = _trunc16(_shr_floor(g2.real[j] * cw, 15))
+        out_i[j] = _trunc16(_shr_floor(g2.imag[j] * cw, 15))
     return _sat16(out_r) + 1j * _sat16(out_i)
 
 

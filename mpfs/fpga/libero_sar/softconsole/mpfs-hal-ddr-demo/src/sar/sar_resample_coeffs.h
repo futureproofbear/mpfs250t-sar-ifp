@@ -40,6 +40,11 @@ void sar_interp_coeffs(const float *query, uint32_t Q,
                        const float *xp, uint32_t S,
                        int32_t *idx, int16_t *wq);
 
+/* Build the line-invariant pass-2 reciprocals 1/(tan_s[k+1]-tan_s[k]).
+ * MUST be called once per scene before sar_coeffs_pass2(); until it is, pass 2 falls back to
+ * the generic search so a missed call degrades speed, never correctness. */
+void sar_coeffs_init(const sar_geom_t *g);
+
 /* Pass 1 (range): coeffs for pulse row i. Writes idx[Np], wq[Np].
  * Source positions kr[i,j] = 2*(f0[i]+j*df[i])/C * pr[i] are built into `scratch`
  * (caller provides a float[N] temp). */

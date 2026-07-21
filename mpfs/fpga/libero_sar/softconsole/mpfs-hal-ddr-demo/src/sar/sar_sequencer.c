@@ -96,6 +96,27 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
  * per-row renormalize is required (tracked in openspec). */
 #define SAR_FFTMODE_ADDR       0xB0059110u   /* 0=CPU, 1=fabric CoreFFT chain */
 #define SAR_FFT_HEADROOM_ADDR  0xB0059114u   /* extra renormalize right-shift (detect headroom); JTAG-tunable */
+/* ---- resample per-line PROFILE (0xB0059180, 12 x uint64) ---------------------------------
+ * Splits the resample line loop into its four components so we stop GUESSING which one owns
+ * the ~1.34 ms/line gap (1.475 ms measured vs 131 us ideal at II=1 for 8192 elements @62.5 MHz).
+ * Three data-movement hypotheses have already been falsified by assuming instead of measuring.
+ *
+ * The loop order is:  ARG writes -> flush coeff bank -> START -> compute NEXT line's coeffs -> WAIT
+ * so the kernel runs concurrently with the coefficient generation. That makes `wait` the
+ * discriminator:
+ *     wait ~= 0        -> CPU-BOUND. Coefficient generation is the limiter; the kernel already
+ *                         finished. Chunking/auto-rearm would NOT help -- coeff work is per-line.
+ *     wait large       -> KERNEL-BOUND. The fabric gather is genuinely slow; look at the AXI path.
+ *     regw+flush large -> ARM-BOUND. Then bigger payloads per arm is the right fix.
+ *
+ * Layout: [0..3] pass1 regw/flush/coeff/wait, [4] lines, [5] pass1 total,
+ *         [6..9] pass2 same,                  [10] lines, [11] pass2 total.  All MTIME us. */
+#define SAR_RPROF_ADDR         0xB0059180u
+#define SAR_RPROF_PROBE_ADDR   0xB0059120u   /* 0 = off; else kernel-only probe iterations */
+#define RPROF ((volatile uint64_t *)(uintptr_t)SAR_RPROF_ADDR)
+#define RP_T0(v)  uint64_t v = readmtime()
+#define RP_ACC(i, v) do { RPROF[i] += readmtime() - (v); } while (0)
+
 #define SAR_DETECTMODE_ADDR    0xB0059118u   /* 0=fabric detect kernel, 1=CPU detect (correct sqrt --
                                               * the fabric detect HLS mis-synthesizes negative-I sign
                                               * extension, saturating ~50% of pixels; see memory) */
@@ -273,26 +294,65 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     int b = 0;
 
     sar_resample_ts[0] = readmtime();
+    /* Build the line-invariant pass-2 reciprocals once for this scene (see
+     * sar_resample_coeffs.c): 1/(tan_s[k+1]-tan_s[k]) does not depend on the line, so pass 2
+     * needs only a single 1/KR[j] per line instead of M-1 divides. */
+    sar_coeffs_init(g);
     /* PASS 1 (range) */
     sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
                                 (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
+    for (int k = 0; k < 14; k++) RPROF[k] = 0;          /* profile accumulators */
+    /* KERNEL-ONLY PROBE. The main loop overlaps coefficient generation with the kernel, so
+     * `wait` only proves the kernel finished FIRST -- it does not reveal how long the kernel
+     * actually takes. Re-arm line 0 (coeffs already computed and flushed above) with nothing
+     * else in the loop, so the measured time IS the gather kernel. This decides whether fusing
+     * coefficient generation into the kernel could reach the projected ~200 us/line, or whether
+     * the gather itself is already slower than that. Repeats the same line: harmless, the
+     * output is overwritten by the real pass below. */
+    /* OFF by default: the probe re-runs line 0 and so inflates the stage total, which would
+     * silently corrupt any performance baseline taken from this build. Enable over JTAG by
+     * writing the iteration count to SAR_RPROF_PROBE_ADDR before PIPE. */
+    const uint32_t PROBE = *(volatile uint32_t *)(uintptr_t)SAR_RPROF_PROBE_ADDR;
+    if (PROBE != 0u && PROBE <= 4096u) {
+        sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + 0u);
+        sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(0));
+        sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(0));
+        sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[0] * Np * 4u);
+        flush_coef_bank_to_ddr(0, Np);
+        uint64_t t0 = readmtime();
+        for (uint32_t p = 0; p < PROBE; p++) {
+            sar_k_start(K_RESAMPLE);
+            if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+        }
+        RPROF[12] = readmtime() - t0;
+        RPROF[13] = PROBE;
+    }
     for (uint32_t i = 0; i < g->M; i++) {
         SAR_PROG(1u, i, g->M);
-        sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);            /* in  (N-wide) */
-        sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+        { RP_T0(t);
+          sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);          /* in  (N-wide) */
+          sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
+          sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
+          sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+          RP_ACC(0, t); }
         /* FIC0 non-coherent: the idx/wq coeffs just computed by the MSS (bank b) live in
          * L2, not DDR. Publish just that bank before the kernel reads it via FIC0, else
          * it gathers with stale coeffs. */
-        flush_coef_bank_to_ddr(b, Np);
+        { RP_T0(t); flush_coef_bank_to_ddr(b, Np); RP_ACC(1, t); }
         sar_k_start(K_RESAMPLE);
-        if (i + 1u < g->M)
+        if (i + 1u < g->M) {
+            RP_T0(t);
             sar_coeffs_pass1(g, i + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
                                              (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-        if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+            RP_ACC(2, t);
+        }
+        { RP_T0(t);
+          if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+          RP_ACC(3, t); }
+        RPROF[4]++;
         b ^= 1;
     }
+    RPROF[5] = readmtime() - sar_resample_ts[0];
     /* zero padded pulse rows (M..Mp-1) for clean FFT zero-padding (CPU clear; a
      * candidate for a fabric memset if this dominates runtime) */
     {
@@ -325,18 +385,29 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     b = 0;
     for (uint32_t j = 0; j < Np; j++) {
         SAR_PROG(2u, j, Np);
-        sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG     + j * Mp * 4u);   /* in  (Mp-wide, M valid) */
-        sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
-        sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u);   /* out (Mp-wide) */
-        flush_coef_bank_to_ddr(b, Mp);   /* publish just-computed coeffs L2 -> DDR (non-coherent FIC0) */
+        { RP_T0(t);
+          sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG     + j * Mp * 4u); /* in  (Mp-wide, M valid) */
+          sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
+          sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
+          sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u); /* out (Mp-wide) */
+          RP_ACC(6, t); }
+        { RP_T0(t); flush_coef_bank_to_ddr(b, Mp); RP_ACC(7, t); }    /* publish coeffs L2 -> DDR */
         sar_k_start(K_RESAMPLE);
-        if (j + 1u < Np)
+        if (j + 1u < Np) {
+            RP_T0(t);
             sar_coeffs_pass2(g, j + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
                                              (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-        if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+            RP_ACC(8, t);
+        }
+        { RP_T0(t);
+          if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+          RP_ACC(9, t); }
+        RPROF[10]++;
         b ^= 1;
     }
+    RPROF[11] = readmtime() - sar_resample_ts[2];
+    __asm volatile ("fence rw, rw");
+    flush_range_to_ddr(SAR_RPROF_ADDR, 112u);     /* publish so a JTAG physical read sees it */
     sar_resample_ts[3] = readmtime();          /* azimuth gather done */
     return 1;
 }

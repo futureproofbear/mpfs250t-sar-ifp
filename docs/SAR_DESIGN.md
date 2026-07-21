@@ -572,7 +572,7 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 | Deviation | Reason |
 |---|---|
 | Detect is fabric, in the FFT unloader (not a kernel of its own) | The standalone HLS detect kernel is unusable (sign-extension miscompile). Fusing it into `fft_unloader_v.v` in Verilog both fixes that and deletes the 19.24 s pass (§2.4) |
-| Resample gather emits SINGLE-BEAT AXI reads | SmartHLS refuses burst conversion: the two-tap interpolation issues two AXI loads per iteration (`hls.log`: "cannot be converted into an AXI burst transfer: resample.cpp:41,43"). ~880 us/line against a 131 us II=1 schedule, and the AR-burst FIFO has "2 uses per cycle but only 1 units available", which is why `max_outstanding` 1->8 did nothing. Largest remaining target |
+| Resample gather is II=1 but ~2.44x AXI-stalled | The kernel schedules at II=1 on all 4 loops (22,545 cyc = 361 us/line) yet measures ~880 us -- AXI stall on a correct schedule, not a burst failure (an earlier "single-beat reads" claim was a stale-report error). Localising it needs the FIC_0 ARLEN+gap monitor. Largest remaining target |
 | FFT feeder/unloader are hand-written Verilog | SmartHLS mem <-> stream kernels synthesize to dead RTL |
 | Window is fused into the FFT feeder (Verilog), not into resample (HLS) | Two distinct SmartHLS miscompiles on the resample-fusion route; the Verilog feeder route works and is silicon-proven (§2.2) |
 | `silicon_emulator.window_fixed()` is NOT bit-exact vs `window.cpp` | It applies the two tapers as two separate `>>15` rounds; the kernel folds them into one `cw` first. Differs in the low bit. Pre-existing, found 2026-07-21, unresolved — the mirror's docstring claims bit-accuracy, so one of the two should change |

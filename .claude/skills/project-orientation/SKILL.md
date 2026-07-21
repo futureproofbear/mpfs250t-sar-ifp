@@ -55,9 +55,9 @@ Open / next (image is already correct; these are latency + hardening):
   FLUSH64 writeback is now DONE and measured (resample 53.6 → 29.2 s, frame 110.8 → 88.1 s, output bits
   unchanged) — do not treat the per-line L2 flush as a pending lever, and disregard the old "2% L2
   flush" split, which came from a profile of a since-reverted experiment. The live levers, in order:
-  (1) **resample at 26.92 s (46.3%) — the largest target by far**, root cause known: SmartHLS emits
-  SINGLE-BEAT reads for the gather because the two-tap interpolation issues two AXI loads per
-  iteration (see `hls_silicon_stats.jsonl`, phenomenon `axi_ii_lie`). Window and detect are FUSED
+  (1) **resample at 26.92 s (46.3%) — the largest target by far**, gather is II=1 on all loops but
+  ~2.44x AXI-stalled (361 us scheduled vs ~880 us measured; an earlier single-beat-reads claim was
+  a stale-report error, see `hls_silicon_stats.jsonl` `axi_ii_lie`). Needs the FIC_0 monitor. Window and detect are FUSED
   into the FFT passes and no longer exist as stages;
   moving it to fabric is blocked on the SmartHLS sign-extension miscompile, so the firmware-only path is
   splitting CPU detect across the 4 U54 harts; (2) the resample fabric kernel's interconnect — its shared

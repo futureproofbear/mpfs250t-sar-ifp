@@ -1,9 +1,10 @@
 # Resample: parallel fabric paths — design study
 
 Resample is the largest pipeline stage (26.92 s of 58.12 s -- 46.3%, after window and detect were
-fused away). NOTE this study predates the root-cause finding: the gather runs ~880 us/line against
-a 131 us II=1 schedule because SmartHLS refuses burst conversion (two AXI loads per iteration), so
-the parallelism options below are not the first thing to try. This study asks what it would take to
+fused away). NOTE this study predates the root-cause finding: the gather runs ~880 us/line against a
+361 us II=1 schedule (2.44x AXI stall on a CORRECT schedule -- an earlier burst-inference claim was
+a stale-report error), so localising the stall with the FIC_0 monitor comes before the parallelism
+options below. This study asks what it would take to
 parallelise it in fabric, and concludes that the answer differs sharply across its three parts.
 
 Status: **study only.** Nothing here is built. The one prerequisite — measuring the three parts

@@ -71,17 +71,13 @@ flowchart LR
   SIG1[("SIG<br/>range-FFT'd")] -->|read| CT["4 · Corner-turn<br/>transpose"]
   CT -->|write| SCR3[("SCRATCH")]
   SCR3 -->|read| AF["5 · Azimuth FFT<br/>CoreFFT chain"]
-  AF -->|write| SIG2[("SIG")]
-  SIG2 -->|read| D["6 · Detect<br/>MSS CPU"]
-  D -->|write| OUT[("OUT<br/>image")]
+  AF -->|"magnitude fused in the unloader"| OUT[("OUT<br/>uint16 image")]
   classDef ddr fill:#f1f5f9,stroke:#475569,color:#334155;
   classDef fab fill:#dbeafe,stroke:#2563eb,color:#1e3a8a;
   classDef ip fill:#ede9fe,stroke:#7c3aed,color:#5b21b6;
-  classDef cpu fill:#fef3c7,stroke:#d97706,color:#92400e;
-  class SIG1,SCR3,SIG2,OUT ddr;
+  class SIG1,SCR3,OUT ddr;
   class CT fab;
   class AF ip;
-  class D cpu;
 ```
 
 The MSS (`sar_form_image` in `sar_sequencer.c`) arms each kernel over AXI4-Lite, waits for DONE, then
@@ -104,7 +100,7 @@ slaves, each a 4 KiB window at `0x6000_n000` (`sar_kernels.h`): `K_CORNER_TURN` 
 | 3 | **Range FFT** | `K_FFT_FEEDER` → gearbox → **CoreFFT** → `K_FFT_UNLOADER` | Verilog feeder + Verilog gearbox + DirectCore CoreFFT 8.1.100 (in-place, 8192-pt, BFP) + HLS unloader | 8192-pt row FFT with per-row block-floating-point (SCALE_EXP). |
 | 4 | **Corner-turn** | `K_CORNER_TURN` | HLS mem→mem, tiled transpose | Transpose SIG→SCRATCH (LSRAM-tiled) between the two FFT passes. |
 | 5 | **Azimuth FFT** | same CoreFFT chain | (reused) | Second 8192-pt FFT pass over the transposed frame. |
-| 6 | **Detect** | `K_DETECT` | HLS mem→mem | Magnitude `|z| = sqrt(I²+Q²)` (fixed-iteration integer sqrt), uint16 saturate. *(See §6 — SmartHLS sign bug → currently done on the MSS.)* |
+| 6 | **Detect** | *(none - fused)* | Verilog, in `fft_unloader_v` | Magnitude `|z| = sqrt(I²+Q²)`, uint16 saturate, computed inline as the azimuth FFT streams to DDR. No separate pass; the standalone `K_DETECT` HLS kernel is instantiated but never armed. *(§5, §6 — HLS detect was a sign-extension miscompile; the Verilog version declares operands `signed`.)* |
 
 **CoreFFT chain (stages 3 & 5).** The FFT is not a single kernel — it's a hand-assembled stream chain,
 because SmartHLS mem↔stream kernels are dead RTL here (§6). Both FFT passes reuse it:
@@ -175,10 +171,11 @@ gained the CoreFFT chain and deeper AXI FIFOs. The immediately preceding build m
 runs on CoreFFT's own butterfly, not a MACC farm, so only 18 of 784 Math blocks are used. LSRAM is the
 next-tightest at ~10%, spread across resample/window scratch, corner-turn tiles, and AXI burst FIFOs.
 
-> **Note on the `DET` row:** these resources are the **fabric detect kernel, which is present in the
-> bitstream but disabled at runtime** — detect currently executes on the MSS CPU (§6). It is still
-> synthesized/placed (hence the footprint) and is selectable via `detect_mode==2` for testing. If the
-> HLS detect were removed (CPU detect being the shipping path), the fabric would recover ~3.8k LUT /
+> **Note on the `DET` row:** this is the **standalone HLS detect kernel, present in the bitstream but
+> DEAD** — detect now runs in fabric fused into the FFT unloader (`detect_mode==3`, §5), not here and
+> not on the CPU. The `K_DETECT` kernel is still synthesized/placed (hence the footprint) and
+> `detect_mode==2` still selects it for testing, but nothing arms it in the shipping path. Stripping
+> it recovers ~3.8k LUT /
 > ~3k DFF / 25 µSRAM / 2 Math. All other rows are stages that DO run in fabric.
 
 ---
@@ -282,12 +279,13 @@ docs claimed. The 2% figure came from an mcycle profile taken while an experimen
 number outlived the code it described. Measure the shipping path, not a branch.
 
 Detect is GONE from the datapath (fused into the FFT unloader, §5). Resample is now the target by
-a wide margin: 26.92 s, 46.3% of the run. Its ROOT CAUSE is identified -- SmartHLS refuses burst
-conversion for the gather loop because the two-tap interpolation issues TWO AXI loads per
-iteration (`hls.log`: "cannot be converted into an AXI burst transfer: resample.cpp:41,43"), so it
-emits SINGLE-BEAT reads at ~880 us/line against a 131 us II=1 schedule. The AR-burst FIFO also has
-"2 uses per cycle but only 1 units available", which serialises requests -- that is why
-`max_outstanding` 1->8 changed nothing. Resample is still the single
+a wide margin: 26.92 s, 46.3% of the run. Its gather kernel schedules at II=1 on ALL FOUR loops (verified 2026-07-22 by regenerating the HLS
+report; scheduled 22,545 cycles = 361 us/line) yet MEASURES ~880 us -- a 2.44x AXI STALL on a
+correct schedule (`axi_ii_lie`). An earlier revision of this section claimed a burst-inference
+FAILURE (two AXI loads/iteration -> single-beat reads, 6.7x); that was WRONG, read off a stale
+hls_output from the pre-packing kernel -- the shipping gather reads buf[j]/buf[j+1] from LSRAM, not
+AXI, and every AXI access burst-converts. Localising the stall needs the FIC_0 monitor (ARLEN
+histogram + inter-burst gap counters), still unbuilt. Resample is still the single
 largest stage (28.53 s, 35.8%), but it is the more stubborn of the two — three data-movement
 hypotheses have now been falsified on it (burst length, outstanding depth, beat packing), and DDR
 training has been ruled out as a cause.
@@ -307,10 +305,14 @@ figure, not the optimized latency roadmap (dual-FIC ~3.2 GB/s, tiled corner-turn
 
 ## 6. Known issues / design decisions driven by the toolchain
 
-- **Detect runs on the MSS CPU** (`detect_mode` default). The fabric detect HLS kernel is correct in C,
-  but **SmartHLS mis-synthesizes the negative-I sign extension** (the high-16 field read as unsigned →
-  ~50% pixel saturation). Multiple C rewrites + a fresh timing-MET fabric rebuild did **not** survive
-  synthesis. CPU detect (correct signed sqrt) is the shipping path and gives **corr 0.9923** on silicon.
+- **Detect runs IN FABRIC**, fused into the FFT unloader (`fft_unloader_v.v`, `detect_mode==3` — §5).
+  The STANDALONE HLS detect kernel was never usable: **SmartHLS mis-synthesizes the negative-I sign
+  extension** (high-16 field read as unsigned → ~50% pixel saturation), surviving neither C rewrites
+  nor a fresh rebuild, and it passed both cosim and a correlation check. The fusion sidesteps that by
+  being hand-written Verilog with `signed` operands; `tb/tb_fft_unloader_det.v` mutation-tests it
+  (strip `signed` → 2035/2048 mismatches). For months before the fusion, detect ran on the MSS CPU
+  (correct signed sqrt, **corr 0.9923**); that CPU path remains runtime-selectable (`detect_mode` 0/1)
+  and is the A/B reference that validated the fusion (max 2 LSB over 1M pixels).
   A hand-written Verilog detect (or `ap_int<16>`, de-risked in sim first) is the fix if a fabric-detect
   throughput win is needed.
 - **FFT is CoreFFT, not HLS** — the HLS `K_FFT` butterfly is unsynthesizable here (drops the twiddle

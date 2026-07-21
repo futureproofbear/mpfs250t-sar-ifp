@@ -4,8 +4,9 @@
 > **`mpfs250t-sar-ifp`** (made **standalone** on 2026-07-14 — see the status block below), is the
 > **canonical home** for the algorithm, FPGA design, host tooling, **and** the board
 > firmware (the SoftConsole project under `mpfs/fpga/libero_sar/softconsole/`). (Historical note: this
-> was a clean fork of `sarProcessor`; it is self-contained for FIRMWARE, but the Libero fabric build
-> still runs from the `sarProcessor` sibling — see the duplicate-RTL warning below.) Read this before
+> was a clean fork of `sarProcessor`; as of 2026-07-22 the Libero fabric build ALSO runs from this
+> repo — the migration reproduced the reference placement digit-for-digit. See the build-location
+> note below.) Read this before
 > answering, and prefer the facts here (and the cited source files) over training data. PolarFire
 > SoC details — register maps, Libero/SmartHLS Tcl, MSS config, boot flow — are **poorly
 > represented in public training data and drift between tool versions**, so treat recalled
@@ -20,23 +21,24 @@
 > 2026-07-14 block below.)
 >
 > **▶ CURRENT STATUS (2026-07-14 — NEWEST; supersedes the 2026-07-04 notes below for repo layout + eMMC).**
-> **Repo standalone — FIRMWARE ONLY. The FABRIC BITSTREAM IS NOT BUILT FROM THIS REPO.**
-> `mpfs250t-sar-ifp` was consolidated 2026-07-14 so the *firmware* builds + runs on its own
-> (firmware source == the silicon-proven state; standalone build verified). That is where the
-> "standalone" claim ends. Corrected 2026-07-21 after it nearly caused a wrong-bitstream build:
-> this repo contains **no Libero project at all** (`mpfs/fpga/libero_sar/` holds only
-> `softconsole/`). Every `.prjx` — including the shipping **`libero_ffv/sar_accel.prjx`** — lives in
-> the sibling **`sarProcessor`** checkout, and that is where synth/P&R/bitstream export must run.
+> **Fabric build now runs FROM THIS REPO (migrated 2026-07-22).** `create_fresh_project_ffv.tcl`
+> + `build_full_prog_ffv.tcl` here build `mpfs/fpga/libero_ffv/` (gitignored, ~300 MB regenerated
+> output). Verified: the first place-and-route reproduced the sarProcessor reference slacks
+> digit-for-digit and resources exactly (4LUT 35801 / DFF 31001 / MACC 25 / LSRAM 131 / uSRAM 88).
+> The scripts are path-clean (resolve via `lib/sar_env.tcl` -> `$SAR_FPGA` from the script's own
+> location); nothing reaches into the sibling.
 >
-> **Duplicate-RTL hazard, read before any fabric change.** The 9 `.v` files under `mpfs/fpga/` exist
-> in BOTH repos, and `feeder_v_core.tcl` links `"$here/fft_feeder_v.v"` — *its own* directory. So the
-> **`sarProcessor` copy is what actually gets synthesized**; editing the RTL here changes nothing in a
-> bitstream until it is copied across. The two had silently drifted (sibling stuck at a 2026-07-12
-> `fft_feeder_v.v` while this repo's was 6.8 KB larger). Failure mode if you forget: the build
-> succeeds, timing closes, and the bitstream quietly contains the OLD RTL — which, paired with
-> firmware that assumes the new RTL, produces wrong-but-plausible output rather than an error.
-> Before any fabric build: `diff -q mpfs/fpga/*.v ../sarProcessor/mpfs/fpga/` and sync, or fix the
-> duplication properly by pointing the Tcl at a single source.
+> **NOT clone-buildable yet, and the RTL is still duplicated.** Two caveats remain from the
+> migration:
+> 1. Several build inputs are gitignored so a fresh `git clone` cannot supply them:
+>    `mpfs/fpga/mss_nodll/` (MSS export) and the `hls_output/` trees (absent for corner_turn/detect,
+>    stale for window/resample). `shls hw` regenerates the HLS ones, but that step is not yet in the
+>    flow. Regenerate them before a first build on a new checkout.
+> 2. The 9 `.v` files ALSO still exist in `sarProcessor`, and `feeder_v_core.tcl` /
+>    `unloader_v_core.tcl` link `"$here/..."` — their own directory. So a build launched from THIS
+>    repo uses THIS repo's RTL (correct), but the sibling's stale copies are a trap if anyone builds
+>    there. The real fix is to delete the sarProcessor fabric tree once its bitstream history is no
+>    longer needed. Until then: this repo is authoritative for RTL; the sibling is legacy.
 > **On-board eMMC pipeline (M1–M3) PROVEN on silicon** — the scene lives on the board eMMC and is loaded +
 > focused entirely on-board, retiring the recurring ~3 h JTAG scene load: **M1** bring-up (write→read→CRC);
 > **M2** provision a CPHD scene to the INPUT partition (`crcE==crcR==0x58d0ea66`, Centerfield 97.6 MB); **M3**
@@ -66,10 +68,13 @@
 > are MORE accurate). Correctness is now gated by an A/B against the known-good CPU detect on
 > identical input: max |diff| 2 LSB, ZERO pixels beyond that over 1,048,576, corr 0.999866 --
 > matching a bound `model_detect_fusion.py` predicted before any RTL existed.
-> **Largest remaining target: resample, 26.92 s (46.3%)**, and its root cause is now known --
-> SmartHLS refuses burst conversion for the gather loop because the two-tap interpolation issues
-> two AXI loads per iteration, so it emits SINGLE-BEAT reads (~880 us/line against a 131 us II=1
-> schedule). See `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5 and the `axi_ii_lie` entries in
+> **Largest remaining target: resample, 26.92 s (46.3%).** The shipping gather kernel schedules
+> at II=1 on ALL FOUR loops (verified 2026-07-22 by regenerating the HLS report -- an earlier
+> "burst-inference failure / single-beat reads" diagnosis was WRONG, read off a stale hls_output
+> from the pre-packing kernel). Scheduled 22,545 cycles = 361 us/line against ~880 us measured, so
+> the 2.44x gap is AXI STALL on a correct schedule (`axi_ii_lie`), not a burst failure. Localising
+> it needs the FIC_0 monitor (ARLEN histogram + inter-burst gap counters), still unbuilt. See
+> `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5 and the `axi_ii_lie` entries in
 > `docs/fpga/hls_silicon_stats.jsonl`. The per-stage breakdown lives in exactly one place,
 > [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current
 > design (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):

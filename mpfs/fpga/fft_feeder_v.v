@@ -62,7 +62,11 @@ module fft_feeder_v #(
     parameter integer AXI_ID_W   = 4,
     parameter integer MAX_BURST   = 64,      // beats per AR (<=256 for AXI4 INCR)
     parameter integer FIFO_AW      = 9,       // read-data FIFO depth = 512 beats (> MAX_BURST*OUTSTANDING)
-    parameter integer TAB_AW       = 12       // window taper: 4096 words x 2 taps = 8192 taps = one row
+    parameter integer TAB_AW       = 12,      // window taper: 4096 words x 2 taps = 8192 taps = one row
+    // ---- fused azimuth-resample GATHER (runtime-enabled -- reg 0x20 bit0) ----
+    parameter integer G_BUF_AW     = 12,      // source-row bank depth: 4096 x 2 banks = 8192 samples
+    parameter integer G_TAB_AW     = 13,      // idx/wq entries per row (8192); idx banks 2^12, wq banks 2^11
+    parameter integer G_SFIFO_AW   = 9        // gather stream FIFO depth = 512 beats
 )(
     input  wire                     clk,
     input  wire                     resetn,
@@ -84,12 +88,14 @@ module fft_feeder_v #(
     input  wire                     s_rready,
 
     // ---- AXI4 read master to DDR (FIC0) ----
-    output reg  [AXI_ID_W-1:0]      m_arid,
-    output reg  [AXI_ADDR_W-1:0]    m_araddr,
-    output reg  [7:0]               m_arlen,
+    // AR outputs are muxed at the port between the legacy window-feed master (l_*) and the
+    // gather load master (g_*); both are plain regs inside, the port is a wire.
+    output wire [AXI_ID_W-1:0]      m_arid,
+    output wire [AXI_ADDR_W-1:0]    m_araddr,
+    output wire [7:0]               m_arlen,
     output wire [2:0]               m_arsize,
     output wire [1:0]               m_arburst,
-    output reg                      m_arvalid,
+    output wire                     m_arvalid,
     input  wire                     m_arready,
     input  wire [AXI_ID_W-1:0]      m_rid,
     input  wire [AXI_DATA_W-1:0]    m_rdata,
@@ -123,6 +129,20 @@ module fft_feeder_v #(
     reg       err_align;                  // src_base was not 8-byte aligned at START
     wire      beat_ok = (state == S_DATA) && (burst_rem != 9'd0);
 
+    // ---- forward declarations for the fused azimuth-resample GATHER engine ----------
+    // (full datapath at the bottom of the module; declared here because the AR/stream/status
+    // port muxes and the control readback reference them.) gmode==1 means the gather load
+    // master owns the AXI read + stream ports; when 0 the feeder is BIT-UNCHANGED from today.
+    reg                    gath_busy;
+    reg                    g_err_extra, g_err_rlast, g_err_align;
+    wire                   gmode;
+    wire                   g_rready;
+    reg  [AXI_ADDR_W-1:0]  g_araddr;
+    reg  [7:0]             g_arlen;
+    reg                    g_arvalid;
+    reg  [AXI_DATA_W-1:0]  g_sdata;
+    reg                    g_svalid;
+
     // ---- SCALE_EXP latch: capture on OUTP_READY falling edge, hold until next frame ----
     reg [3:0] scale_exp_latched;
     reg       outp_ready_d;
@@ -145,6 +165,12 @@ module fft_feeder_v #(
     reg                  tab_we;
     reg [TAB_AW-1:0]     tab_waddr;     // address captured WITH the data (tab_wptr has moved on)
     reg [31:0]           tab_wdata;
+    // ---- gather control (all above 0x1c; wrapper addr decode widened to 6 bits, see top.v) ----
+    reg                  gath_en;       // GATHER_CTRL[0]  @0x20
+    reg [AXI_ADDR_W-1:0] idx_base;      // IDX_BASE        @0x24  DDR byte addr of this row's idx[]
+    reg [AXI_ADDR_W-1:0] wq_base;       // WQ_BASE         @0x28  DDR byte addr of this row's wq[]
+    reg [15:0]           src_len;       // GATHER_DIMS[15:0] @0x2c  S = source SAMPLE count
+    reg [15:0]           q_n;           // GATHER_DIMS[31:16]@0x2c  QN = output SAMPLE count (even)
 
     assign s_awready = s_awvalid & s_wvalid & ~s_bvalid;   // simple: latch when both present
     assign s_wready  = s_awready;
@@ -152,6 +178,7 @@ module fft_feeder_v #(
         if (!resetn) begin
             src_base <= 0; nbeats <= 0; s_bvalid <= 0; start_pulse <= 0;
             win_scale <= 16'sd0; win_en <= 1'b0; tab_wptr <= 0; tab_we <= 1'b0;
+            gath_en <= 1'b0; idx_base <= 0; wq_base <= 0; src_len <= 16'd0; q_n <= 16'd0;
         end else begin
             start_pulse <= 0;
             tab_we      <= 1'b0;
@@ -171,6 +198,10 @@ module fft_feeder_v #(
                         tab_we    <= 1'b1;
                         tab_wptr  <= tab_wptr + 1'b1;
                     end
+                    12'h020: gath_en  <= s_wdata[0];        // GATHER_CTRL
+                    12'h024: idx_base <= s_wdata[AXI_ADDR_W-1:0];
+                    12'h028: wq_base  <= s_wdata[AXI_ADDR_W-1:0];
+                    12'h02c: begin src_len <= s_wdata[15:0]; q_n <= s_wdata[31:16]; end
                     default: ;
                 endcase
                 s_bvalid <= 1'b1;
@@ -186,16 +217,20 @@ module fft_feeder_v #(
         else if (s_arready) begin
             s_rvalid <= 1'b1;
             case (s_araddr[11:0])
-                12'h008: s_rdata <= {31'd0, busy};
+                12'h008: s_rdata <= {31'd0, busy | gath_busy};
                 12'h00c: s_rdata <= src_base;
                 12'h010: s_rdata <= nbeats;
-                // [3:0] SCALE_EXP; [18:16] sticky AXI protocol-violation flags. The firmware
-                // already reads this register once per row, so a violation is visible without
-                // any extra bus traffic -- see fft_fabric_pass().
-                12'h014: s_rdata <= {13'd0, err_align, err_rlast, err_extra,
-                                     12'd0, scale_exp_latched};
+                // [3:0] SCALE_EXP; [18:16] sticky AXI protocol-violation flags (legacy OR gather).
+                // The firmware already reads this register once per row, so a violation is visible
+                // without any extra bus traffic -- see fft_fabric_pass().
+                12'h014: s_rdata <= {13'd0, err_align | g_err_align, err_rlast | g_err_rlast,
+                                     err_extra | g_err_extra, 12'd0, scale_exp_latched};
                 12'h018: s_rdata <= {15'd0, win_en, win_scale};  // window ctrl readback
                 12'h01c: s_rdata <= {{(32-TAB_AW){1'b0}}, tab_wptr};  // taper fill level
+                12'h020: s_rdata <= {31'd0, gath_en};
+                12'h024: s_rdata <= idx_base;
+                12'h028: s_rdata <= wq_base;
+                12'h02c: s_rdata <= {q_n, src_len};
                 default: s_rdata <= 32'd0;
             endcase
         end else if (s_rvalid & s_rready) begin
@@ -218,8 +253,11 @@ module fft_feeder_v #(
                                                 : (FIFO_CAP[FIFO_AW:0] - fcount);
     wire fifo_empty = (fcount == 0);
 
-    wire rbeat = m_rvalid & m_rready;
-    assign m_rready = ~fifo_full;
+    // Legacy R acceptance. When the gather engine owns the bus (gmode) the legacy master is idle
+    // and MUST NOT see the gather's R beats (they would spuriously latch err_extra), so gate with
+    // ~gmode. m_rready itself is muxed to whichever master is active (see the port muxes below).
+    wire l_rready = ~fifo_full;
+    wire rbeat    = ~gmode & m_rvalid & l_rready;
 
     // ---- window taper: 4096 words, each {hamc[2i+1], hamc[2i]} in Q15 ----
     (* syn_ramstyle = "lsram" *)
@@ -287,13 +325,23 @@ module fft_feeder_v #(
             end
         end
     end
-    assign m_axis_tdata  = sdata;
-    assign m_axis_tvalid = svalid;
+    // Stream output is muxed: legacy window-feed (sdata/svalid) vs gather (g_sdata/g_svalid).
+    assign m_axis_tdata  = gmode ? g_sdata  : sdata;
+    assign m_axis_tvalid = gmode ? g_svalid : svalid;
 
-    // ===================== AXI4 read-burst master =====================
+    // ===================== AXI4 read-burst master (LEGACY window feed) =====================
+    // AR is muxed with the gather load master at the port. m_arsize/m_arburst/m_arid are the same
+    // constants for both, so they are driven unconditionally.
+    reg [AXI_ADDR_W-1:0] l_araddr;    // legacy AR address (port is a wire)
+    reg [7:0]            l_arlen;     // legacy AR len
+    reg                  l_arvalid;   // legacy AR valid
     assign m_arsize  = (AXI_DATA_W==64) ? 3'b011 : 3'b010; // 8 bytes/beat
     assign m_arburst = 2'b01;                              // INCR
     assign m_arid    = {AXI_ID_W{1'b0}};
+    assign m_araddr  = gmode ? g_araddr  : l_araddr;
+    assign m_arlen   = gmode ? g_arlen   : l_arlen;
+    assign m_arvalid = gmode ? g_arvalid : l_arvalid;
+    assign m_rready  = gmode ? g_rready  : l_rready;
 
     reg [31:0] beats_left;        // beats still to request
     reg [AXI_ADDR_W-1:0] next_addr;
@@ -329,7 +377,7 @@ module fft_feeder_v #(
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
-            state <= S_IDLE; m_arvalid <= 0; m_araddr <= 0; m_arlen <= 0;
+            state <= S_IDLE; l_arvalid <= 0; l_araddr <= 0; l_arlen <= 0;
             beats_left <= 0; next_addr <= 0; busy <= 0; cur_len <= 0; burst_rem <= 0;
             err_extra <= 1'b0; err_rlast <= 1'b0; err_align <= 1'b0;
         end else begin
@@ -337,8 +385,9 @@ module fft_feeder_v #(
             if (rbeat && !beat_ok) err_extra <= 1'b1;
             case (state)
               S_IDLE: begin
-                  m_arvalid <= 1'b0;
-                  if (start_pulse && nbeats != 0) begin
+                  l_arvalid <= 1'b0;
+                  // In gather mode the load master owns the bus; the legacy feed stays idle.
+                  if (start_pulse && nbeats != 0 && !gath_en) begin
                       beats_left <= nbeats;
                       next_addr  <= src_base;
                       busy       <= 1'b1;
@@ -349,18 +398,18 @@ module fft_feeder_v #(
               S_ADDR: begin
                   if (beats_left == 0) begin
                       state <= S_DRAIN;
-                  end else if (!m_arvalid && (fifo_room >= this_len)) begin
+                  end else if (!l_arvalid && (fifo_room >= this_len)) begin
                       // Issue only when the FIFO can hold the whole burst. NOTE: this is a
                       // throughput optimisation, not the safety property -- `fifo_full`
                       // gating m_rready is the independent guard, and with the window stages
                       // in flight fcount CAN reach the cap mid-burst, so RREADY may legally
                       // deassert part-way through a burst. That is harmless.
-                      m_araddr  <= next_addr;
-                      m_arlen   <= this_len[7:0] - 8'd1;   // AXI len = beats-1
+                      l_araddr  <= next_addr;
+                      l_arlen   <= this_len[7:0] - 8'd1;   // AXI len = beats-1
                       cur_len   <= this_len;               // latch what we actually asked for
-                      m_arvalid <= 1'b1;
-                  end else if (m_arvalid && m_arready) begin
-                      m_arvalid  <= 1'b0;
+                      l_arvalid <= 1'b1;
+                  end else if (l_arvalid && m_arready) begin
+                      l_arvalid  <= 1'b0;
                       burst_rem  <= cur_len[8:0];
                       state      <= S_DATA;
                   end
@@ -387,6 +436,373 @@ module fft_feeder_v #(
                   end
               end
               default: state <= S_IDLE;
+            endcase
+        end
+    end
+
+    // =====================================================================================
+    // FUSED AZIMUTH-RESAMPLE GATHER  (optional, runtime-enabled -- reg 0x20 bit0)
+    //
+    // WHY: the azimuth resample was a separate fabric pass -- a per-row linear-interpolation
+    // GATHER that wrote a 128 MB frame to SCRATCH which THIS feeder (FFT-1) then read back
+    // (~1.65 ms/line, DDR-round-trip bound). CoreFFT consumes at ~1 sample / 8 SLOWCLK, so the
+    // feeder has ample slack to DO the gather as it streams, deleting the separate stage AND the
+    // SCRATCH round-trip. Same fuse-into-the-feed pattern as the window (above) and the detect
+    // (in the unloader).
+    //
+    // PER ROW: (1) burst-read the source row into on-chip banks, (2) burst-read this row's idx[]
+    // and wq[] coefficient tables into on-chip banks, (3) for i in 0..QN-1 gather+lerp
+    //   out[i] = lerp(src[idx[i]], src[idx[i]+1], wq[i])   (Q15, idx<0||idx>=S-1 -> zero fill)
+    // then apply the EXISTING 2-D Hamming window multiply (hamr=win_scale, hamc=wtab[i]) and push
+    // to the stream FIFO. Reads are three SEQUENTIAL bursts; the gather/stream phase is
+    // CoreFFT-rate-limited, so a serial load-then-stream per row still hides under the FFT.
+    //
+    // ARITHMETIC is bit-identical to hls_resample/resample.cpp (lerp) followed by
+    // hls_window/window.cpp (window), so an A/B against a gather-then-window reference validates.
+    // All fixed-point multiplies are EXPLICIT `signed`; no two multiplies are chained in a cycle.
+    // =====================================================================================
+    localparam integer IDXB_AW = G_TAB_AW - 1;   // idx bank depth (2 banks, 2 int32/beat)
+    localparam integer WQB_AW  = G_TAB_AW - 2;   // wq  bank depth (4 banks, 4 int16/beat)
+
+    localparam G_IDLE=3'd0, G_SRC=3'd1, G_IDX=3'd2, G_WQ=3'd3, G_GATHER=3'd4, G_DRAIN=3'd5;
+    localparam GA_IDLE=2'd0, GA_ADDR=2'd1, GA_DATA=2'd2;
+    reg [2:0] gstate;
+    reg [1:0] grstate;
+    reg [1:0] gpass;                  // 0=SRC 1=IDX 2=WQ
+
+    // latched-at-start per-row parameters (a late AXI4-Lite write cannot split a row)
+    reg [15:0]           gr_srclen, gr_qn;
+    reg [AXI_ADDR_W-1:0] gr_srcbase, gr_idxbase, gr_wqbase;
+
+    // gather load master (own copy; the legacy feed master stays idle while gath_busy)
+    reg [31:0]           g_beats_left;
+    reg [AXI_ADDR_W-1:0] g_next_addr;
+    reg [31:0]           g_cur_len;
+    reg [8:0]            g_burst_rem;
+    reg [15:0]           g_wn;         // beat index within the CURRENT pass (write address)
+
+    assign gmode    = gath_busy;
+    // rready is asserted across the WHOLE load pass (not just GA_DATA) so a stray/misrouted R beat
+    // arriving between bursts is ACCEPTED-AND-DISCARDED and latches err_extra -- rather than
+    // stalling the interconnect -- exactly as the legacy master does. Banks always have room.
+    assign g_rready = (gstate==G_SRC) || (gstate==G_IDX) || (gstate==G_WQ);
+    wire g_beat_ok  = (grstate == GA_DATA) && (g_burst_rem != 9'd0);
+    wire g_rbeat    = gmode & m_rvalid & g_rready;
+    wire g_store    = g_rbeat & g_beat_ok;
+
+    // pass beat counts: IDX 2 int32/beat, WQ 4 int16/beat. SRC uses live src_len at start (below).
+    wire [31:0] idx_beats = ({16'd0, gr_qn} + 32'd1) >> 1;
+    wire [31:0] wq_beats  = ({16'd0, gr_qn} + 32'd3) >> 2;
+
+    // burst length: min(MAX_BURST, beats_left, distance-to-4KB), clamped >=1 (see legacy this_len)
+    wire [31:0] g_blk4k    = (32'd4096 - {20'd0, g_next_addr[11:0]}) >> 3;
+    wire [31:0] g_cap      = (g_beats_left < MAX_BURST) ? g_beats_left : MAX_BURST;
+    wire [31:0] g_lenraw   = (g_blk4k < g_cap) ? g_blk4k : g_cap;
+    wire [31:0] g_this_len = (g_lenraw == 32'd0) ? 32'd1 : g_lenraw;
+
+    // ---- on-chip banks -------------------------------------------------------------------
+    // srcbuf split by sample parity (even/odd) so buf[j] and buf[j+1] read in one cycle.
+    // idxbuf 2 banks (entry i in bank i&1 @ i>>1); wqbuf 4 banks (entry i in bank i&3 @ i>>2).
+    (* syn_ramstyle = "lsram" *) reg [31:0] buf_e   [0:(1<<G_BUF_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [31:0] buf_o   [0:(1<<G_BUF_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [31:0] idxbuf0 [0:(1<<IDXB_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [31:0] idxbuf1 [0:(1<<IDXB_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [15:0] wqbuf0  [0:(1<<WQB_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [15:0] wqbuf1  [0:(1<<WQB_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [15:0] wqbuf2  [0:(1<<WQB_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [15:0] wqbuf3  [0:(1<<WQB_AW)-1];
+    reg [31:0] buf_e_q, buf_o_q, idxbuf0_q, idxbuf1_q;
+    reg [15:0] wqbuf0_q, wqbuf1_q, wqbuf2_q, wqbuf3_q;
+    reg [31:0] g_wtab_q;                          // 2 hamc taps {tap[2m+1],tap[2m]}
+
+    // output-index issue
+    reg [G_TAB_AW-1:0] gi;
+    reg [15:0]         g_left;
+    wire g_issue = (gstate == G_GATHER) && (g_left != 16'd0);
+    wire gen;                                     // pipeline enable (gather stream FIFO room)
+
+    // ---- gather pipeline stage registers -------------------------------------------------
+    reg               g0_v;
+    reg               g0_sel0;                    // gi[0]   (idx bank + tap half)
+    reg [1:0]         g0_sel;                     // gi[1:0] (wq bank)
+    reg               g1_v, g1_val, g1_idx0;
+    reg [15:0]        g1_wq;
+    reg signed [31:0] g1_cwp;                     // win_scale*tap  (window 1st multiply)
+    reg               g2_v, g2_val;
+    reg [15:0]        g2_wq;
+    reg signed [16:0] g2_dhi, g2_dlo;
+    reg signed [15:0] g2_ahi, g2_alo, g2_cw;
+    reg               g3_v, g3_val;
+    reg signed [32:0] g3_mh, g3_ml;
+    reg signed [15:0] g3_ahi, g3_alo, g3_cw;
+    reg               g4_v;
+    reg signed [15:0] g4_hi, g4_lo, g4_cw;
+    reg               g5_v;
+    reg [31:0]        g5_samp;
+
+    // combinational bank-read address for the source banks (declared here, used by the RAM procs)
+    wire [G_BUF_AW-1:0] ge_ra, go_ra;
+
+    // ---- RAM read/write address muxes (load phase writes @g_wn; gather phase reads) --------
+    wire [G_BUF_AW-1:0] be_addr = (gstate==G_GATHER) ? ge_ra : g_wn[G_BUF_AW-1:0];
+    wire [G_BUF_AW-1:0] bo_addr = (gstate==G_GATHER) ? go_ra : g_wn[G_BUF_AW-1:0];
+    wire buf_we = g_store & (gpass==2'd0);
+    always @(posedge clk) begin
+        if (buf_we) buf_e[be_addr] <= m_rdata[31:0];
+        buf_e_q <= buf_e[be_addr];
+    end
+    always @(posedge clk) begin
+        if (buf_we) buf_o[bo_addr] <= m_rdata[63:32];
+        buf_o_q <= buf_o[bo_addr];
+    end
+
+    wire [IDXB_AW-1:0] idx_addr = (gstate==G_GATHER) ? gi[G_TAB_AW-1:1] : g_wn[IDXB_AW-1:0];
+    wire idx_we = g_store & (gpass==2'd1);
+    always @(posedge clk) begin
+        if (idx_we) idxbuf0[idx_addr] <= m_rdata[31:0];
+        idxbuf0_q <= idxbuf0[idx_addr];
+    end
+    always @(posedge clk) begin
+        if (idx_we) idxbuf1[idx_addr] <= m_rdata[63:32];
+        idxbuf1_q <= idxbuf1[idx_addr];
+    end
+
+    wire [WQB_AW-1:0] wq_addr = (gstate==G_GATHER) ? gi[G_TAB_AW-1:2] : g_wn[WQB_AW-1:0];
+    wire wq_we = g_store & (gpass==2'd2);
+    always @(posedge clk) begin
+        if (wq_we) wqbuf0[wq_addr] <= m_rdata[15:0];
+        wqbuf0_q <= wqbuf0[wq_addr];
+    end
+    always @(posedge clk) begin
+        if (wq_we) wqbuf1[wq_addr] <= m_rdata[31:16];
+        wqbuf1_q <= wqbuf1[wq_addr];
+    end
+    always @(posedge clk) begin
+        if (wq_we) wqbuf2[wq_addr] <= m_rdata[47:32];
+        wqbuf2_q <= wqbuf2[wq_addr];
+    end
+    always @(posedge clk) begin
+        if (wq_we) wqbuf3[wq_addr] <= m_rdata[63:48];
+        wqbuf3_q <= wqbuf3[wq_addr];
+    end
+
+    // Second reader of the window taper (wtab). The legacy stage-A read is untouched; synthesis
+    // replicates wtab for this independent read port. Output sample i -> hamc[i] = wtab[i>>1] half.
+    always @(posedge clk) g_wtab_q <= wtab[gi[TAB_AW:1]];
+
+    // ---- stage-1 combinational: pick idx/wq/tap, range-check, form source-bank addresses -----
+    wire signed [31:0] idx1 = g0_sel0 ? $signed(idxbuf1_q) : $signed(idxbuf0_q);
+    wire        [15:0] wq1  = (g0_sel==2'd0) ? wqbuf0_q :
+                              (g0_sel==2'd1) ? wqbuf1_q :
+                              (g0_sel==2'd2) ? wqbuf2_q : wqbuf3_q;
+    wire signed [15:0] tap1 = g0_sel0 ? g_wtab_q[31:16] : g_wtab_q[15:0];
+    wire signed [31:0] g_sm1 = $signed({16'd0, gr_srclen}) - 32'sd1;   // S-1
+    wire g_inr1 = (idx1 >= 0) && (idx1 < g_sm1);
+    assign ge_ra = idx1[0] ? (idx1[G_BUF_AW:1] + 1'b1) : idx1[G_BUF_AW:1];
+    assign go_ra = idx1[G_BUF_AW:1];
+
+    // ---- stage-2 combinational: source pair (bufA=src[j], bufB=src[j+1]) ---------------------
+    wire [31:0] bufA = g1_idx0 ? buf_o_q : buf_e_q;
+    wire [31:0] bufB = g1_idx0 ? buf_e_q : buf_o_q;
+
+    // ---- stage-3 combinational: lerp multiply  (b-a)*w, w Q15 (>=0), 33-bit exact -----------
+    wire signed [32:0] sh_hi = {{16{g2_dhi[16]}}, g2_dhi} * $signed({1'b0, g2_wq});
+    wire signed [32:0] sh_lo = {{16{g2_dlo[16]}}, g2_dlo} * $signed({1'b0, g2_wq});
+
+    // ---- stage-4 combinational: lerp add  a + ((b-a)*w >>> 15) ------------------------------
+    wire signed [17:0] r_hi = {{2{g3_ahi[15]}}, g3_ahi} + g3_mh[32:15];
+    wire signed [17:0] r_lo = {{2{g3_alo[15]}}, g3_alo} + g3_ml[32:15];
+
+    // ---- stage-5 combinational: window multiply  (gathered * cw) >>> 15 ----------------------
+    wire signed [31:0] wm_i = $signed(g4_hi) * $signed(g4_cw);
+    wire signed [31:0] wm_q = $signed(g4_lo) * $signed(g4_cw);
+    wire [31:0] g5_win  = {wm_i[30:15], wm_q[30:15]};   // windowed {I,Q}
+    wire [31:0] g5_pass = {g4_hi, g4_lo};               // gathered  {I,Q} (window disabled)
+
+    // ---- gather + window pipeline (all stages frozen together by `gen` backpressure) ---------
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            g0_v<=0; g1_v<=0; g2_v<=0; g3_v<=0; g4_v<=0; g5_v<=0;
+            g0_sel0<=0; g0_sel<=0;
+            g1_val<=0; g1_idx0<=0; g1_wq<=0; g1_cwp<=32'sd0;
+            g2_val<=0; g2_wq<=0; g2_dhi<=17'sd0; g2_dlo<=17'sd0; g2_ahi<=0; g2_alo<=0; g2_cw<=0;
+            g3_val<=0; g3_mh<=33'sd0; g3_ml<=33'sd0; g3_ahi<=0; g3_alo<=0; g3_cw<=0;
+            g4_hi<=0; g4_lo<=0; g4_cw<=0;
+            g5_samp<=32'd0;
+        end else if (gen) begin
+            g0_v    <= g_issue;
+            g0_sel0 <= gi[0];
+            g0_sel  <= gi[1:0];
+
+            g1_v    <= g0_v;
+            g1_val  <= g_inr1;
+            g1_idx0 <= idx1[0];
+            g1_wq   <= wq1;
+            g1_cwp  <= win_scale * tap1;
+
+            g2_v    <= g1_v;
+            g2_val  <= g1_val;
+            g2_wq   <= g1_wq;
+            g2_dhi  <= $signed(bufB[31:16]) - $signed(bufA[31:16]);
+            g2_dlo  <= $signed(bufB[15:0])  - $signed(bufA[15:0]);
+            g2_ahi  <= bufA[31:16];
+            g2_alo  <= bufA[15:0];
+            g2_cw   <= g1_cwp[30:15];
+
+            g3_v    <= g2_v;
+            g3_val  <= g2_val;
+            g3_mh   <= sh_hi;
+            g3_ml   <= sh_lo;
+            g3_ahi  <= g2_ahi;
+            g3_alo  <= g2_alo;
+            g3_cw   <= g2_cw;
+
+            g4_v    <= g3_v;
+            g4_hi   <= g3_val ? r_hi[15:0] : 16'sd0;   // zero-fill out-of-range BEFORE the window
+            g4_lo   <= g3_val ? r_lo[15:0] : 16'sd0;
+            g4_cw   <= g3_cw;
+
+            g5_v    <= g4_v;
+            g5_samp <= win_en ? g5_win : g5_pass;
+        end
+    end
+
+    // issue counter
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn)                    begin gi <= 0; g_left <= 16'd0; end
+        else if (gstate != G_GATHER)    begin gi <= 0; g_left <= gr_qn; end
+        else if (gen && g_left != 16'd0) begin gi <= gi + 1'b1; g_left <= g_left - 1'b1; end
+    end
+
+    // ---- pack two samples/beat -> gather stream FIFO ----------------------------------------
+    reg [31:0] g_word; reg g_word_v;
+    (* syn_ramstyle = "lsram" *) reg [AXI_DATA_W-1:0] gfifo [0:(1<<G_SFIFO_AW)-1];
+    reg  [G_SFIFO_AW:0] gwptr, grptr;
+    wire [G_SFIFO_AW:0] gcount = gwptr - grptr;
+    localparam integer G_SFIFO_CAP = (1<<G_SFIFO_AW) - 2;
+    wire g_sfull  = (gcount >= G_SFIFO_CAP);
+    wire g_sempty = (gcount == 0);
+    assign gen = ~g_sfull;
+
+    wire g_push = gen & g5_v & g_word_v;                 // push on the SECOND sample of a pair
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn)                 begin g_word <= 32'd0; g_word_v <= 1'b0; end
+        else if (gstate == G_IDLE)   begin g_word_v <= 1'b0; end
+        else if (gen & g5_v) begin
+            if (!g_word_v) begin g_word <= g5_samp; g_word_v <= 1'b1; end   // even sample -> low half
+            else                g_word_v <= 1'b0;                           // odd sample -> push
+        end
+    end
+    always @(posedge clk) if (g_push) gfifo[gwptr[G_SFIFO_AW-1:0]] <= {g5_samp, g_word};
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn)                gwptr <= 0;
+        else if (gstate == G_IDLE)  gwptr <= 0;
+        else if (g_push)            gwptr <= gwptr + 1'b1;
+    end
+
+    // show-ahead read -> stream (muxed onto m_axis when gmode)
+    wire g_has     = (gwptr != grptr);
+    wire g_consume = g_svalid & m_axis_tready;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn)                begin grptr <= 0; g_svalid <= 1'b0; end
+        else if (gstate == G_IDLE)  begin grptr <= 0; g_svalid <= 1'b0; end
+        else begin
+            if (g_consume) g_svalid <= 1'b0;
+            if ((~g_svalid | g_consume) & g_has) begin
+                g_sdata  <= gfifo[grptr[G_SFIFO_AW-1:0]];
+                grptr    <= grptr + 1'b1;
+                g_svalid <= 1'b1;
+            end
+        end
+    end
+
+    // ---- gather sequencer: 3 read passes, then gather/stream, then drain --------------------
+    wire g_pipe_empty = !g0_v && !g1_v && !g2_v && !g3_v && !g4_v && !g5_v && !g_word_v;
+    wire gather_done  = (g_left == 16'd0) && g_pipe_empty;
+    wire g_drained    = g_sempty && !g_svalid;
+
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            gstate <= G_IDLE; grstate <= GA_IDLE; gpass <= 2'd0; gath_busy <= 1'b0;
+            g_arvalid <= 1'b0; g_araddr <= 0; g_arlen <= 8'd0;
+            g_beats_left <= 32'd0; g_next_addr <= 0; g_cur_len <= 32'd0; g_burst_rem <= 9'd0;
+            g_wn <= 16'd0;
+            g_err_extra <= 1'b0; g_err_rlast <= 1'b0; g_err_align <= 1'b0;
+            gr_srclen <= 16'd0; gr_qn <= 16'd0;
+            gr_srcbase <= 0; gr_idxbase <= 0; gr_wqbase <= 0;
+        end else begin
+            // sticky: a stray/misrouted R beat during a load pass must not silently shift a bank
+            if (g_rbeat && !g_beat_ok) g_err_extra <= 1'b1;
+            case (gstate)
+              G_IDLE: begin
+                  g_arvalid <= 1'b0;
+                  if (start_pulse && gath_en) begin
+                      gr_srclen  <= src_len;   gr_qn      <= q_n;
+                      gr_srcbase <= src_base;  gr_idxbase <= idx_base;  gr_wqbase <= wq_base;
+                      gath_busy  <= 1'b1;
+                      gpass      <= 2'd0;
+                      g_next_addr  <= src_base;
+                      g_beats_left <= ({16'd0, src_len} + 32'd1) >> 1;    // ceil(S/2) source beats
+                      g_wn         <= 16'd0;
+                      grstate      <= GA_ADDR;
+                      gstate       <= G_SRC;
+                      if (src_base[2:0]!=3'd0 || idx_base[2:0]!=3'd0 || wq_base[2:0]!=3'd0 ||
+                          q_n[0] || q_n==16'd0 || src_len < 16'd2)
+                          g_err_align <= 1'b1;
+                  end
+              end
+              G_SRC, G_IDX, G_WQ: begin
+                  case (grstate)
+                    GA_ADDR: begin
+                        if (g_beats_left == 32'd0) begin
+                            if (gpass == 2'd2) begin
+                                grstate <= GA_IDLE;
+                                gstate  <= G_GATHER;
+                            end else begin
+                                gpass <= gpass + 2'd1;
+                                g_wn  <= 16'd0;
+                                if (gpass == 2'd0) begin
+                                    g_next_addr  <= gr_idxbase; g_beats_left <= idx_beats;
+                                    gstate       <= G_IDX;
+                                end else begin
+                                    g_next_addr  <= gr_wqbase;  g_beats_left <= wq_beats;
+                                    gstate       <= G_WQ;
+                                end
+                                grstate <= GA_ADDR;
+                            end
+                        end else if (!g_arvalid) begin
+                            g_araddr  <= g_next_addr;
+                            g_arlen   <= g_this_len[7:0] - 8'd1;
+                            g_cur_len <= g_this_len;
+                            g_arvalid <= 1'b1;
+                        end else if (g_arvalid && m_arready) begin
+                            g_arvalid   <= 1'b0;
+                            g_burst_rem <= g_cur_len[8:0];
+                            grstate     <= GA_DATA;
+                        end
+                    end
+                    GA_DATA: begin
+                        if (g_store) begin
+                            g_wn        <= g_wn + 16'd1;
+                            g_burst_rem <= g_burst_rem - 9'd1;
+                            if (m_rlast != (g_burst_rem == 9'd1)) g_err_rlast <= 1'b1;
+                            if (g_burst_rem == 9'd1) begin
+                                g_beats_left <= g_beats_left - g_cur_len;
+                                g_next_addr  <= g_next_addr + (g_cur_len << 3);
+                                grstate      <= GA_ADDR;
+                            end
+                        end
+                    end
+                    default: grstate <= GA_IDLE;
+                  endcase
+              end
+              G_GATHER: begin
+                  if (gather_done) gstate <= G_DRAIN;
+              end
+              G_DRAIN: begin
+                  if (g_drained) begin gath_busy <= 1'b0; gstate <= G_IDLE; end
+              end
+              default: gstate <= G_IDLE;
             endcase
         end
     end

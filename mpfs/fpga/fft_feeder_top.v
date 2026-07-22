@@ -27,8 +27,10 @@ module fft_feeder_top #(parameter integer IDW = 4) (
     input  wire        axi4initiator_r_valid,
     output wire        axi4initiator_r_ready,
 
-    // ---- axi4target: AXI4 slave, control regs (64-bit data, 5-bit addr, ID) ----
-    input  wire [4:0]  axi4target_awaddr,
+    // ---- axi4target: AXI4 slave, control regs (64-bit data, 6-bit addr, ID) ----
+    // Addr widened 5->6 bits to reach the fused-gather registers 0x20..0x2c (GATHER_CTRL,
+    // IDX_BASE, WQ_BASE, GATHER_DIMS). The CIC AXI4mtarget4 must present araddr/awaddr[5:0].
+    input  wire [5:0]  axi4target_awaddr,
     input  wire [IDW-1:0] axi4target_awid,
     input  wire [7:0]  axi4target_awlen,
     input  wire [2:0]  axi4target_awsize,
@@ -44,7 +46,7 @@ module fft_feeder_top #(parameter integer IDW = 4) (
     output wire [1:0]  axi4target_bresp,
     output wire        axi4target_bvalid,
     input  wire        axi4target_bready,
-    input  wire [4:0]  axi4target_araddr,
+    input  wire [5:0]  axi4target_araddr,
     input  wire [IDW-1:0] axi4target_arid,
     input  wire [7:0]  axi4target_arlen,
     input  wire [2:0]  axi4target_arsize,
@@ -101,10 +103,10 @@ module fft_feeder_top #(parameter integer IDW = 4) (
     fft_feeder_v #(.AXI_ADDR_W(32), .AXI_DATA_W(64), .AXI_ID_W(IDW)) u_feeder (
         .clk(clk), .resetn(resetn),
         // control (AXI4-Lite view): map addr to {7'd0, 5-bit byte offset}
-        .s_awaddr({7'd0, axi4target_awaddr}), .s_awvalid(axi4target_awvalid), .s_awready(li_awready),
+        .s_awaddr({6'd0, axi4target_awaddr}), .s_awvalid(axi4target_awvalid), .s_awready(li_awready),
         .s_wdata(wlane), .s_wvalid(axi4target_wvalid), .s_wready(li_wready),
         .s_bvalid(li_bvalid), .s_bready(axi4target_bready),
-        .s_araddr({7'd0, axi4target_araddr}), .s_arvalid(axi4target_arvalid), .s_arready(li_arready),
+        .s_araddr({6'd0, axi4target_araddr}), .s_arvalid(axi4target_arvalid), .s_arready(li_arready),
         .s_rdata(li_rdata), .s_rvalid(li_rvalid), .s_rready(axi4target_rready),
         // read master -> axi4initiator
         .m_arid(),                                       // ID assigned by the interconnect side

@@ -193,6 +193,16 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
 #define K_FFT_WIN_CTRL  0x18u                /* [15:0]=hamr[row] Q15, [16]=enable, [17]=rewind tab */
 #define K_FFT_WIN_TAB   0x1cu                /* {hamc[2i+1],hamc[2i]}, pointer auto-increments */
 #define WIN_TAB_WORDS   (SAR_GRID / 2u)      /* 8192 taps / 2 per word = 4096 words */
+/* Fused azimuth-resample GATHER in the FFT-1 feeder (fft_feeder_v.v, 2026-07-22). Deletes the
+ * standalone azimuth resample stage: the feeder gathers M source samples -> Mp outputs, windows,
+ * and streams to CoreFFT, so the ~13.5 s pass folds under the FFT feed. Runtime-gated by
+ * SAR_GATHERMODE_ADDR so the default pipeline is unchanged. idx/wq are read from DDR per row (the
+ * feeder's own read master), NOT loaded over AXI4-Lite. */
+#define K_FFT_GATHER_CTRL 0x20u              /* [0] = gather enable */
+#define K_FFT_IDX_BASE    0x24u              /* DDR byte addr of this row's idx[] */
+#define K_FFT_WQ_BASE     0x28u              /* DDR byte addr of this row's wq[] */
+#define K_FFT_GATHER_DIMS 0x2cu              /* [15:0]=SRC_LEN (source samples), [31:16]=QN (outputs) */
+#define SAR_GATHERMODE_ADDR 0xB005911Cu      /* 0=standalone azimuth resample (default); 1=fused into FFT-1 */
 
 static uint8_t sar_row_exp[SAR_GRID];        /* per-row captured exponent (static, off-stack) */
 
@@ -304,6 +314,83 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
     }
     __asm volatile ("fence rw, rw");
     flush_l2_cache(1u);                       /* push renormalized dst to DDR for the next kernel */
+    return 0;
+}
+
+/* FUSED FFT-1 with per-row azimuth-resample GATHER (SAR_GATHERMODE=1). Mirrors fft_fabric_pass
+ * exactly EXCEPT each row's feeder is armed in gather mode: the feeder reads M source samples from
+ * `src` row j, gathers to Mp with this row's idx/wq, windows, and streams to CoreFFT -- so the
+ * azimuth resample stage folds under the FFT feed. idx/wq are computed on the MSS per row
+ * (sar_coeffs_pass2, double-buffered so row j+1's coeffs compute while row j streams) and published
+ * to DDR for the feeder's read master. Detect is NEVER fused here (FFT-1 stays complex).
+ *
+ * NOT YET SILICON-VALIDATED: the board was unavailable (JTAG wedged) when this was written. Gated
+ * off by default (SAR_GATHERMODE); the standalone azimuth resample path is unchanged. Validate by
+ * A/B vs SAR_GATHERMODE=0 on the same scene before trusting -- the CRC gate does not apply (the
+ * fused gather is bit-identical to gather-then-window, tb/tb_fft_feeder_gather.v, but the whole
+ * pipeline CRC has already moved off 0xd596c9eb). */
+static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint32_t dst,
+                            uint32_t spins)
+{
+    uint32_t budget = spins ? spins : SAR_DEFAULT_SPINS;
+    const int16_t *hamr = (const int16_t *)(uintptr_t)SAR_HAMR_ADDR;
+    const uint32_t Mp = g->Mp, M = g->M;
+    int b = 0;
+
+    fft_win_load_taper();
+    sar_coeffs_pass2(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
+                                (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
+
+    for (uint32_t row = 0; row < SAR_GRID; row++) {
+        uint32_t d = dst + row * SAR_ROW_BYTES;
+        flush_coef_bank_to_ddr(b, M);                     /* publish this row's coeffs L2->DDR */
+        sar_reg_w(K_FFT_UNLOADER, K_UNL_DET_CTRL, 0u);     /* FFT-1 never fuses detect */
+        sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, d);
+        sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);
+        sar_k_start(K_FFT_UNLOADER);
+        /* Feeder in GATHER mode: source row, this row's idx/wq, dims (SRC_LEN=M, QN=Mp), window on.
+         * One START sequences load(src,idx,wq) -> gather+window+stream. */
+        sar_reg_w(K_FFT_FEEDER, K_FFT_IDX_BASE,    (uint32_t)SAR_COEF_IDX(b));
+        sar_reg_w(K_FFT_FEEDER, K_FFT_WQ_BASE,     (uint32_t)SAR_COEF_WQ(b));
+        sar_reg_w(K_FFT_FEEDER, K_FFT_GATHER_DIMS, (Mp << 16) | (M & 0xFFFFu));
+        sar_reg_w(K_FFT_FEEDER, K_FFT_GATHER_CTRL, 1u);
+        sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL,    (1u << 16) | (uint16_t)hamr[row]);
+        sar_reg_w(K_FFT_FEEDER, HLS_ARG0,          src + row * Mp * 4u);   /* source row (Mp-wide, M valid) */
+        sar_k_start(K_FFT_FEEDER);
+        if (row + 1u < SAR_GRID)                          /* overlap: next row's coeffs under the feed */
+            sar_coeffs_pass2(g, row + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
+                                               (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
+        uint32_t n = budget;
+        while (n) { if (sar_k_idle(K_FFT_FEEDER) && sar_k_idle(K_FFT_UNLOADER)) break; n--; }
+        if (n == 0u) return sar_k_idle(K_FFT_FEEDER) ? 1 : 2;
+        sar_row_exp[row] = (uint8_t)(sar_reg_r(K_FFT_FEEDER, K_FFT_SCALE_EXP) & 0xFu);
+        if ((row & 0x7Fu) == 0u) SAR_PROG(4u, row, SAR_GRID);
+        b ^= 1;
+    }
+    sar_reg_w(K_FFT_FEEDER, K_FFT_GATHER_CTRL, 0u);        /* clear so a later plain FFT is unaffected */
+
+    /* global block exponent + renormalize -- identical to fft_fabric_pass PASS 2 (complex, det=0) */
+    uint8_t emax = 0;
+    for (uint32_t row = 0; row < SAR_GRID; row++)
+        if (sar_row_exp[row] > emax) emax = sar_row_exp[row];
+    uint32_t headroom = *(volatile uint32_t *)(uintptr_t)SAR_FFT_HEADROOM_ADDR;
+    if (headroom > 12u) headroom = 0u;
+    __asm volatile ("fence rw, rw");
+    flush_l2_cache(1u);
+    for (uint32_t row = 0; row < SAR_GRID; row++) {
+        uint32_t sh = (uint32_t)(emax - sar_row_exp[row]) + headroom;
+        if (sh == 0u) continue;
+        uint32_t *d = (uint32_t *)(uintptr_t)(dst + row * SAR_ROW_BYTES);
+        for (uint32_t i = 0; i < SAR_GRID; i++) {
+            uint32_t v = d[i];
+            int32_t re = (int32_t)(int16_t)(v >> 16)     >> sh;
+            int32_t im = (int32_t)(int16_t)(v & 0xFFFFu) >> sh;
+            d[i] = (((uint32_t)(uint16_t)(int16_t)re) << 16) | (uint16_t)(int16_t)im;
+        }
+        if ((row & 0x7Fu) == 0u) SAR_PROG(5u, row, SAR_GRID);
+    }
+    __asm volatile ("fence rw, rw");
+    flush_l2_cache(1u);
     return 0;
 }
 
@@ -438,6 +525,14 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) return 0;
     sar_resample_ts[2] = readmtime();          /* internal corner-turn done */
+
+    /* FUSED azimuth gather (SAR_GATHERMODE=1): stop here. SIG now holds the corner-turned,
+     * range-gathered data -- exactly the input the azimuth gather reads. The gather + azimuth
+     * resample happen inside the FFT-1 feeder (fft1_gather_pass), so pass 2 is not run here. */
+    if (*(volatile uint32_t *)(uintptr_t)SAR_GATHERMODE_ADDR == 1u) {
+        sar_resample_ts[3] = readmtime();
+        return 1;
+    }
 
     /* PASS 2 (azimuth) */
     sar_coeffs_pass2(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
@@ -592,24 +687,40 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
      *    SIG is free after resample, so ping-pong SCRATCH<->SIG keeps read/write on
      *    separate 256 MB pages. VALIDATED on silicon: decoupled fft_pass streams past
      *    transform 1 (in-place stalled at idx=1). */
-    { int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 1, 0);  /* window FUSED into this pass */
-      if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;          /* feeder stalled */
-      if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (range) */
+    /* GATHER-FUSED (SAR_GATHERMODE=1): the azimuth resample gather is folded into THIS FFT feed.
+     * resample_2pass stopped after the internal corner-turn, so SIG holds the gather INPUT. FFT-1
+     * gathers from SIG and writes SCRATCH (decoupled, same in-place-stall avoidance). This FLIPS
+     * the downstream buffers: corner-turn SCRATCH->SIG, FFT-2 SIG->... (below). SCRATCH is free
+     * here because pass 2 no longer wrote it. */
+    const int gather_fused = (*(volatile uint32_t *)(uintptr_t)SAR_GATHERMODE_ADDR == 1u);
+    float *f32g = (float *)(uintptr_t)SAR_COEF_LINE_F32;
+    if (gather_fused) {
+        int r = fft1_gather_pass(&g, f32g, BUF_SIG, BUF_SCRATCH, spins);  /* gather from SIG -> SCRATCH */
+        if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;
+        if (r == 2) return SAR_SEQ_TIMEOUT_DMA;
+    } else {
+        int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 1, 0);  /* window FUSED into this pass */
+        if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;          /* feeder stalled */
+        if (r == 2) return SAR_SEQ_TIMEOUT_DMA;            /* DMA S2MM stalled (range) */
+    }
     sar_stage_ts[3] = readmtime();
 
-    /* 4) corner-turn (transpose): SIG -> SCRATCH (range-FFT output is now in SIG) */
-    sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SIG);
-    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SCRATCH);
+    /* 4) corner-turn (transpose). Non-fused: SIG->SCRATCH (FFT-1 out is in SIG).
+     *    Fused: SCRATCH->SIG (FFT-1 out is in SCRATCH). */
+    sar_reg_w(K_CORNER_TURN, HLS_ARG0, gather_fused ? BUF_SCRATCH : BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, gather_fused ? BUF_SIG     : BUF_SCRATCH);
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) return SAR_SEQ_TIMEOUT_CORNER;
     sar_stage_ts[4] = readmtime();
 
-    /* 5) azimuth FFT: SCRATCH -> SIG (DECOUPLED, same ping-pong as range FFT) */
-    /* FUSED DETECT (runtime, DETECTMODE 3): the unloader takes |z| as the azimuth FFT streams
-     * out, so this pass writes uint16 magnitudes DIRECTLY to OUT and step 6 disappears. Deletes
-     * a 512 MB read + 128 MB write. The range pass above must never enable it. */
+    /* 5) azimuth FFT (the true RANGE-axis FFT). Non-fused: SCRATCH->{OUT|SIG}. Fused: SIG->{OUT|SIG}
+     *    -- corner-turn wrote SIG, so FFT-2 reads SIG.
+     * FUSED DETECT (runtime, DETECTMODE 3): the unloader takes |z| as this FFT streams out, so it
+     * writes uint16 magnitudes DIRECTLY to OUT and step 6 disappears. */
     const int det_fused = (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR == 3u);
-    { int r = fft_pass(BUF_SCRATCH, det_fused ? BUF_OUT : BUF_SIG, spins, 0, det_fused);
+    const uint32_t f2_src = gather_fused ? BUF_SIG : BUF_SCRATCH;
+    const uint32_t f2_dst = det_fused ? BUF_OUT : (gather_fused ? BUF_SCRATCH : BUF_SIG);
+    { int r = fft_pass(f2_src, f2_dst, spins, 0, det_fused);
       if (r == 1) return SAR_SEQ_TIMEOUT_FFT2;          /* feeder stalled */
       if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (azimuth) */
     sar_stage_ts[5] = readmtime();
@@ -622,11 +733,13 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
         /* nothing to do: the unloader produced OUT during step 5, and the uint16 renormalize
          * inside fft_fabric_pass already applied the global block exponent. */
     } else if (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR != 2u) {
-        flush_l2_cache(1u);                                  /* read fabric-written SIG from DDR */
-        cpu_detect(BUF_SIG, BUF_OUT, SAR_GRID * SAR_GRID);
+        /* Read the ACTUAL FFT-2 output buffer (f2_dst): SIG in the non-fused path, SCRATCH when
+         * the gather fusion flipped the buffers. */
+        flush_l2_cache(1u);                                  /* read fabric-written FFT-2 out from DDR */
+        cpu_detect(f2_dst, BUF_OUT, SAR_GRID * SAR_GRID);
         flush_l2_cache(1u);                                  /* push OUT to DDR for JTAG readback */
     } else {
-        sar_reg_w(K_DETECT, HLS_ARG0, BUF_SIG);
+        sar_reg_w(K_DETECT, HLS_ARG0, f2_dst);
         sar_reg_w(K_DETECT, HLS_ARG1, BUF_OUT);
         sar_k_start(K_DETECT);
         if (!sar_k_wait(K_DETECT, spins)) return SAR_SEQ_TIMEOUT_DETECT;

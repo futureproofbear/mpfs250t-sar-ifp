@@ -78,12 +78,18 @@ Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) 
 
 **Priority order (set 2026-07-22):**
 
-**1. Increase the resample gather THROUGHPUT.** The kernel schedules at II=1 (verified) yet runs
-~880 µs/line against a 361 µs schedule — 2.44× AXI stall on a correct schedule (`axi_ii_lie`). The
-cause (short bursts vs long inter-burst gaps — opposite fixes) is not yet observable; the FIC_0
-monitor (ARLEN histogram + busy/elapsed/max-gap counters, built into the 2026-07-22 bitstream, reg
-base `0x6000_6000`) is the measurement that decides the fix. **Do this measurement first** — every
-downstream resample decision depends on it. Firmware: clear-arm-read the monitor around one line.
+**1. Increase the resample gather THROUGHPUT — OPEN and UNDER-DIAGNOSED (do not read as "no lever").**
+The kernel schedules at II=1 (verified) yet runs ~880 µs/line against a 361 µs schedule — 2.44× AXI
+stall on a correct schedule (`axi_ii_lie`). The FIC_0 monitor (2026-07-22 bitstream, reg base
+`0x6000_6000`) measured line 0 of both gathers: reads are LONG bursts (72 beats avg), so
+burst-length is NOT the lever. BUT the monitor taps only the READ channel, so it cannot tell whether
+the distributed idle is WRITE time (invisible) or intra-burst read throttling — opposite fixes, and
+still unresolved. So this priority is NOT closed; it is under-diagnosed. Priority 2 below is a
+PARTIAL fix for it (it deletes the azimuth gather's DDR round-trip, ~13.5 s), but the range gather
+(~8.3 s) and the internal corner-turn (~7.3 s) are untouched and still want a throughput answer. The
+right next diagnostic step is a v2 monitor that adds the WRITE channel + intra-burst RVALID-gap
+counting; whichever it shows (write-bound → extend the fusion; read-throttled → DDR/outstanding
+depth) decides the range-gather fix.
 
 **2. Fuse the AZIMUTH RESAMPLE into FFT-1 (the azimuth-axis FFT).** FFT-1 already has the 2-D window
 fused into its feeder (`fft_feeder_v.v`), and the azimuth resample pass feeds FFT-1 directly with no

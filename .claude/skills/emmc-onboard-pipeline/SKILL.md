@@ -63,13 +63,14 @@ is exactly why they burn so much time.
 
 ### Rule: Where the Bitstreams Actually Live
 - **TRIGGER**: You need to (re)program the FABRIC, or the fabric looks dark.
-- **ACTION**: Firmware, host harnesses and docs ARE standalone in this repo — but the **built Libero
-  projects and exported bitstreams are NOT**. They live in the sibling build repo:
-  `sarProcessor/mpfs/fpga/libero_ffv/export/SAR_TOP_ffv.job` (newest timing-MET CoreFFT + Verilog
-  feeder build, 2026-07-13) and `sarProcessor/mpfs/fpga/bitstreams/`. `libero_tdest/export/` is EMPTY.
-- **HALT**: `program_ffv.tcl` in THIS repo points at `$SAR_FPGA/libero_ffv`, which does not exist here —
-  open the sarProcessor project path instead, or the program step fails. Program FABRIC-ONLY, then
-  obey the App Re-flash + Power-Cycle rules above.
+- **ACTION**: Everything builds HERE now (migrated 2026-07-22 — sarProcessor is retired). The fabric
+  build runs from `mpfs/fpga/` in THIS repo: `create_fresh_project_ffv.tcl` then
+  `build_full_prog_ffv.tcl` produce `mpfs/fpga/libero_ffv/export/SAR_TOP_ffv.job`, and
+  `program_ffv.tcl` (also here) programs it. `libero_ffv/` is gitignored (~300 MB regenerated
+  output), so a fresh clone must run the build once before there is a `.job` to program.
+- **HALT**: `libero_ffv/` is NOT clone-buildable as-is — a few build inputs are gitignored and must be
+  regenerated first (`mss_nodll/` MSS export; the `hls_output/` trees, via `shls hw`). Program
+  FABRIC-ONLY, then obey the App Re-flash + Power-Cycle rules above.
 
 ### Rule: JTAG Teardown Order
 - **TRIGGER**: A gdb/openocd session is hung or must be stopped.
@@ -89,21 +90,18 @@ re-run after a crash-safety fix (see "WHERE TO RESUME").
 This skill is the operational runbook. For chip/toolchain errata use `mpfs-platform-gotchas`; for
 un-wedging JTAG use `jtag-recover`; for the pipeline internals use `sar-pipeline-design`.
 
-## Repo layout (standalone for FIRMWARE/HOST — but NOT for the Libero bitstreams)
+## Repo layout (fully self-contained — firmware, host, AND fabric build)
 
 `mpfs250t-sar-ifp` is self-contained for **firmware, SoftConsole project + build config, board
-harnesses, host tooling, and docs** — all here, no sibling checkout needed to build firmware or run
-the board. (FABRIC BITSTREAM IS THE EXCEPTION: there is no Libero project in this repo; synth/P&R
-runs from the `sarProcessor` sibling, and the `.v` files are duplicated there — sync before building.)
-the JTAG harnesses. (Consolidated 2026-07-14; firmware source is byte-identical to the silicon-proven
-state.) All paths below are relative to the repo root.
+harnesses, host tooling, docs, AND the Libero fabric build** — all here. The sarProcessor sibling is
+RETIRED (fabric build migrated in 2026-07-22 and verified: first place-and-route reproduced the
+reference placement digit-for-digit). All paths below are relative to the repo root.
 
-> ⚠️ **EXCEPTION — the built Libero projects and exported FABRIC bitstreams are NOT in this repo.**
-> They live in the sibling build repo `sarProcessor/mpfs/fpga/`:
-> `libero_ffv/export/SAR_TOP_ffv.job` (newest, timing MET, CoreFFT + Verilog feeder — the one to
-> program) and `bitstreams/`. `libero_tdest/export/` is EMPTY despite what older notes imply.
-> `program_ffv.tcl` here resolves `$SAR_FPGA/libero_ffv`, which does **not** exist in this repo —
-> point it at the sarProcessor project. See the "Where the Bitstreams Actually Live" rule above.
+> **Fabric build + program both run from THIS repo.** `mpfs/fpga/create_fresh_project_ffv.tcl` +
+> `build_full_prog_ffv.tcl` build `mpfs/fpga/libero_ffv/` (gitignored, ~300 MB regenerated output);
+> `program_ffv.tcl` (resolves `$SAR_FPGA/libero_ffv` from its own location) programs the exported
+> `.job`. Caveat: `libero_ffv/` is not clone-buildable until its gitignored inputs are regenerated
+> (`mss_nodll/`; the `hls_output/` trees via `shls hw`).
 >
 > **Paths are configured, not hard-coded:** every script derives the repo root from its own location
 > (`mpfs/host/lib/sar_env.sh`, `mpfs/fpga/lib/sar_env.tcl`); only external tool installs are pinned,

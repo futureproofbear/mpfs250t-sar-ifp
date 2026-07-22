@@ -23,6 +23,18 @@
 #define K_FFT_FEEDER         (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (CoreFFT build: fft_feeder) */
 #define K_FFT_UNLOADER       (SAR_FIC0_CTRL_BASE + 0x5000u)  /* SLAVE5 (CoreFFT build: fft_unloader) */
 #define K_FFT                (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (HLS-FFT build: fft_kernel, replaces feeder+unloader chain) */
+#define K_FIC0MON            (SAR_FIC0_CTRL_BASE + 0x6000u)  /* SLAVE6: FIC_0 AXI monitor (sar_fic0s_mon.v, 2026-07-22 build) */
+
+/* FIC_0 monitor register map (sar_fic0s_mon.v). 0x00 write-any = clear ALL. Reads are RO. */
+#define FICMON_STATUS        0x00u   /* write clears; read = sticky flags + ar/r counts + 0xA5 sig */
+#define FICMON_HIST_1        0x10u   /* AR bursts of 1 beat  (ARLEN==0, single-beat)  saturating */
+#define FICMON_HIST_2_4      0x14u   /* AR bursts 2..4 beats */
+#define FICMON_HIST_5_16     0x18u   /* AR bursts 5..16 beats */
+#define FICMON_HIST_17_64    0x1cu   /* AR bursts 17..64 beats */
+#define FICMON_HIST_65_256   0x20u   /* AR bursts 65..256 beats */
+#define FICMON_BUSY          0x24u   /* cycles with an AR or R handshake in flight */
+#define FICMON_ELAPSED       0x28u   /* total cycles since clear (utilization = busy/elapsed) */
+#define FICMON_MAX_GAP       0x2cu   /* longest idle run between AR/R events (short-burst vs long-gap) */
 
 /* SmartHLS control register offsets (common across all kernels). */
 #define HLS_START            0x08u   /* write 1 = start; read == 0 = done */

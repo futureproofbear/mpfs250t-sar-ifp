@@ -114,6 +114,41 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
 #define SAR_RPROF_ADDR         0xB0059180u
 #define SAR_RPROF_PROBE_ADDR   0xB0059120u   /* 0 = off; else kernel-only probe iterations */
 #define RPROF ((volatile uint64_t *)(uintptr_t)SAR_RPROF_ADDR)
+
+/* ---- FIC_0 monitor snapshot (0xB0059240, 2 x 12 x uint32) --------------------------------
+ * The gather kernel runs at II=1 (verified) yet ~880 us/line vs a 361 us schedule -- a 2.44x AXI
+ * stall on a correct schedule. This captures WHY, per line, straight off the FIC_0 bus: clear the
+ * monitor at sar_k_start, snapshot at sar_k_wait-done, so the counters cover exactly that line's
+ * DDR-facing AXI activity (the resample kernel is the only fabric master live during a line; the
+ * coeff-bank flush is CPU-side CCACHE, not FIC_0, so the monitor does not see it).
+ * Snapshot slot 0 = pass-1 (range gather) line 0, slot 1 = pass-2 (azimuth gather) line 0.
+ * Record layout per slot (12 x uint32): [0]=0xF1C0AA0p (p=pass) [1]=STATUS [2..6]=ARLEN hist
+ * (1 / 2-4 / 5-16 / 17-64 / 65-256) [7]=busy [8]=elapsed [9]=max_gap [10]=beats_this_line [11]=0.
+ * Decode with mpfs/host/decode_ficmon.py. Needs the 2026-07-22 monitor bitstream; on an older
+ * bitstream K_FIC0MON does not decode and reads return the AXI default (harmless, obviously bogus). */
+#define SAR_FICMON_ADDR        0xB0059240u
+#define FICMON_REC(slot)  ((volatile uint32_t *)(uintptr_t)(SAR_FICMON_ADDR + (slot) * 48u))
+
+static inline void ficmon_clear(void) { sar_reg_w(K_FIC0MON, FICMON_STATUS, 1u); }
+
+static void ficmon_snapshot(uint32_t slot, uint32_t pass, uint32_t beats)
+{
+    volatile uint32_t *r = FICMON_REC(slot);
+    r[0]  = 0xF1C0AA00u | (pass & 0xFu);
+    r[1]  = sar_reg_r(K_FIC0MON, FICMON_STATUS);
+    r[2]  = sar_reg_r(K_FIC0MON, FICMON_HIST_1);
+    r[3]  = sar_reg_r(K_FIC0MON, FICMON_HIST_2_4);
+    r[4]  = sar_reg_r(K_FIC0MON, FICMON_HIST_5_16);
+    r[5]  = sar_reg_r(K_FIC0MON, FICMON_HIST_17_64);
+    r[6]  = sar_reg_r(K_FIC0MON, FICMON_HIST_65_256);
+    r[7]  = sar_reg_r(K_FIC0MON, FICMON_BUSY);
+    r[8]  = sar_reg_r(K_FIC0MON, FICMON_ELAPSED);
+    r[9]  = sar_reg_r(K_FIC0MON, FICMON_MAX_GAP);
+    r[10] = beats;
+    r[11] = 0u;
+    __asm volatile ("fence rw, rw");
+    flush_range_to_ddr(SAR_FICMON_ADDR + slot * 48u, 48u);   /* publish for a JTAG physical read */
+}
 #define RP_T0(v)  uint64_t v = readmtime()
 #define RP_ACC(i, v) do { RPROF[i] += readmtime() - (v); } while (0)
 
@@ -362,6 +397,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
          * L2, not DDR. Publish just that bank before the kernel reads it via FIC0, else
          * it gathers with stale coeffs. */
         { RP_T0(t); flush_coef_bank_to_ddr(b, Np); RP_ACC(1, t); }
+        if (i == 0u) ficmon_clear();             /* capture FIC_0 behaviour of range gather line 0 */
         sar_k_start(K_RESAMPLE);
         if (i + 1u < g->M) {
             RP_T0(t);
@@ -372,6 +408,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         { RP_T0(t);
           if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
           RP_ACC(3, t); }
+        if (i == 0u) ficmon_snapshot(0u, 1u, Np / 2u);   /* Np samples, 2/beat */
         RPROF[4]++;
         b ^= 1;
     }
@@ -415,6 +452,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
           sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u); /* out (Mp-wide) */
           RP_ACC(6, t); }
         { RP_T0(t); flush_coef_bank_to_ddr(b, Mp); RP_ACC(7, t); }    /* publish coeffs L2 -> DDR */
+        if (j == 0u) ficmon_clear();             /* capture FIC_0 behaviour of azimuth gather line 0 */
         sar_k_start(K_RESAMPLE);
         if (j + 1u < Np) {
             RP_T0(t);
@@ -425,6 +463,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         { RP_T0(t);
           if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
           RP_ACC(9, t); }
+        if (j == 0u) ficmon_snapshot(1u, 2u, Mp / 2u);   /* Mp samples, 2/beat */
         RPROF[10]++;
         b ^= 1;
     }

@@ -35,7 +35,7 @@ source "$here/axiic_c0_params_330.tcl"    ;# -> $AXIIC_C0_PARAMS
 create_and_configure_core -core_vlnv {Actel:DirectCore:COREAXI4INTERCONNECT:3.0.130} -component_name {AXIIC_C0} -params $AXIIC_C0_PARAMS
 generate_component -component_name {AXIIC_C0}
 
-## Control-plane interconnect AXIIC_CTRL (CIC): 3.0.130, 1 initiator -> 6 targets (target5 now = standard AXI4 for fft_unloader ctrl; was AXI4-Lite for DMA).
+## Control-plane interconnect AXIIC_CTRL (CIC): 3.0.130, 1 initiator -> 7 targets (target5 now = standard AXI4 for fft_unloader ctrl; was AXI4-Lite for DMA. target6 = NEW sar_fic0s_mon monitor, AXI4-Lite).
 source "$here/axiic_ctrl_params.tcl"      ;# -> $AXIIC_CTRL_PARAMS
 create_and_configure_core -core_vlnv {Actel:DirectCore:COREAXI4INTERCONNECT:3.0.130} -component_name {AXIIC_CTRL} -params $AXIIC_CTRL_PARAMS
 generate_component -component_name {AXIIC_CTRL}
@@ -70,6 +70,10 @@ foreach hls {hls_corner_turn hls_window hls_detect hls_resample} {
 source "$here/gearbox_idconv_cores.tcl"
 source "$here/feeder_v_core.tcl"
 source "$here/unloader_v_core.tcl"
+## axi4_regslice: ONE core, TWO instances (DIC/CIC link timing fix, see axi4_regslice_core.tcl).
+## sar_fic0s_mon: FIC_0_AXI4_S transaction monitor, NEW 7th CIC target (see sar_fic0s_mon_core.tcl).
+source "$here/axi4_regslice_core.tcl"
+source "$here/sar_fic0s_mon_core.tcl"
 build_design_hierarchy
 
 ## ---------------- assemble SAR_TOP (instantiate + wire, incl GBX:m_axis -> UNLD:in_var stream) ----------------

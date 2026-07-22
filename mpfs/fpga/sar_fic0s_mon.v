@@ -10,14 +10,19 @@
 //   * Connect the mon_* inputs to the FIC0_S boundary nets (DIC_AXI4mslave0_*):
 //       mon_arvalid <- DIC_AXI4mslave0_ARVALID    mon_arready <- DIC_AXI4mslave0_ARREADY
 //       mon_araddr  <- DIC_AXI4mslave0_ARADDR_0   mon_arid    <- DIC_AXI4mslave0_ARID_0
+//       mon_arlen   <- DIC_AXI4mslave0_ARLEN_0    (NEW tap -- confirm exact net name/suffix
+//                                                   at integration time against the other
+//                                                   AR-channel nets above; it was not tapped
+//                                                   by the original monitor)
 //       mon_rvalid  <- DIC_AXI4mslave0_RVALID     mon_rready  <- DIC_AXI4mslave0_RREADY
 //       mon_rresp   <- DIC_AXI4mslave0_RRESP      mon_rid     <- DIC_AXI4mslave0_RID
 //       mon_rlast   <- DIC_AXI4mslave0_RLAST
 //   * Add it as an AXIIC_CTRL slave (enable SLAVE6) mapped at 0x6000_6000 (4 KiB).
-//   * Firmware reads 0x60006000.. (see register map). A *write* to 0x00 clears the latches.
+//   * Firmware reads 0x60006000.. (see register map). A *write* to 0x00 clears the latches
+//     AND all counters below (one clear-all).
 //
 // Register map (AXI4-Lite, 32-bit):
-//   0x00 STATUS (RO; write any value = clear all sticky latches)
+//   0x00 STATUS (RO; write any value = clear ALL sticky latches + all counters below)
 //        [0] ar_valid_seen   ARVALID was asserted at least once
 //        [1] ar_accepted     ARVALID & ARREADY seen together (AR handshake completed)
 //        [2] r_valid_seen    RVALID was asserted
@@ -30,6 +35,27 @@
 //   0x04 ARADDR_LO  araddr captured at first ARVALID, bits [31:0]   (expect 0x88000000-class / 0xB0148000)
 //   0x08 ARADDR_HI  bits [37:32] in [5:0]
 //   0x0C IDS        [3:0] arid_first   [7:4] rid_last
+//
+//   ---- added: ARLEN histogram / gap-and-utilization counters (all RO, 32-bit saturating) ----
+//   Counted on the AR handshake (mon_arvalid & mon_arready), bucketed by ARLEN+1 (beats, not
+//   the raw AXI ARLEN encoding). Answers "short bursts vs long idle gaps" for the resample
+//   gather kernel's 2.44x AXI-stall gap (see sar_kernels.h / resample runbook).
+//   0x10 ARLEN_HIST_1        beats==1   (single-beat burst, ARLEN==0)
+//   0x14 ARLEN_HIST_2_4      2<=beats<=4
+//   0x18 ARLEN_HIST_5_16     5<=beats<=16
+//   0x1C ARLEN_HIST_17_64    17<=beats<=64
+//   0x20 ARLEN_HIST_65_256   65<=beats<=256
+//   0x24 BUSY_CYCLES     cycles with an AR or R handshake in flight (mon_arvalid&mon_arready
+//                         OR mon_rvalid&mon_rready) -- "useful work" cycles.
+//   0x28 ELAPSED_CYCLES  total cycles since the last clear (utilization = BUSY/ELAPSED).
+//   0x2C MAX_GAP         longest run of consecutive idle cycles (no AR/R handshake) between
+//                         two AR/R handshake events. Running gap resets to 0 on any AR/R
+//                         handshake; latched into MAX_GAP only if the just-ended run exceeds
+//                         the current MAX_GAP (monotonic non-decreasing until cleared).
+//   Firmware usage: write 0x00 immediately before arming ONE resample line (sar_k_start),
+//   read 0x10-0x2C immediately after that line's sar_k_wait completes -- counters then cover
+//   exactly that line's AXI activity (thousands of cycles; 32-bit saturation is not a
+//   practical concern for a single line).
 
 module sar_fic0s_mon #(
     parameter SIG = 8'hA5
@@ -42,6 +68,7 @@ module sar_fic0s_mon #(
     input  wire        mon_arready,
     input  wire [37:0] mon_araddr,
     input  wire [3:0]  mon_arid,
+    input  wire [7:0]  mon_arlen,
     input  wire        mon_rvalid,
     input  wire        mon_rready,
     input  wire [1:0]  mon_rresp,
@@ -106,6 +133,54 @@ module sar_fic0s_mon #(
     wire [31:0] status = { SIG, r_count, ar_count, 1'b0, rresp_last,
                            r_last_seen, r_accepted, r_valid_seen, ar_accepted, ar_valid_seen };
 
+    // ---- ARLEN histogram / busy / elapsed / max-gap (see register map above) ----
+    reg [31:0] hist_len1, hist_len2_4, hist_len5_16, hist_len17_64, hist_len65_256;
+    reg [31:0] busy_cycles, elapsed_cycles, max_gap, running_gap;
+
+    wire       ar_hs     = mon_arvalid & mon_arready;
+    wire       r_hs      = mon_rvalid  & mon_rready;
+    wire       act_cycle = ar_hs | r_hs;              // AR or R handshake this cycle
+    wire [8:0] ar_beats  = {1'b0, mon_arlen} + 9'd1;  // ARLEN encodes beats-1
+
+    always @(posedge aclk or negedge aresetn) begin
+        if (!aresetn) begin
+            hist_len1<=0; hist_len2_4<=0; hist_len5_16<=0; hist_len17_64<=0; hist_len65_256<=0;
+            busy_cycles<=0; elapsed_cycles<=0; max_gap<=0; running_gap<=0;
+        end else if (clr) begin
+            hist_len1<=0; hist_len2_4<=0; hist_len5_16<=0; hist_len17_64<=0; hist_len65_256<=0;
+            busy_cycles<=0; elapsed_cycles<=0; max_gap<=0; running_gap<=0;
+        end else begin
+            // ELAPSED: every cycle since the last clear (saturating)
+            if (elapsed_cycles != 32'hFFFF_FFFF) elapsed_cycles <= elapsed_cycles + 32'd1;
+
+            // BUSY: cycles with an AR or R handshake in flight (saturating)
+            if (act_cycle && busy_cycles != 32'hFFFF_FFFF) busy_cycles <= busy_cycles + 32'd1;
+
+            // ARLEN histogram, bucketed on AR acceptance (saturating per bucket)
+            if (ar_hs) begin
+                if (ar_beats == 9'd1) begin
+                    if (hist_len1 != 32'hFFFF_FFFF) hist_len1 <= hist_len1 + 32'd1;
+                end else if (ar_beats <= 9'd4) begin
+                    if (hist_len2_4 != 32'hFFFF_FFFF) hist_len2_4 <= hist_len2_4 + 32'd1;
+                end else if (ar_beats <= 9'd16) begin
+                    if (hist_len5_16 != 32'hFFFF_FFFF) hist_len5_16 <= hist_len5_16 + 32'd1;
+                end else if (ar_beats <= 9'd64) begin
+                    if (hist_len17_64 != 32'hFFFF_FFFF) hist_len17_64 <= hist_len17_64 + 32'd1;
+                end else begin
+                    if (hist_len65_256 != 32'hFFFF_FFFF) hist_len65_256 <= hist_len65_256 + 32'd1;
+                end
+            end
+
+            // MAX_GAP: longest run of idle cycles between two AR/R handshake events.
+            if (act_cycle) begin
+                if (running_gap > max_gap) max_gap <= running_gap;
+                running_gap <= 32'd0;
+            end else if (running_gap != 32'hFFFF_FFFF) begin
+                running_gap <= running_gap + 32'd1;
+            end
+        end
+    end
+
     // ---- minimal AXI4-Lite (single-beat, always OKAY) ----
     reg wr_clr;
     assign clr = wr_clr;
@@ -138,6 +213,14 @@ module sar_fic0s_mon #(
                     10'd1:   s_axi_rdata <= araddr_first[31:0];
                     10'd2:   s_axi_rdata <= {26'b0, araddr_first[37:32]};
                     10'd3:   s_axi_rdata <= {24'b0, rid_last, arid_first};
+                    10'd4:   s_axi_rdata <= hist_len1;        // 0x10 ARLEN_HIST_1
+                    10'd5:   s_axi_rdata <= hist_len2_4;      // 0x14 ARLEN_HIST_2_4
+                    10'd6:   s_axi_rdata <= hist_len5_16;     // 0x18 ARLEN_HIST_5_16
+                    10'd7:   s_axi_rdata <= hist_len17_64;    // 0x1C ARLEN_HIST_17_64
+                    10'd8:   s_axi_rdata <= hist_len65_256;   // 0x20 ARLEN_HIST_65_256
+                    10'd9:   s_axi_rdata <= busy_cycles;      // 0x24 BUSY_CYCLES
+                    10'd10:  s_axi_rdata <= elapsed_cycles;   // 0x28 ELAPSED_CYCLES
+                    10'd11:  s_axi_rdata <= max_gap;          // 0x2C MAX_GAP
                     default: s_axi_rdata <= 32'hDEAD_0000;
                 endcase
             end else if (s_axi_rvalid & s_axi_rready) begin

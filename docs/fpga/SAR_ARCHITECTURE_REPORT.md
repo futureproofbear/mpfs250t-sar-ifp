@@ -217,8 +217,8 @@ CURRENT BASELINE — measured 2026-07-21, detect-fused-unloader build:
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
 | Resample (2-pass keystone) | **26.92 s** | **46.3%** | fabric gather, dominant by a wide margin |
-| Range FFT | 12.60 s | 21.7% | CoreFFT (fabric) |
-| Azimuth FFT | 11.27 s | 19.4% | CoreFFT + **fused detect** (fabric) |
+| FFT-1 (azimuth axis; code "range FFT") | 12.60 s | 21.7% | CoreFFT (fabric); 2-D window fused in |
+| FFT-2 (range axis; code "azimuth FFT") | 11.27 s | 19.4% | CoreFFT + **fused detect** (fabric) |
 | Corner-turn | 7.33 s | 12.6% | fabric transpose |
 | Window | **0.00 s** | 0% | fused into the range-FFT feeder |
 | Detect | **0.00 s** | 0% | fused into the azimuth-FFT unloader |

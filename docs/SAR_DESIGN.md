@@ -156,14 +156,35 @@ Two things this depends on, both deliberate:
   miscompiles on silicon — see [`fpga/SMARTHLS_ANTIPATTERNS.md`](fpga/SMARTHLS_ANTIPATTERNS.md).
   Do not retry that route.
 
-### 2.3 Range FFT, corner-turn, azimuth FFT
+### 2.3 The two FFT passes — a naming correction
 
 See section 4 for the FFT engine and BFP contract.
 
-The corner-turn is the load-bearing data-movement primitive: a global transpose cannot be fused into
-a neighbouring stage, so it is the one stage that must fully materialize the frame in DDR. It is
-tiled through on-chip LSRAM and is the reason the buffer plan needs a distinct destination (SCRATCH
--> SIG rather than in place).
+**The two FFTs are mislabelled in the code, and this doc uses the corrected names.** Verified from
+the fixed-point mirror (`silicon_emulator.py`) and the sequencer: the frame after resample is
+`(Np=range, Mp=azimuth)`, and each `fft_pass` transforms the LAST axis (columns). So:
+
+| Pipeline position | True axis it transforms | Fused into it | Historical CODE name (still in the RTL/timing printout) |
+|---|---|---|---|
+| **FFT-1** (first pass, `SCRATCH→SIG`) | **azimuth** | the 2-D Hamming **window** | `rangeFFT` / "range FFT" / the first `fft_pass` |
+| corner-turn | (global transpose) | — | `cornerturn` |
+| **FFT-2** (second pass, `SCRATCH→SIG/OUT`) | **range** | magnitude **detect** | `azFFT` / "azimuth FFT" / the second `fft_pass` |
+
+The code identifiers (`sar_stage_ts` labels, `SAR_SEQ_TIMEOUT_FFT1/2`, the `run_m3_iso.sh` printout
+strings `range-FFT`/`azimuth-FFT`) were NOT renamed — parsers and old logs depend on them — so when
+reading a raw timing dump, `range-FFT` is FFT-1 (azimuth axis) and `azimuth-FFT` is FFT-2 (range
+axis). This is the same swap the `sar-verification-methodology` "orientation gremlin" warns about; a
+transposed golden comparison is exactly what an inverted label predicts.
+
+The corner-turn between them is the load-bearing data-movement primitive: a global transpose cannot
+be fused into a neighbouring stage, so it is the one stage that must fully materialize the frame in
+DDR. It is tiled through on-chip LSRAM and is the reason the buffer plan needs a distinct destination
+(SCRATCH -> SIG rather than in place).
+
+Consequence for the optimisation roadmap: because **FFT-1 (azimuth axis) is fed directly by the
+azimuth resample pass with no corner-turn between them**, the azimuth resample can be fused into
+FFT-1's feeder exactly as the window already was — see the roadmap in
+[`fpga/SAR_PIPELINE_STATUS.md`](fpga/SAR_PIPELINE_STATUS.md).
 
 ### 2.4 Detect
 

@@ -2,7 +2,7 @@
   <rect width="1240" height="430" fill="#ffffff"/>
 
   <text x="620" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">SAR image-formation pipeline — as built on MPFS250T_ES</text>
-  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-21: 58.12 s total. Window and detect are FUSED INTO FABRIC (inside the FFT feeder / unloader) -- no CPU stage remains in the datapath.</text>
+  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-21: 58.12 s total. Window and detect are FUSED INTO FABRIC (inside the FFT feeder / unloader) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
 
   <!-- ============ input ============ -->
   <rect x="24" y="96" width="118" height="86" rx="6" fill="#f2f2f2" stroke="#888888" stroke-width="1.5" stroke-dasharray="5 3"/>
@@ -39,9 +39,9 @@
 
   <!-- 3 range fft -->
   <rect x="520" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
-  <text x="593" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Range FFT</text>
-  <text x="593" y="130" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt per row</text>
-  <text x="593" y="145" text-anchor="middle" font-size="10.5" fill="#333333">block floating point</text>
+  <text x="593" y="110" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">FFT-1 (azimuth axis)</text>
+  <text x="593" y="126" text-anchor="middle" font-size="9.5" fill="#333333">8192-pt · BFP · window fused</text>
+  <text x="593" y="139" text-anchor="middle" font-size="9" fill="#888888">code name: "range FFT" (K_FFT1)</text>
   <text x="593" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
   <text x="593" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.60 s</text>
 
@@ -55,9 +55,9 @@
 
   <!-- 5 azimuth fft -->
   <rect x="852" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
-  <text x="925" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Azimuth FFT</text>
-  <text x="925" y="130" text-anchor="middle" font-size="10.5" fill="#333333">8192-pt per row</text>
-  <text x="925" y="145" text-anchor="middle" font-size="10.5" fill="#333333">same engine reused</text>
+  <text x="925" y="110" text-anchor="middle" font-size="13" font-weight="600" fill="#1a1a1a">FFT-2 (range axis)</text>
+  <text x="925" y="126" text-anchor="middle" font-size="9.5" fill="#333333">8192-pt · BFP · detect fused</text>
+  <text x="925" y="139" text-anchor="middle" font-size="9" fill="#888888">code name: "azimuth FFT" (K_FFT2)</text>
   <text x="925" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
   <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">11.27 s</text>
 

@@ -71,19 +71,42 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-58.12 s is the current baseline (2026-07-21). Levers in measured-ROI order. **Detect (18.88 s,
-23.7%) is the largest structural target** and the only stage still running on the CPU (resample is
-the larger stage at 28.53 s, but far more studied — three data-movement hypotheses falsified, and
-DDR training ruled out). The FFTs are already on fabric and are not a
-lever. Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5.
+58.12 s is the current baseline (2026-07-21). Window and detect are both fused into fabric; no CPU
+stage remains in the datapath. **Resample is now the target by a wide margin: 26.92 s, 46.3%.**
+Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5. FFT axis naming:
+[`../SAR_DESIGN.md`](../SAR_DESIGN.md) §2.3 (the code labels are swapped vs the true axis).
 
-**1. Detect — 18.88 s, and it is on the CPU.**
-The fabric detect kernel is bypassed because SmartHLS mis-synthesised its sign extension
-(`(int16_t)(x>>16)` read unsigned → ~50% saturation); the shipping path is a correct-signed CPU
-detect selected by `detect_mode` @`0xB0059118`. Two routes: fix or replace the fabric detect (largest
-win, needs a rebuild and a value-gate), or split the CPU detect across the 4 U54 harts (firmware-only,
-rows are independent, no bitstream risk). The multi-hart split is the best effort-to-payoff ratio
-available today.
+**Priority order (set 2026-07-22):**
+
+**1. Increase the resample gather THROUGHPUT.** The kernel schedules at II=1 (verified) yet runs
+~880 µs/line against a 361 µs schedule — 2.44× AXI stall on a correct schedule (`axi_ii_lie`). The
+cause (short bursts vs long inter-burst gaps — opposite fixes) is not yet observable; the FIC_0
+monitor (ARLEN histogram + busy/elapsed/max-gap counters, built into the 2026-07-22 bitstream, reg
+base `0x6000_6000`) is the measurement that decides the fix. **Do this measurement first** — every
+downstream resample decision depends on it. Firmware: clear-arm-read the monitor around one line.
+
+**2. Fuse the AZIMUTH RESAMPLE into FFT-1 (the azimuth-axis FFT).** FFT-1 already has the 2-D window
+fused into its feeder (`fft_feeder_v.v`), and the azimuth resample pass feeds FFT-1 directly with no
+corner-turn between them (see SAR_DESIGN §2.3). So the azimuth gather can be folded into the same
+feeder the window uses, deleting its separate DDR read/write pass — the exact pattern that deleted
+the window and detect passes. Board-free RTL + TB first; value-gated by an A/B, since it changes the
+fixed-point path (CRC gate no longer applies).
+
+**3. Parallel fabric instances for resample and the FFT chains.** Rows are independent and FIC_0 has
+~10× bandwidth headroom. This was blocked by `sar_axi_idconv` mis-routing concurrent masters'
+responses; that is FIXED (2026-07-22, forwards `master_number`; silicon-confirmed inert with the
+current sequential firmware, so it is ready for concurrent use). Needs per-instance instantiation +
+wiring + a build; each added chain splits nothing because the bus is idle ~76% of the time.
+
+**4. Increase the clock frequency.** CLK is the binding constraint (~110 MHz ceiling; SLOWCLK/CoreFFT
+has +113 ns slack and is not the limiter). The 2026-07-22 register slices already broke the
+interconnect combinational critical path (worst OUT0 path moved into a slice register, +7.024 ns), so
+the prerequisite is in place. A CLK bump raises SLOWCLK with it (tied CLK/8) and speeds both FFTs;
+needs a CCC reconfig + a fresh timing-gate pass. Lowest priority because it is the most uncertain and
+the register-slice groundwork must be proven on silicon first.
+
+**Historical note:** an earlier revision of this roadmap led with "multi-hart CPU detect" as the top
+lever. Detect is now fused into fabric (0.00 s), so that lever is gone.
 
 **2. Resample fabric-kernel interconnect — 28.53 s, still the single largest stage.**
 Measured on-silicon mcycle profiling of the azimuth pass (counters in `resample_2pass`, JTAG-read

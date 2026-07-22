@@ -45,7 +45,13 @@ if [ "$CMD" = "0x50495045" ]; then
     FFTSET="$FFTSET
 set {unsigned int}0xB0059118 = $DETMODE"
   fi
-  FFTECHO='printf ">>> fft_mode=%u (1=fabric CoreFFT) detect_mode=%u (3=fused into unloader)\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118'
+  # SAR_GATHERMODE @0xB005911C: 0 = standalone azimuth resample (default), 1 = azimuth gather
+  # FUSED into the FFT-1 feeder. Set EXPLICITLY (the DDR debug word is uninitialised otherwise, so
+  # the fused-vs-baseline A/B must pin it, not trust garbage).
+  GATHMODE="${GATHMODE:-0}"
+  FFTSET="$FFTSET
+set {unsigned int}0xB005911C = $GATHMODE"
+  FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u (1=azimuth resample fused into FFT-1)\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C'
 fi
 
 cat > "$GDBSCRIPT" <<GDBEOF

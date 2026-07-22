@@ -31,7 +31,7 @@ path at run time. This is the shipping configuration, proven end-to-end on silic
 |---|---|---:|
 | Scene resident on eMMC | `SARI` partition @ LBA `0x80000` (superblock + TOC + per-scene blob, 10 role segments) | one-time provision |
 | **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **81.5 s** |
-| **PIPE** focus | `sar_form_image`, fabric CoreFFT + fused window/detect | **58.12 s** (§5) |
+| **PIPE** focus | `sar_form_image`, fabric CoreFFT + fused window/gather/detect | **48.19 s** (§5) |
 | **SAVEOUT** DDR → eMMC | `ESAV`, commit-last ordering (crash-safe) | ~16 min |
 | Verify / inspect | `EVOU` full-image CRC; `EROI` crop + small JTAG dump | ~63 s / ~4 min |
 
@@ -212,20 +212,40 @@ re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
 **Current (measured 2026-07-20, eMMC boot-load path, `fft_mode=1` fabric CoreFFT verified at runtime):**
 
-CURRENT BASELINE — measured 2026-07-21, detect-fused-unloader build:
+CURRENT BASELINE — measured 2026-07-22, azimuth-gather-fused + detect-fused-unloader build:
 
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
-| Resample (2-pass keystone) | **26.92 s** | **46.3%** | fabric gather, dominant by a wide margin |
-| FFT-1 (azimuth axis; code "range FFT") | 12.60 s | 21.7% | CoreFFT (fabric); 2-D window fused in |
-| FFT-2 (range axis; code "azimuth FFT") | 11.27 s | 19.4% | CoreFFT + **fused detect** (fabric) |
-| Corner-turn | 7.33 s | 12.6% | fabric transpose |
-| Window | **0.00 s** | 0% | fused into the range-FFT feeder |
-| Detect | **0.00 s** | 0% | fused into the azimuth-FFT unloader |
-| **Total** | **58.12 s** | | `SAR_SEQ_OK` |
+| Resample (2-pass keystone) | **13.46 s** | **27.9%** | fabric gather; azimuth pass now fused into FFT-1 feeder |
+| FFT-1 (azimuth transform; code "range FFT") | 15.97 s | 33.1% | CoreFFT (fabric); 2-D window **+ azimuth resample gather** fused in |
+| FFT-2 (range transform; code "azimuth FFT") | 11.08 s | 23.0% | CoreFFT + **fused detect** (fabric) |
+| Corner-turn | 7.68 s | 15.9% | fabric transpose |
+| Window | **0.00 s** | 0% | fused into the FFT-1 feeder |
+| Detect | **0.00 s** | 0% | fused into the FFT-2 unloader |
+| **Total** | **48.19 s** | | `SAR_SEQ_OK` |
 
-Both CPU stages are now gone from the datapath. The whole pipeline is fabric except coefficient
+Both CPU stages are gone from the datapath, and the azimuth resample gather no longer round-trips
+DDR — it streams straight into the FFT-1 feeder. The whole pipeline is fabric except coefficient
 generation, which the MSS still computes per line.
+
+PRIORITY-2 AZIMUTH-GATHER FUSION — measured 2026-07-22, same bitstream and scene, `SAR_GATHERMODE`
+@ `0xB005911C` (0 = standalone azimuth resample, 1 = fused into the FFT-1 feeder). Isolated on the
+CPU-detect config so only the gather moves:
+
+| | GATHMODE=0 | GATHMODE=1 | Δ |
+|---|---:|---:|---:|
+| resample | 27.19 s | 13.46 s | −13.73 |
+| FFT-1 feeder | 12.44 s | 16.05 s | +3.61 |
+| TOTAL (CPU detect) | 78.85 s | 68.73 s | **−10.13 s** |
+
+The azimuth gather (~13.7 s) left the standalone resample stage; ~3.6 s of it re-surfaced inside the
+FFT-1 feeder (the rest hides under FFT compute), net −10.1 s. Combined with fused detect (the
+`DETMODE=3` shipping path) the two fusions stack cleanly: **58.12 → 48.19 s (−9.93 s, −17%)**.
+
+Correctness: the fused-gather output crop (top-left 1024², from `sar_form_image`) is **bit-identical**
+to the standalone-resample output over all 1,048,576 pixels — the fused-gather feeder RTL is
+bit-exact to gather-then-window, so the only risk was the firmware orchestration (buffer flip,
+`fft1_gather_pass`, step-6 `f2_dst`), which silicon confirms is correct.
 
 MEASURED A/B, same bitstream and scene (`DETMODE=1` CPU detect vs `DETMODE=3` fused):
 
@@ -278,19 +298,24 @@ docs claimed. The 2% figure came from an mcycle profile taken while an experimen
 (16× fewer flushes) was active; that experiment was later reverted by a `git checkout`, but the
 number outlived the code it described. Measure the shipping path, not a branch.
 
-Detect is GONE from the datapath (fused into the FFT unloader, §5). Resample is now the target by
-a wide margin: 26.92 s, 46.3% of the run. Its gather kernel schedules at II=1 on ALL FOUR loops (verified 2026-07-22 by regenerating the HLS
+Detect is GONE from the datapath (fused into the FFT unloader, §5), and the azimuth resample pass is
+now fused into the FFT-1 feeder (priority 2, done 2026-07-22 — resample 27.19 → 13.46 s, net −10.1 s;
+see the PRIORITY-2 block in §5). The remaining resample time (13.46 s, 27.9%) is the pass-1 RANGE
+gather + its internal corner-turn — untouched by the azimuth fusion and now the priority-1 target.
+Its gather kernel schedules at II=1 on ALL FOUR loops (verified 2026-07-22 by regenerating the HLS
 report; scheduled 22,545 cycles = 361 us/line) yet MEASURES ~880 us -- a 2.44x AXI STALL on a
 correct schedule (`axi_ii_lie`). An earlier revision of this section claimed a burst-inference
 FAILURE (two AXI loads/iteration -> single-beat reads, 6.7x); that was WRONG, read off a stale
 hls_output from the pre-packing kernel -- the shipping gather reads buf[j]/buf[j+1] from LSRAM, not
 AXI, and every AXI access burst-converts. Localising the stall needs the FIC_0 monitor (ARLEN
-histogram + inter-burst gap counters), still unbuilt. Resample is still the single
-largest stage (28.53 s, 35.8%), but it is the more stubborn of the two — three data-movement
-hypotheses have now been falsified on it (burst length, outstanding depth, beat packing), and DDR
-training has been ruled out as a cause.
+histogram + inter-burst gap counters), still unbuilt. After the azimuth fusion the FFT-1 feeder
+(15.97 s) is now the single largest stage and the range gather (13.46 s resample) is second, but the
+range gather remains the more stubborn lever — three data-movement hypotheses have now been falsified
+on it (burst length, outstanding depth, beat packing), and DDR training has been ruled out as a cause.
 
-<sub>Earlier baselines (superseded): 2026-07-21 packed-resample — Resample 28.58 s · Window 6.0 s ·
+<sub>Earlier baselines (superseded): 2026-07-21 detect-fused (pre-azimuth-gather) — Resample 26.92 s ·
+FFT-1 12.60 s · FFT-2 11.27 s · Corner-turn 7.33 s · Total 58.12 s.
+2026-07-21 packed-resample — Resample 28.58 s · Window 6.0 s ·
 Total 87.58 s. 2026-07-20 flush-fix — Resample 29.2 s · Detect 20.6 s · Azimuth FFT 12.6 s ·
 Range FFT 12.4 s · Corner-turn 7.3 s · Window 6.0 s · Total 88.1 s (two runs, 88.04 / 88.11 s).
 2026-07-20 pre-flush-fix — Resample 53.6 s · Detect 19.7 s ·

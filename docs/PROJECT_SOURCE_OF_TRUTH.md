@@ -56,19 +56,22 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
-> **Pipeline total: 58.12 s** (measured 2026-07-21, detect-fused-unloader build). Window AND detect
+> **Pipeline total: 48.19 s** (measured 2026-07-22, azimuth-gather-fused build). Window AND detect
 > are now fused into the FFT passes; no CPU stage remains in the datapath.
 > How it got here: 110.8 s -> 88.1 s (targeted CCACHE `FLUSH64` writeback of the coefficient banks
 > replacing a per-line whole-L2 flush) -> 79.79 s (2-D Hamming window fused into the range-FFT
 > feeder, deleting a 512 MB-read + 512 MB-write pass) -> ~78.6 s (resample coefficient closed form)
 > -> 58.12 s (magnitude detect fused into the azimuth-FFT unloader, deleting a 512 MB-read +
-> 128 MB-write pass AND halving that pass's write traffic).
+> 128 MB-write pass AND halving that pass's write traffic)
+> -> 48.19 s (azimuth resample gather fused into the FFT-1 feeder, deleting its DDR round-trip;
+> resample 27.19 -> 13.46 s).
 > **The CRC gate no longer applies.** ROI crc `0xd596c9eb` held from the 110.8 s build through the
 > window fusion, but the coefficient rewrite and the detect fusion change values deliberately (both
 > are MORE accurate). Correctness is now gated by an A/B against the known-good CPU detect on
 > identical input: max |diff| 2 LSB, ZERO pixels beyond that over 1,048,576, corr 0.999866 --
 > matching a bound `model_detect_fusion.py` predicted before any RTL existed.
-> **Largest remaining target: resample, 26.92 s (46.3%).** The shipping gather kernel schedules
+> **Largest remaining target after the azimuth-gather fusion: the FFT-1 feeder at 15.97 s** (resample,
+> the range gather, is now 13.46 s -- was 26.92 s). The shipping gather kernel schedules
 > at II=1 on ALL FOUR loops (verified 2026-07-22 by regenerating the HLS report -- an earlier
 > "burst-inference failure / single-beat reads" diagnosis was WRONG, read off a stale hls_output
 > from the pre-packing kernel). Scheduled 22,545 cycles = 361 us/line against ~880 us measured, so

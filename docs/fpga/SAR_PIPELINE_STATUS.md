@@ -12,10 +12,12 @@ The full PFA (polar-format) SAR pipeline runs on the PolarFire SoC MPFS250T_ES (
 JTAG/FlashPro6) and produces the correct focused image, autonomously from the board's own eMMC:
 
 - Scene loads eMMC → DDR in **81.5 s** (`sig_crc 0x89fa12dc` verified), retiring the ~3 h JTAG input load.
-- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **79.79 s** (2026-07-21,
-  window-fused-feeder build), with `fft_mode=1` (fabric CoreFFT) confirmed at runtime. Output
-  image byte-identical to every prior build back to 110.8 s — top-left 1024² ROI crc `0xd596c9eb`.
-  Reproducible: two consecutive runs at 79.794 s / 79.683 s (0.14% spread), stage-for-stage.
+- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **48.19 s** (2026-07-22,
+  azimuth-gather-fused + detect-fused build, `SAR_GATHERMODE=1` + `DETMODE=3`), with `fft_mode=1`
+  (fabric CoreFFT) confirmed at runtime. The azimuth resample gather is now fused into the FFT-1
+  feeder (priority 2): resample 27.19 → 13.46 s, and the fused output crop is **bit-identical** to the
+  standalone-resample output over all 1,048,576 pixels — see `SAR_ARCHITECTURE_REPORT.md` §5. Earlier
+  window-fused-only build ran 79.79 s (crc `0xd596c9eb`); detect fusion took it to 58.12 s.
 - Correlation vs golden reference = **0.9923** (Centerfield decimated 705×540 scene, band rows
   896:1152, 1.05 M unsaturated pixels; a point-target crop hits 0.9962). The board image matches
   `golden_small_mag.npy` in the **`T.rot180`** orientation (`board == golden.T[::-1,::-1]`) — exactly
@@ -71,32 +73,33 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-58.12 s is the current baseline (2026-07-21). Window and detect are both fused into fabric; no CPU
-stage remains in the datapath. **Resample is now the target by a wide margin: 26.92 s, 46.3%.**
+**48.19 s** is the current baseline (2026-07-22, azimuth-gather-fused + detect-fused). Window, detect,
+and the azimuth resample gather are all fused into fabric; no CPU stage remains in the datapath. The
+FFT-1 feeder (15.97 s) is now the largest stage; the range gather (13.46 s "resample") is second.
 Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5. FFT axis naming:
 [`../SAR_DESIGN.md`](../SAR_DESIGN.md) §2.3 (the code labels are swapped vs the true axis).
 
 **Priority order (set 2026-07-22):**
 
-**1. Increase the resample gather THROUGHPUT — OPEN and UNDER-DIAGNOSED (do not read as "no lever").**
-The kernel schedules at II=1 (verified) yet runs ~880 µs/line against a 361 µs schedule — 2.44× AXI
-stall on a correct schedule (`axi_ii_lie`). The FIC_0 monitor (2026-07-22 bitstream, reg base
-`0x6000_6000`) measured line 0 of both gathers: reads are LONG bursts (72 beats avg), so
-burst-length is NOT the lever. BUT the monitor taps only the READ channel, so it cannot tell whether
-the distributed idle is WRITE time (invisible) or intra-burst read throttling — opposite fixes, and
-still unresolved. So this priority is NOT closed; it is under-diagnosed. Priority 2 below is a
-PARTIAL fix for it (it deletes the azimuth gather's DDR round-trip, ~13.5 s), but the range gather
-(~8.3 s) and the internal corner-turn (~7.3 s) are untouched and still want a throughput answer. The
-right next diagnostic step is a v2 monitor that adds the WRITE channel + intra-burst RVALID-gap
-counting; whichever it shows (write-bound → extend the fusion; read-throttled → DDR/outstanding
-depth) decides the range-gather fix.
+**2. ✅ DONE (2026-07-22) — Fuse the AZIMUTH RESAMPLE into FFT-1 (the azimuth transform).** The
+azimuth gather was folded into the same feeder that already applies the 2-D window (`fft_feeder_v.v`,
+runtime-gated by `SAR_GATHERMODE` @ `0xB005911C`), deleting its separate DDR read/write pass — the
+exact pattern that deleted the window and detect passes. Measured on silicon: resample 27.19 → 13.46 s,
+net −10.1 s (≈3.6 s re-surfaced inside the FFT-1 feeder, the rest hides under FFT compute). Output
+crop **bit-identical** to the standalone-resample output over all 1,048,576 pixels (the value gate,
+since the CRC gate no longer applies). Combined with fused detect: **58.12 → 48.19 s**.
 
-**2. Fuse the AZIMUTH RESAMPLE into FFT-1 (the azimuth-axis FFT).** FFT-1 already has the 2-D window
-fused into its feeder (`fft_feeder_v.v`), and the azimuth resample pass feeds FFT-1 directly with no
-corner-turn between them (see SAR_DESIGN §2.3). So the azimuth gather can be folded into the same
-feeder the window uses, deleting its separate DDR read/write pass — the exact pattern that deleted
-the window and detect passes. Board-free RTL + TB first; value-gated by an A/B, since it changes the
-fixed-point path (CRC gate no longer applies).
+**1. Increase the range gather THROUGHPUT — OPEN and UNDER-DIAGNOSED (do not read as "no lever").**
+The gather kernel schedules at II=1 (verified) yet runs ~880 µs/line against a 361 µs schedule — 2.44×
+AXI stall on a correct schedule (`axi_ii_lie`). The FIC_0 monitor (2026-07-22 bitstream, reg base
+`0x6000_6000`) measured line 0 of both gathers: reads are LONG bursts (72 beats avg), so burst-length
+is NOT the lever. BUT the monitor taps only the READ channel, so it cannot tell whether the
+distributed idle is WRITE time (invisible) or intra-burst read throttling — opposite fixes, and still
+unresolved. Priority 2 (above) already deleted the azimuth gather's DDR round-trip; what remains under
+this priority is the pass-1 RANGE gather (13.46 s "resample") + the internal corner-turn, still a full
+DDR round-trip and still wanting a throughput answer. The right next diagnostic step is a v2 monitor
+that adds the WRITE channel + intra-burst RVALID-gap counting; whichever it shows (write-bound →
+extend the fusion; read-throttled → DDR/outstanding depth) decides the range-gather fix.
 
 **3. Parallel fabric instances for resample and the FFT chains.** Rows are independent and FIC_0 has
 ~10× bandwidth headroom. This was blocked by `sar_axi_idconv` mis-routing concurrent masters'

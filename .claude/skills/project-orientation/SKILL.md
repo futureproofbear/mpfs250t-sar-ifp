@@ -36,7 +36,7 @@ target-neutral (see `sar-pipeline-design`); the FPGA/toolchain specifics are sco
 ## What is PROVEN vs OPEN
 Proven (on silicon):
 - **Full autonomous on-board run (re-confirmed 2026-07-20):** scene loaded from the board's own eMMC
-  (81.5 s, `sig_crc 0x89fa12dc` verified) → focused in **58.12 s** (`SAR_SEQ_OK`, `fft_mode=1` FABRIC
+  (81.5 s, `sig_crc 0x89fa12dc` verified) → focused in **48.19 s** (2026-07-22, azimuth-gather fused; `SAR_SEQ_OK`, `fft_mode=1` FABRIC
   CoreFFT confirmed at runtime) → ROI crop rendered to a coherent focused image. No host JTAG data load.
   Reproducible: the superseded 88.1 s baseline ran 88.04 s / 88.11 s, output byte-identical to the previous
   88.1 s pre-flush-fix build had the same top-left 1024² ROI crc `0xd596c9eb`).
@@ -51,7 +51,7 @@ Proven (on silicon):
   a correct-signed CPU detect (see `sar-pipeline-design` + `mpfs-platform-gotchas`).
 
 Open / next (image is already correct; these are latency + hardening):
-- Latency reduction (58.12 s). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
+- Latency reduction (48.19 s). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
   FLUSH64 writeback is now DONE and measured (resample 53.6 → 29.2 s, frame 110.8 → 88.1 s, output bits
   unchanged) — do not treat the per-line L2 flush as a pending lever, and disregard the old "2% L2
   flush" split, which came from a profile of a since-reverted experiment. The live levers, in order:

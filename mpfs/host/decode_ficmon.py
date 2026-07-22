@@ -59,25 +59,40 @@ def decode_record(w):
               if total else f"  beats/line  {beats}")
 
     # ---- verdict ----
+    # NOTE: this monitor taps only the READ channel (AR/R). Writes (AW/W/B) are NOT counted, so
+    # (elapsed - busy) is write-time PLUS genuine idle, and low read-utilization does NOT by itself
+    # mean the bus is idle. Weigh that before concluding "stalled".
     short = (hist[0] + hist[1])                       # 1 + 2-4 beat bursts
-    long_ = hist[4]                                    # 65-256 beat bursts
+    long_ = hist[4]                                   # 65-256 beat bursts
     short_frac = short / total if total else 0
     long_frac = long_ / total if total else 0
+    avg_burst = beats / total if total else 0
+    # a gap only counts as "big" if it is comparable to a whole burst's own data phase; a gap far
+    # smaller than one burst is intra-burst throttling, not an inter-burst arbitration stall.
+    big_gap = max_gap > max(200, 2 * avg_burst)
     print("  VERDICT:", end=" ")
     if util > 0.85:
-        print("bus is NEAR-SATURATED -- the stall is small; the schedule roughly holds.")
+        print("read bus NEAR-SATURATED -- reads are not the stall; the schedule roughly holds.")
     elif short_frac > 0.5:
-        print(f"SHORT BURSTS dominate ({100*short_frac:.0f}% are <=4 beats), util {100*util:.0f}%. "
+        print(f"SHORT READ BURSTS dominate ({100*short_frac:.0f}% are <=4 beats), util {100*util:.0f}%. "
               "The kernel is not requesting long bursts -> fix is kernel/pragma side (raise "
               "max_burst_len, or restructure so bursts coalesce).")
-    elif long_frac > 0.5 and util < 0.5:
-        print(f"LONG BURSTS but big gaps ({100*long_frac:.0f}% are 65-256 beats, util only "
-              f"{100*util:.0f}%, max gap {max_gap/FCLK_HZ*1e9:.0f} ns). The kernel asks for good "
-              "bursts but stalls between them -> DDR/interconnect latency, not burst length. Fix is "
-              "system side (outstanding/prefetch depth, or fuse to remove the DDR round-trip).")
+    elif long_frac > 0.5 and big_gap:
+        print(f"LONG READ BURSTS but a BIG inter-burst gap ({100*long_frac:.0f}% are 65-256 beats, "
+              f"max gap {max_gap/FCLK_HZ*1e9:.0f} ns >> one burst). The kernel stalls BETWEEN bursts "
+              "-> arbitration/outstanding-depth or a per-burst re-arm cost. Fix is system side.")
+    elif long_frac > 0.5:
+        print(f"LONG READ BURSTS, SMALL max gap ({max_gap/FCLK_HZ*1e9:.0f} ns << one "
+              f"{avg_burst:.0f}-beat burst), read util {100*util:.0f}%. Burst length is NOT the "
+              "problem and there is no single big stall -- the idle is DISTRIBUTED. Two things it can "
+              "be, and this read-only monitor cannot separate them: (a) time spent WRITING output "
+              "(invisible here), or (b) read DATA returning slower than 1 beat/cyc within each burst "
+              "(DDR/interconnect read throughput). Lever: DELETE the DDR round-trip (fuse the stage) "
+              "rather than tune burst length. A v2 monitor needs the write channel + intra-burst "
+              "RVALID-gap counting to split (a) from (b).")
     else:
-        print(f"MIXED -- util {100*util:.0f}%, short {100*short_frac:.0f}%, long {100*long_frac:.0f}%. "
-              "Read the histogram + max_gap directly; neither clean case dominates.")
+        print(f"MIXED -- util {100*util:.0f}%, short {100*short_frac:.0f}%, long {100*long_frac:.0f}%, "
+              f"max gap {max_gap/FCLK_HZ*1e9:.0f} ns. Read the histogram + max_gap directly.")
 
 
 def main():

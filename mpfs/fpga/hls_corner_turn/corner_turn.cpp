@@ -24,7 +24,9 @@
 #define CT_W 8192
 #endif
 #ifndef CT_T
-#define CT_T 32            // tile size (CT_H, CT_W multiples of CT_T)
+#define CT_T 128           // tile size (CT_H, CT_W multiples of CT_T). 32->128: 128B->512B AXI
+                           // bursts to amortize the DDR row-activation cost (corner-turn was
+                           // ~67 MB/s / row-activation bound; see SAR_PIPELINE_STATUS priority 1).
 #endif
 
 void corner_turn(uint32_t *src, uint32_t *dst) {

@@ -31,7 +31,7 @@ path at run time. This is the shipping configuration, proven end-to-end on silic
 |---|---|---:|
 | Scene resident on eMMC | `SARI` partition @ LBA `0x80000` (superblock + TOC + per-scene blob, 10 role segments) | one-time provision |
 | **LOAD** eMMC → DDR | `ELOD` mailbox cmd; segments scattered to fixed DDR role addresses + JOB rebuilt | **81.5 s** |
-| **PIPE** focus | `sar_form_image`, fabric CoreFFT + fused window/gather/detect | **48.19 s** (§5) |
+| **PIPE** focus | `sar_form_image`, fabric CoreFFT + fused window/gather/detect | **45.26 s** (§5) |
 | **SAVEOUT** DDR → eMMC | `ESAV`, commit-last ordering (crash-safe) | ~16 min |
 | Verify / inspect | `EVOU` full-image CRC; `EROI` crop + small JTAG dump | ~63 s / ~4 min |
 
@@ -212,21 +212,42 @@ re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
 **Current (measured 2026-07-20, eMMC boot-load path, `fft_mode=1` fabric CoreFFT verified at runtime):**
 
-CURRENT BASELINE — measured 2026-07-22, azimuth-gather-fused + detect-fused-unloader build:
+CURRENT BASELINE — measured 2026-07-23, azimuth-gather-fused + detect-fused + corner-turn CT_T=128 build:
 
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
-| Resample (2-pass keystone) | **13.46 s** | **27.9%** | fabric gather; azimuth pass now fused into FFT-1 feeder |
-| FFT-1 (azimuth transform; code "range FFT") | 15.97 s | 33.1% | CoreFFT (fabric); 2-D window **+ azimuth resample gather** fused in |
-| FFT-2 (range transform; code "azimuth FFT") | 11.08 s | 23.0% | CoreFFT + **fused detect** (fabric) |
-| Corner-turn | 7.68 s | 15.9% | fabric transpose |
+| Resample (2-pass keystone) | **11.98 s** | **26.5%** | range gather 5.78 s + internal corner-turn 6.20 s (azimuth pass fused into FFT-1 feeder) |
+| FFT-1 (azimuth transform; code "range FFT") | 15.98 s | 35.3% | CoreFFT (fabric); 2-D window **+ azimuth resample gather** fused in |
+| FFT-2 (range transform; code "azimuth FFT") | 11.10 s | 24.5% | CoreFFT + **fused detect** (fabric) |
+| Corner-turn (inter-FFT) | 6.20 s | 13.7% | fabric transpose, tiled TxT, CT_T=128 |
 | Window | **0.00 s** | 0% | fused into the FFT-1 feeder |
 | Detect | **0.00 s** | 0% | fused into the FFT-2 unloader |
-| **Total** | **48.19 s** | | `SAR_SEQ_OK` |
+| **Total** | **45.26 s** | | `SAR_SEQ_OK` |
 
 Both CPU stages are gone from the datapath, and the azimuth resample gather no longer round-trips
 DDR — it streams straight into the FFT-1 feeder. The whole pipeline is fabric except coefficient
 generation, which the MSS still computes per line.
+
+CORNER-TURN TILE SIZE — measured 2026-07-23. The tiled DDR→DDR transpose (`hls_corner_turn`,
+CT_H=CT_W=8192) was rebuilt with the tile `CT_T` 32 → 128, lengthening its AXI bursts 128 B → 512 B.
+The transpose kernel runs twice per pipeline (once inside resample, once between the FFTs), same core,
+so one change moves both:
+
+| | CT_T=32 | CT_T=128 | Δ |
+|---|---:|---:|---:|
+| each corner-turn | 7.68 s | 6.20 s | −1.48 s |
+| throughput (512 MB moved) | 67 MB/s | 82.6 MB/s | ×1.23 |
+| TOTAL (both instances) | 48.19 s | 45.26 s | **−2.93 s** |
+
+Output crop is **bit-identical** to the CT_T=32 output (the tile size is an exact-transpose parameter;
+verified bit-for-bit on silicon over the top-left 1,048,576 px). Timing MET multi-corner (setup +7.02,
+hold +0.031 ns @ OUT0 62.5 MHz); LSRAM 176 → 210 (the 16× larger tile). KEY FINDING: 4× longer bursts
+bought only 1.23× throughput, so the corner-turn is **latency/path-bound, not burst-length bound** —
+the residual cost is per-transaction interconnect+DDR latency and the serialized read-then-write per
+tile, which longer bursts only partly amortize. CT_T=256 (1 KB bursts, ~105 LSRAM blocks for the tile)
+would yield ~1 s more at rising timing/LSRAM cost — diminishing. The higher-value next lever is to
+DELETE the internal corner-turn's DDR round-trip by fusing the transpose into the FFT-1 feeder's tiled
+load (deletes ~6.2 s, not shaves it), the same fusion pattern used for window/detect/azimuth-gather.
 
 PRIORITY-2 AZIMUTH-GATHER FUSION — measured 2026-07-22, same bitstream and scene, `SAR_GATHERMODE`
 @ `0xB005911C` (0 = standalone azimuth resample, 1 = fused into the FFT-1 feeder). Isolated on the

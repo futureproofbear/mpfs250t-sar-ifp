@@ -2,7 +2,7 @@
   <rect width="1240" height="430" fill="#ffffff"/>
 
   <text x="620" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">SAR image-formation pipeline — as built on MPFS250T_ES</text>
-  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-22: 48.19 s total. Window, detect AND the azimuth resample gather are FUSED INTO FABRIC (inside the FFT feeder / unloader) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
+  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-23: 45.26 s total. Window, detect AND the azimuth resample gather are FUSED INTO FABRIC (inside the FFT feeder / unloader) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
 
   <!-- ============ input ============ -->
   <rect x="24" y="96" width="118" height="86" rx="6" fill="#f2f2f2" stroke="#888888" stroke-width="1.5" stroke-dasharray="5 3"/>
@@ -26,7 +26,7 @@
   <text x="259" y="130" text-anchor="middle" font-size="10.5" fill="#333333">keystone / polar-format</text>
   <text x="259" y="145" text-anchor="middle" font-size="10.5" fill="#333333">range gather + transpose</text>
   <text x="259" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric gather kernel</text>
-  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">13.46 s</text>
+  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">11.98 s</text>
 
   <!-- 2 window -->
   <rect x="366" y="88" width="130" height="102" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8" stroke-dasharray="5 3"/>
@@ -51,7 +51,7 @@
   <text x="759" y="130" text-anchor="middle" font-size="10.5" fill="#333333">global transpose</text>
   <text x="759" y="145" text-anchor="middle" font-size="10.5" fill="#333333">tiled via LSRAM</text>
   <text x="759" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel</text>
-  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">7.68 s</text>
+  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">6.20 s</text>
 
   <!-- 5 azimuth fft -->
   <rect x="852" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>

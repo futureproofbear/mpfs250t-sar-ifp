@@ -73,13 +73,23 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-**48.19 s** is the current baseline (2026-07-22, azimuth-gather-fused + detect-fused). Window, detect,
-and the azimuth resample gather are all fused into fabric; no CPU stage remains in the datapath. The
-FFT-1 feeder (15.97 s) is now the largest stage; the range gather (13.46 s "resample") is second.
-Per-stage breakdown: [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5. FFT axis naming:
+**45.26 s** is the current baseline (2026-07-23, azimuth-gather-fused + detect-fused + corner-turn
+CT_T=128). Window, detect, and the azimuth resample gather are all fused into fabric; no CPU stage
+remains in the datapath. The FFT-1 feeder (15.98 s) is the largest stage; the range gather + internal
+corner-turn (11.98 s "resample") is second. Per-stage breakdown:
+[`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5. FFT axis naming:
 [`../SAR_DESIGN.md`](../SAR_DESIGN.md) §2.3 (the code labels are swapped vs the true axis).
 
 **Priority order (set 2026-07-22):**
+
+**1a. ✅ DONE (2026-07-23) — Corner-turn tile size CT_T 32 → 128.** Lengthened the transpose's AXI
+bursts 128 B → 512 B; each of the two corner-turns 7.68 → 6.20 s, **48.19 → 45.26 s**. Bit-identical
+output, timing MET. But 4× burst gave only 1.23× throughput → the corner-turn is **latency-bound, not
+burst-bound**; CT_T=256 is marginal. The real corner-turn lever is fusion (1b below), not more tiling.
+
+**1b. NEXT — Fuse the internal corner-turn into the FFT-1 feeder.** Delete its DDR round-trip (~6.2 s)
+by doing the transpose inside the feeder's tiled LSRAM load, the same pattern as window/detect/azimuth.
+Higher ceiling than tiling; RTL surgery on the feeder, value-gated by A/B. See §5 and the Step-2 notes.
 
 **2. ✅ DONE (2026-07-22) — Fuse the AZIMUTH RESAMPLE into FFT-1 (the azimuth transform).** The
 azimuth gather was folded into the same feeder that already applies the 2-D window (`fft_feeder_v.v`,

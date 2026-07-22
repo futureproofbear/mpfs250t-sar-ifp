@@ -46,6 +46,9 @@ void sar_fft_hold(void);
 /* Debug: run ONLY the range-FFT pass on SCRATCH (skip resample) for fast chunk-boundary
  * iteration. Returns fft_pass status (0 OK, 1 feeder stall, 2 DMA stall). */
 int sar_fft_pass_test(void);
+/* H4 concurrency micro-benchmark: times corner-turn alone / FFT alone / both concurrent
+ * to a JTAG-readable record @0xB005E400. Firmware-only; decides FIC_0 overlap-vs-serialize. */
+int fft_h4_bench(uint32_t spins);
 int sar_fabric_scale_test(void);
 
 #endif /* SAR_SEQUENCER_H_ */

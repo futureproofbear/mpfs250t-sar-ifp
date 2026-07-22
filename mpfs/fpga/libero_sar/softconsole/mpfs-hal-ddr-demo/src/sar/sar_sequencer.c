@@ -317,6 +317,67 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
     return 0;
 }
 
+/* ---- H4 CONCURRENCY MICRO-BENCHMARK (firmware-only; current bitstream) ------------------------
+ * Measures whether two fabric masters overlap or SERIALIZE on the single shared FIC_0 write channel
+ * -- the H4 hazard the architectural-critic flagged, unmeasurable in cosim, that gates BOTH the
+ * corner-turn/FFT overlap (Step 2) AND priority-3 write-parallelism.
+ *
+ * The scenario mirrors Step 2 (CT#2 SCRATCH->SIG concurrent with FFT-2 SIG->OUT) minus the strip
+ * handshake -- for TIMING only, so the FFT reads whatever SIG the CT is mid-writing (garbage output
+ * is expected and irrelevant; the wall-clock is the measurement). Three timings to a JTAG-readable
+ * record @0xB005E400:
+ *   t_ct   = corner-turn alone (SCRATCH->SIG, ~6.2 s expected)
+ *   t_fft  = one FFT pass alone (SIG->OUT, det, ~11 s expected)
+ *   t_conc = CT armed free-running, THEN the FFT pass, THEN wait CT  (both active concurrently)
+ * gain = t_ct + t_fft - t_conc.  gain ~= t_ct  => FULL overlap (H4 benign, build Step 2).
+ *                                 gain ~= 0     => SERIALIZED     (H4 bites, FIC_1 is the fix).
+ * A ficmon snapshot (slot 0) captures the READ-channel bus behaviour during the concurrent run. */
+#define SAR_H4_REC_ADDR  0xB005E400u
+int fft_h4_bench(uint32_t spins)
+{
+    volatile uint32_t *rec = (volatile uint32_t *)(uintptr_t)SAR_H4_REC_ADDR;
+    for (int i = 0; i < 16; i++) rec[i] = 0u;
+    rec[0] = 0x48344253u;                         /* 'H4B\0' magic */
+    uint64_t t0, t1;
+
+    /* 1) corner-turn ALONE: SCRATCH -> SIG */
+    sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    t0 = readmtime();
+    sar_k_start(K_CORNER_TURN);
+    if (!sar_k_wait(K_CORNER_TURN, spins)) { rec[15] = 0xDEAD0001u; goto pub; }
+    t1 = readmtime();
+    rec[1] = (uint32_t)(t1 - t0);                 /* t_ct  (us) */
+
+    /* 2) FFT pass ALONE: SIG -> OUT (det), decoupled src/dst (no in-place stall) */
+    t0 = readmtime();
+    (void)fft_fabric_pass(BUF_SIG, BUF_OUT, spins, 0, 1);
+    t1 = readmtime();
+    rec[2] = (uint32_t)(t1 - t0);                 /* t_fft (us) */
+
+    /* 3) CONCURRENT: arm CT free-running, run the FFT pass while it writes SIG, then join CT. */
+    sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    ficmon_clear();
+    t0 = readmtime();
+    sar_k_start(K_CORNER_TURN);                   /* CT free-runs on FIC_0 ... */
+    (void)fft_fabric_pass(BUF_SIG, BUF_OUT, spins, 0, 1);  /* ... while the FFT hammers FIC_0 too */
+    if (!sar_k_wait(K_CORNER_TURN, spins)) rec[15] = 0xDEAD0002u;   /* join CT (should be long done) */
+    t1 = readmtime();
+    ficmon_snapshot(0u, 9u, SAR_ROW_BEATS);       /* concurrent-run bus behaviour -> 0xB0059240 */
+    rec[3] = (uint32_t)(t1 - t0);                 /* t_conc (us) */
+
+    {
+        int32_t gain = (int32_t)(rec[1] + rec[2]) - (int32_t)rec[3];
+        rec[4] = (uint32_t)gain;                                   /* overlap_gain (us) */
+        rec[5] = rec[1] ? (uint32_t)(((int64_t)gain * 100) / (int32_t)rec[1]) : 0u;  /* % of t_ct hidden */
+    }
+pub:
+    __asm volatile ("fence rw, rw");
+    flush_range_to_ddr(SAR_H4_REC_ADDR, 64u);
+    return 0;
+}
+
 /* FUSED FFT-1 with per-row azimuth-resample GATHER (SAR_GATHERMODE=1). Mirrors fft_fabric_pass
  * exactly EXCEPT each row's feeder is armed in gather mode: the feeder reads M source samples from
  * `src` row j, gathers to Mp with this row's idx/wq, windows, and streams to CoreFFT -- so the

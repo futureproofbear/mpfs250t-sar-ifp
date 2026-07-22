@@ -63,6 +63,8 @@
                                         /*          sar_seq_status_t (0=OK, else failing stage)  */
 #define MBX_CMD_FFTHOLD  0x46484C44u    /* 'FHLD' : arm DMA + start FFT feeder, do NOT wait --   */
                                         /*          holds the stream stall live for SmartDebug   */
+#define MBX_CMD_H4BENCH  0x48344254u    /* 'H4BT' : H4 concurrency micro-benchmark (CT+FFT on    */
+                                        /*          shared FIC_0); result record @0xB005E400.    */
 #define MBX_CMD_EMMC     0x454D4D43u    /* 'EMMC' : Milestone-1 eMMC write/read/CRC round trip.  */
                                         /*          .base = scratch LBA (0 = default OUT region); */
                                         /*          .result = verdict (0=PASS); details latched   */
@@ -472,6 +474,16 @@ void u54_1(void)
             __asm volatile ("fence rw, rw");
         } else if (mbx->cmd == 0x46544553u) {   /* 'FTES': run fft_pass on SCRATCH (keeps symbol; also GDB-callable) */
             mbx->result = (uint32_t)sar_fft_pass_test();
+            __asm volatile ("fence rw, rw");
+            mbx->status = MBX_DONE_MAGIC;
+            mbx->seq    = mbx->seq + 1u;
+            __asm volatile ("fence rw, rw");
+            mbx->cmd    = 0u;
+            __asm volatile ("fence rw, rw");
+        } else if (mbx->cmd == MBX_CMD_H4BENCH) {   /* 'H4BT': FIC_0 concurrency micro-benchmark */
+            flush_l2_cache(1u);                     /* fabric reads the JTAG/ELOD-loaded DDR, not L2 */
+            __asm volatile ("fence rw, rw");
+            mbx->result = (uint32_t)fft_h4_bench(mbx->len);   /* .len = spin budget (0 = default) */
             __asm volatile ("fence rw, rw");
             mbx->status = MBX_DONE_MAGIC;
             mbx->seq    = mbx->seq + 1u;

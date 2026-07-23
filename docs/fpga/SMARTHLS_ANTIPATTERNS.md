@@ -155,3 +155,48 @@ id: partition-pragma-placement
 severity: warn
 message: `memory partition` must immediately precede the variable's DECLARATION; elsewhere SmartHLS warns "[HLS pragma] ignored", drops it and exits 0. Verify the achieved II in the pipelining report.
 -->
+
+## 7. Outer-loop bound made a RUNTIME argument collapses read overlap  `[block-class, manual]`
+
+Confirmed 2026-07-23 on `hls_corner_turn/corner_turn.cpp` while adding strip-transpose support
+(two new scalar args `c_base`/`c_count` so the kernel could transpose a range-bin band instead of
+only the whole frame, for a corner-turn/FFT overlap design).
+
+The tiled DDR<->DDR transpose has two nested nests: `for (r0=0; r0<CT_H; r0+=CT_T)` outer, then
+`for (c0=cb; c0<ce; c0+=CT_T)` — originally `c0<CT_W`, a **compile-time constant**. Changing only
+the bound (`ce = c_count==0 ? CT_W : c_base+c_count`, still equal to `CT_W` for the full-frame
+case) is enough to regress the kernel **~3.9x on silicon** (6.20 s -> 24.36 s, reproducible to
+within microseconds across two runs) — with the *inner* pipelined loops still reporting `II=1` in
+the pipelining report (Gate 1 does not catch this; the degradation is at the outer-loop/tile-
+boundary level, invisible to the inner-loop II check).
+
+FIC_0 monitor (`sar_fic0s_mon`) confirmed the mechanism at the bus level during the CT-alone run:
+read-channel **utilization 6.4%** (busy 1.63 s of 25.3 s elapsed, vs a healthy pipelined kernel
+near-saturated), AR burst count **exactly 2x** what a clean one-burst-per-row schedule would
+produce (every row's read appears to split into two shorter transactions), and a single
+**MAX_GAP ~5.19 ms** stall. The write side was *already* single-beat/unbursted in the fast
+CT_T=128 build (so that isn't the delta) — the regression is specific to making the READ-issue
+loop bound a runtime value, which evidently costs the scheduler its ability to overlap read-issue
+of tile N+1 with the write-drain of tile N across the outer-loop boundary.
+
+**This was caught by silicon A/B, not by any board-free gate** — `shls sw`/`shls hw` both passed,
+`hls_gate.sh` passed (II=1 both loops), and the timing gate passed (setup/hold MET) because P&R has
+no opinion on AXI transaction scheduling. Only a same-scene A/B against the last known-good
+bitstream (mandated by the batch-confidence protocol) surfaced it, and only the FIC_0 monitor
+localised it to read-issue overlap rather than a burst-length or write-side regression.
+
+Guard: NEVER change a `axi_initiator`-facing loop's bound from a compile-time constant to a
+runtime-computed value without an A/B against the constant-bound baseline on the SAME bitstream
+family, even when `c_count==0`/full-range makes the two mathematically equivalent. Prefer one of:
+(a) keep the loop bound a compile-time constant and gate the tile BODY with a cheap runtime `if`
+(untested here — may hit the same scheduling loss, verify before relying on it); (b) synthesize
+N separate compile-time-bounded kernel instances for a fixed strip count instead of one
+dynamically-bounded kernel; (c) the explicit `axi_m_read_req`/`write_req` interface (hand-managed
+handshake, not schedule-dependent). Do not ship a dynamically-bounded `axi_initiator` loop kernel
+on schedule/timing gates alone.
+
+<!-- LINT
+id: axi-initiator-runtime-loop-bound
+severity: warn
+message: Making an axi_initiator kernel's outer loop bound a RUNTIME value (even when equal to the old compile-time constant) can collapse read-issue overlap ~4x on silicon while II/timing gates stay green. A/B against the constant-bound baseline before shipping.
+-->

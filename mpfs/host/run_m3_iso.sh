@@ -51,11 +51,6 @@ set {unsigned int}0xB0059118 = $DETMODE"
   GATHMODE="${GATHMODE:-0}"
   FFTSET="$FFTSET
 set {unsigned int}0xB005911C = $GATHMODE"
-  # SAR_OVERLAPMODE @0xB0059130: 0 = sequential corner-turn+FFT-2 (default), 1 = Step-2 overlap
-  # (CT#2 strip-pipelined concurrently with FFT-2). Requires GATHMODE=1 + DETMODE=3; ignored otherwise.
-  OVLMODE="${OVLMODE:-0}"
-  FFTSET="$FFTSET
-set {unsigned int}0xB0059130 = $OVLMODE"
   FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u (1=azimuth resample fused into FFT-1)\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C'
 fi
 

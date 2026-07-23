@@ -123,18 +123,43 @@ now also latency-bound per 1a — cannot be overlap-hidden the same way as 1b, s
 diagnostic step is a v2 monitor that adds the WRITE channel + intra-burst RVALID-gap counting;
 whichever it shows (write-bound → a fusion; read-throttled → DDR/outstanding depth) decides the fix.
 
-**3. Parallel fabric instances for resample and the FFT chains.** Rows are independent and FIC_0 has
-~10× bandwidth headroom. This was blocked by `sar_axi_idconv` mis-routing concurrent masters'
-responses; that is FIXED (2026-07-22, forwards `master_number`; silicon-confirmed inert with the
-current sequential firmware, so it is ready for concurrent use). Needs per-instance instantiation +
-wiring + a build; each added chain splits nothing because the bus is idle ~76% of the time.
+**4. Increase the clock frequency — the recommended NEXT lever (biggest cheap win, lowest risk).**
+CLK is the binding constraint (~110 MHz *estimated* ceiling; SLOWCLK/CoreFFT has +113 ns slack and is
+not the limiter). The register slices already broke the interconnect combinational critical path and
+have closed timing at 62.5 MHz across THREE builds this session (CT_T=128, the reverted strip kernel,
+Option A), so the prerequisite is proven. CLK 62.5 → ~110 raises SLOWCLK 7.8 → 13.75 MHz (still under
+CoreFFT's ~10–20 MHz in-place ceiling), giving **~1.76× on the ~23 s of SLOWCLK-bound FFT compute**
+(~88 % of each FFT stage) → saves ~10 s, **40.91 → ~28–30 s**. No new logic, output bit-identical,
+timing-gated. Do it as a SWEEP (build 80/100/110, find where timing stops closing) — "110" is an
+estimate. The latency-bound stages (corner-turns, gather AXI stall) scale little with fabric clock
+(different/DDR clock domain), so most of the win is the FFT.
 
-**4. Increase the clock frequency.** CLK is the binding constraint (~110 MHz ceiling; SLOWCLK/CoreFFT
-has +113 ns slack and is not the limiter). The 2026-07-22 register slices already broke the
-interconnect combinational critical path (worst OUT0 path moved into a slice register, +7.024 ns), so
-the prerequisite is in place. A CLK bump raises SLOWCLK with it (tied CLK/8) and speeds both FFTs;
-needs a CCC reconfig + a fresh timing-gate pass. Lowest priority because it is the most uncertain and
-the register-slice groundwork must be proven on silicon first.
+**3. Parallel fabric — a WIDE PER-STAGE pipeline, not whole-chain replication.** Literal whole-chain
+parallelism hits two walls: (a) the corner-turn is a GLOBAL transpose, so one frame cannot be split
+across two independent chains through it; (b) inter-frame pipelining (frame N+1 while N finishes) is
+blocked by DDR capacity (SIG+SCRATCH+OUT already use ~640 MB of 1 GB). The achievable form is N
+instances of the ROW-INDEPENDENT stages, syncing at the single shared corner-turns. Two sub-levers:
+  - **3a — range-gather N=2 (cheap, do alongside clock).** 5.78 → ~3.4 s (~2.4 s saved). Reuse a dead
+    DIC slot (WIN/DET, both fused away); `sar_axi_idconv` fix (2026-07-22, silicon-inert) routes it;
+    +32 LSRAM. Shared FIC_0 first — gate with a two-`RES` H4BT microbench for the identical-pair
+    contention; FIC_1 only if the v2 monitor shows CHANNEL-level (not DDR-row-level) contention.
+  - **3b — parallel FFT via a 2nd CoreFFT chain (expensive; the big FFT lever).** ~2× on FFT compute,
+    but STRICTLY DOMINATED by the clock lever on value/cost for the same target — only worth it to
+    STACK on clock (1.76 × 2 ≈ 3.5× on FFT). Costs a 2nd CoreFFT + gearbox + feeder + unloader
+    (~50–60 LSRAM → ~270/812; DSP trivial) and creates 4 concurrent streaming masters — **this is the
+    real justification for FIC_1** (split 2+2 across two ports; NOT a bandwidth lever — the data plane
+    is at ~17 % of the FIC_0 ceiling, see `multific-step4-foundation`). Post-clock FFT ~13 → ~7 s.
+
+**Composition + recommended sequence:** clock (28–30 s) → +range-gather N=2 (26–28 s) → +parallel-FFT
++FIC_1 (20–22 s). Clock and parallel-FFT MULTIPLY (same target); range-gather is additive. Floor after
+all of it ≈ the two corner-turns (~12 s of DDR-latency-bound transpose that none of clock/parallel/
+overlap removes — the internal one can't even be overlap-hidden, §2.3a). Breaking below ~20 s needs a
+fundamentally different transpose (CoreAXI4DMA scatter, or a layout eliminating one transpose —
+research, not a known win). FIC study detail: the `H4BT` concurrency microbench (81 % two-master
+overlap, `SAR_ARCHITECTURE_REPORT.md` §5) and the FIC_1 MSS-regen groundwork in
+`LIBERO_HEADLESS_PLAYBOOK.md` §3.2 (de-risked: `pfsoc_mss` regen with `FIC_1_AXI4_TARGET_USED`
+enabled works headless; a prior measurement found FIC_1 is a NO-OP as a *bandwidth* lever — its only
+justification is splitting concurrent masters, per 3b).
 
 **Historical note:** an earlier revision of this roadmap led with "multi-hart CPU detect" as the top
 lever. Detect is now fused into fabric (0.00 s), so that lever is gone.

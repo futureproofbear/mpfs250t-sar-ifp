@@ -12,12 +12,15 @@ The full PFA (polar-format) SAR pipeline runs on the PolarFire SoC MPFS250T_ES (
 JTAG/FlashPro6) and produces the correct focused image, autonomously from the board's own eMMC:
 
 - Scene loads eMMC → DDR in **81.5 s** (`sig_crc 0x89fa12dc` verified), retiring the ~3 h JTAG input load.
-- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **48.19 s** (2026-07-22,
-  azimuth-gather-fused + detect-fused build, `SAR_GATHERMODE=1` + `DETMODE=3`), with `fft_mode=1`
-  (fabric CoreFFT) confirmed at runtime. The azimuth resample gather is now fused into the FFT-1
-  feeder (priority 2): resample 27.19 → 13.46 s, and the fused output crop is **bit-identical** to the
-  standalone-resample output over all 1,048,576 pixels — see `SAR_ARCHITECTURE_REPORT.md` §5. Earlier
-  window-fused-only build ran 79.79 s (crc `0xd596c9eb`); detect fusion took it to 58.12 s.
+- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **40.91 s** (2026-07-23,
+  azimuth-gather-fused + detect-fused + corner-turn/FFT-2 **overlap** build, `SAR_GATHERMODE=1` +
+  `DETMODE=3` + `SAR_OVERLAPMODE=1`), with `fft_mode=1` (fabric CoreFFT) confirmed at runtime. The
+  azimuth resample gather is fused into the FFT-1 feeder (priority 2): resample 27.19 → 13.46 s.
+  The inter-FFT corner-turn now runs CONCURRENTLY with FFT-2 (Step 2): 45.26 → 40.91 s, ~75% of the
+  corner-turn hidden. Output crop **bit-identical** across every fusion/overlap mode over all
+  1,048,576 pixels — see `SAR_ARCHITECTURE_REPORT.md` §5 and `../SAR_DESIGN.md` §2.3a for the full
+  mechanism. Earlier window-fused-only build ran 79.79 s (crc `0xd596c9eb`); detect fusion took it to
+  58.12 s; azimuth-gather fusion + CT_T=128 took it to 45.26 s.
 - Correlation vs golden reference = **0.9923** (Centerfield decimated 705×540 scene, band rows
   896:1152, 1.05 M unsaturated pixels; a point-target crop hits 0.9962). The board image matches
   `golden_small_mag.npy` in the **`T.rot180`** orientation (`board == golden.T[::-1,::-1]`) — exactly
@@ -73,10 +76,11 @@ value-equals the CPU FFT at corr 0.9999.
 
 ## Latency roadmap
 
-**45.26 s** is the current baseline (2026-07-23, azimuth-gather-fused + detect-fused + corner-turn
-CT_T=128). Window, detect, and the azimuth resample gather are all fused into fabric; no CPU stage
-remains in the datapath. The FFT-1 feeder (15.98 s) is the largest stage; the range gather + internal
-corner-turn (11.98 s "resample") is second. Per-stage breakdown:
+**40.91 s** is the current baseline (2026-07-23, azimuth-gather-fused + detect-fused + corner-turn
+CT_T=128 + corner-turn/FFT-2 overlap). Window, detect, and the azimuth resample gather are all fused
+into fabric; no CPU stage remains in the datapath. The FFT-1 feeder (15.98 s) is the largest single
+stage; the merged corner-turn+FFT-2 (12.90 s) is second; the range gather + internal corner-turn
+(11.98 s "resample") is third. Per-stage breakdown:
 [`SAR_ARCHITECTURE_REPORT.md`](SAR_ARCHITECTURE_REPORT.md) §5. FFT axis naming:
 [`../SAR_DESIGN.md`](../SAR_DESIGN.md) §2.3 (the code labels are swapped vs the true axis).
 
@@ -85,11 +89,19 @@ corner-turn (11.98 s "resample") is second. Per-stage breakdown:
 **1a. ✅ DONE (2026-07-23) — Corner-turn tile size CT_T 32 → 128.** Lengthened the transpose's AXI
 bursts 128 B → 512 B; each of the two corner-turns 7.68 → 6.20 s, **48.19 → 45.26 s**. Bit-identical
 output, timing MET. But 4× burst gave only 1.23× throughput → the corner-turn is **latency-bound, not
-burst-bound**; CT_T=256 is marginal. The real corner-turn lever is fusion (1b below), not more tiling.
+burst-bound**; CT_T=256 is marginal.
 
-**1b. NEXT — Fuse the internal corner-turn into the FFT-1 feeder.** Delete its DDR round-trip (~6.2 s)
-by doing the transpose inside the feeder's tiled LSRAM load, the same pattern as window/detect/azimuth.
-Higher ceiling than tiling; RTL surgery on the feeder, value-gated by A/B. See §5 and the Step-2 notes.
+**1b. ✅ DONE (2026-07-23) — Overlap the inter-FFT corner-turn with FFT-2 (Step 2).** Fusing the
+transpose into the FFT-1 feeder's tiled load (this section's original 1b) turned out to be
+STRUCTURALLY INFEASIBLE — a transpose's read side needs its entire source matrix to already exist,
+so it can never be fed by an upstream producer still writing that source (see `../SAR_DESIGN.md`
+§2.3a for the general rule and why it rules out both remaining transpose boundaries). What DOES work
+is overlapping a transpose's OUTPUT against a downstream row-consumer: the inter-FFT corner-turn now
+runs strip-by-strip, concurrently with FFT-2 consuming the previous strip (`SAR_OVERLAPMODE` @
+`0xB0059130`). Measured on silicon: merged corner-turn+FFT-2 17.57 → 12.90 s, **45.26 → 40.91 s
+(−9.6%)**, bit-identical crop. Full mechanism, the SmartHLS runtime-loop-bound regression hit and
+fixed along the way (`docs/fpga/SMARTHLS_ANTIPATTERNS.md` #7), and why the range-gather/internal-CT
+and FFT-1/CT boundaries CANNOT use the same trick: `../SAR_DESIGN.md` §2.3a.
 
 **2. ✅ DONE (2026-07-22) — Fuse the AZIMUTH RESAMPLE into FFT-1 (the azimuth transform).** The
 azimuth gather was folded into the same feeder that already applies the 2-D window (`fft_feeder_v.v`,
@@ -106,10 +118,10 @@ AXI stall on a correct schedule (`axi_ii_lie`). The FIC_0 monitor (2026-07-22 bi
 is NOT the lever. BUT the monitor taps only the READ channel, so it cannot tell whether the
 distributed idle is WRITE time (invisible) or intra-burst read throttling — opposite fixes, and still
 unresolved. Priority 2 (above) already deleted the azimuth gather's DDR round-trip; what remains under
-this priority is the pass-1 RANGE gather (13.46 s "resample") + the internal corner-turn, still a full
-DDR round-trip and still wanting a throughput answer. The right next diagnostic step is a v2 monitor
-that adds the WRITE channel + intra-burst RVALID-gap counting; whichever it shows (write-bound →
-extend the fusion; read-throttled → DDR/outstanding depth) decides the range-gather fix.
+this priority is the pass-1 RANGE gather (5.78 s within "resample") + the internal corner-turn (6.20 s,
+now also latency-bound per 1a — cannot be overlap-hidden the same way as 1b, see §2.3a). The right next
+diagnostic step is a v2 monitor that adds the WRITE channel + intra-burst RVALID-gap counting;
+whichever it shows (write-bound → a fusion; read-throttled → DDR/outstanding depth) decides the fix.
 
 **3. Parallel fabric instances for resample and the FFT chains.** Rows are independent and FIC_0 has
 ~10× bandwidth headroom. This was blocked by `sar_axi_idconv` mis-routing concurrent masters'

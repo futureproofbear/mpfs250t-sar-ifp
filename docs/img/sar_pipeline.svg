@@ -1,8 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 430" width="1240" height="430" font-family="Segoe UI, Helvetica, Arial, sans-serif">
-  <rect width="1240" height="430" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1240 446" width="1240" height="446" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+  <rect width="1240" height="446" fill="#ffffff"/>
 
   <text x="620" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">SAR image-formation pipeline — as built on MPFS250T_ES</text>
-  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-23: 45.26 s total. Window, detect AND the azimuth resample gather are FUSED INTO FABRIC (inside the FFT feeder / unloader) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
+  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-23: 40.91 s total. Window, detect AND the azimuth resample gather are FUSED INTO FABRIC; the corner-turn below runs CONCURRENTLY with FFT-2 (Step 2) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
+
+  <!-- overlap indicator: corner-turn (box 4) runs CONCURRENTLY with FFT-2 (box 5), Step 2 -->
+  <rect x="690" y="76" width="308" height="9" rx="3" fill="none" stroke="#a03535" stroke-width="1.3" stroke-dasharray="4 2"/>
+  <text x="844" y="83" text-anchor="middle" font-size="8.5" fill="#a03535">CONCURRENT (Step 2) -- merged 12.90 s, was 17.57 s sequential</text>
 
   <!-- ============ input ============ -->
   <rect x="24" y="96" width="118" height="86" rx="6" fill="#f2f2f2" stroke="#888888" stroke-width="1.5" stroke-dasharray="5 3"/>
@@ -50,8 +54,8 @@
   <text x="759" y="112" text-anchor="middle" font-size="14" font-weight="600" fill="#1a1a1a">Corner-turn</text>
   <text x="759" y="130" text-anchor="middle" font-size="10.5" fill="#333333">global transpose</text>
   <text x="759" y="145" text-anchor="middle" font-size="10.5" fill="#333333">tiled via LSRAM</text>
-  <text x="759" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel</text>
-  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">6.20 s</text>
+  <text x="759" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel, strip-pipelined</text>
+  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">6.20 s*</text>
 
   <!-- 5 azimuth fft -->
   <rect x="852" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
@@ -59,7 +63,7 @@
   <text x="925" y="126" text-anchor="middle" font-size="9.5" fill="#333333">8192-pt · BFP · detect fused</text>
   <text x="925" y="139" text-anchor="middle" font-size="9" fill="#888888">code name: "azimuth FFT" (K_FFT2)</text>
   <text x="925" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
-  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">11.08 s</text>
+  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.90 s*</text>
 
   <!-- 6 detect -->
   <rect x="1022" y="88" width="130" height="102" rx="6" stroke-dasharray="5 3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
@@ -131,4 +135,5 @@
 
   <text x="24" y="404" font-size="11" fill="#777777">Times are wall-clock per stage from sar_stage_ts[0..6] (MTIME, 1 us/tick), full deci-1 Centerfield scene, fabric at 62.5 MHz. Re-read with mpfs/host/run_stage_timing.sh</text>
   <text x="24" y="421" font-size="11" fill="#777777">Numeric source of truth: docs/fpga/SAR_ARCHITECTURE_REPORT.md section 5. If this diagram disagrees with it, the report is right and this diagram is stale.</text>
+  <text x="24" y="438" font-size="11" fill="#a03535">* Corner-turn and FFT-2 run CONCURRENTLY (SAR_OVERLAPMODE=1, SAR_DESIGN.md sec2.3a): 6.20 s is corner-turn's own-slot time in SEQUENTIAL mode; 12.90 s is the MERGED wall-clock of both boxes together in OVERLAP mode (was 17.57 s sequential).</text>
 </svg>

@@ -186,6 +186,92 @@ azimuth resample pass with no corner-turn between them**, the azimuth resample c
 FFT-1's feeder exactly as the window already was — see the roadmap in
 [`fpga/SAR_PIPELINE_STATUS.md`](fpga/SAR_PIPELINE_STATUS.md).
 
+### 2.3a Corner-turn / FFT-2 overlap (Step 2, 2026-07-23)
+
+The paragraph above says a global transpose "cannot be fused into a neighbouring stage" — true, but
+it turns out it CAN be **overlapped** with one, on this silicon, without fusing anything. This
+section is that mechanism: what makes it safe, why it only works at this one point in the pipeline
+and nowhere else, the SmartHLS pitfall hit and fixed along the way, and the measured result.
+
+**The idea.** The corner-turn between FFT-1 and FFT-2 (`SCRATCH→SIG`, 6.20 s) and FFT-2 itself
+(`SIG→OUT`, ~11.1 s) are two independent fabric masters on the same FIC_0 bus. If they run
+*concurrently* instead of strictly sequentially, the corner-turn's wall-clock time can hide under
+FFT-2's — for free, with no new silicon logic beyond re-arming the existing kernels differently.
+
+**Why THIS pair, and not corner-turn + FFT-1 or resample's gather + its own corner-turn.** The
+transpose's read side is the constraint: to write destination row `r`, `corner_turn` must read
+source column `r` across the *entire* source height (`for r0 in 0..CT_H: read src[(r0+i)*W + c0]`).
+So a transpose can never start any output until its ENTIRE source matrix already exists — there is
+no way to strip-pipeline a transpose against an *upstream* producer that is still writing that
+source. That rules out overlapping the range-gather with resample's own internal corner-turn
+(gather is still writing SCRATCH), and it rules out overlapping FFT-1 with the corner-turn that
+follows it (FFT-1 is still writing SCRATCH). What a transpose CAN do is stream its OUTPUT
+progressively to a *downstream consumer* — each `(c_base, c_count)` strip call, once armed and run
+to completion, has fully written its destination rows (the kernel's own `r0` loop already iterated
+the whole source height internally before returning), so a consumer reading those specific rows is
+safe the moment that one strip call's DONE fires. FFT-2 is exactly such a consumer: it reads SIG
+row-by-row, and the corner-turn's `dst` rows are exactly SIG rows. This overlap is a *one-time*
+opportunity created by DDR buffer layout (SCRATCH read-only during this phase, OUT — thanks to
+fused detect — a third buffer distinct from both SIG and SCRATCH so FFT-2's writes never alias
+anything the corner-turn still needs); it does not generalise to the other two transpose boundaries
+in this pipeline.
+
+**Correctness — the non-coherent-FIC0 hazard the design has to defeat.** Two independent fabric
+masters have no ordering guarantee between one master's DDR write and another master's later read —
+AXI orders transactions on one interface, not across two. A design that let the corner-turn
+free-run while polling a DDR-resident progress counter (the first thing tried) fails for two
+reasons: (1) nothing orders the feeder's read of a "ready" strip after the corner-turn's write of
+that strip actually reaching DDR — a write can be accepted into the interconnect before it is
+globally observable; (2) the counter itself would need the same ordering guarantee to be trustworthy,
+and a non-coherent DDR-resident counter polled through the CPU's L2 has no fresher guarantee than
+the data it is meant to signal. The fix actually shipped is **strip-granular kernel calls, each run
+to hardware DONE**: `fft2_ct_overlap()` (`sar_sequencer.c`) arms corner-turn strip `s` (`c_base =
+s·S`, `c_count = S`, `S = 1024` → 8 strips of `CT_T`-aligned width), lets it free-run, processes
+FFT-2 rows `[(s-1)·S, s·S)` from strip `s-1` (already known-complete from the *previous* iteration's
+`sar_k_wait`), then explicitly waits for strip `s`'s kernel-DONE before treating it as ready. Kernel
+DONE is the same completion primitive the fully-sequential pipeline already relies on for every
+other stage boundary — so correctness follows by the same argument as the rest of the pipeline, not
+by a new, unproven ordering assumption. A prologue processes strip 0's corner-turn alone before the
+loop starts; an epilogue processes the last strip's FFT-2 rows after the loop ends. PASS-2 BFP
+renormalize stays a single global sweep at the very end (unchanged from the sequential path — it
+needs every row's SCALE_EXP, which isn't known until the last FFT-2 row completes anyway).
+
+**The SmartHLS pitfall (read before touching a strip-argument kernel again).** The first
+`corner_turn` implementation of this idea made the kernel's outer `c0` loop bound a *runtime* value
+(`for c0 = cb; c0 < ce; ...` where `ce` came from the new `c_count` argument) — mathematically
+identical to the old `c0 < CT_W` for the full-frame case, and every board-free gate agreed: `shls
+sw`/`hw` passed, inner-loop II stayed 1, post-P&R timing was clean. It regressed the kernel **3.9x
+on silicon** anyway (6.20 s → 24.36 s), confirmed via the FIC_0 monitor to be a collapse of
+read-issue overlap across the tile boundary (read-channel utilization fell to 6.4%, AR burst count
+doubled, one ~5 ms stall) — invisible to every gate because none of them model AXI transaction
+scheduling across an outer-loop boundary. The fix that shipped keeps **both outer loop bounds as
+the original compile-time constants** (`r0 < CT_H`, `c0 < CT_W` — never `ce`) and gates the tile
+BODY with a runtime skip guard, `if (c0 >= cb && c0 < ce) { ...unchanged tile transfer... }`. The
+loop's trip count is therefore identical in every case to the known-good non-strip kernel; only
+whether a given iteration's body executes a transaction is data-dependent. That preserved the fast
+kernel's scheduling exactly — verified on silicon at 6.20 s, bit-identical to the pre-strip baseline.
+Full writeup, including the FIC_0 monitor numbers: `docs/fpga/SMARTHLS_ANTIPATTERNS.md` #7.
+
+**Runtime control.** `SAR_OVERLAPMODE` @ `0xB0059130` (`OVLMODE` env in `run_m3_iso.sh`): 0 =
+sequential (default), 1 = the overlap path. Only takes effect when `SAR_GATHERMODE=1` and
+`detect_mode=3` (the shipping gather-fused + detect-fused configuration) — the buffer argument
+(SCRATCH read-only, OUT as the third buffer) depends on both.
+
+**Measured, 2026-07-23 (Option A bitstream, same scene, both runs from the same ELOD):**
+
+| | sequential (`OVLMODE=0`) | overlap (`OVLMODE=1`) |
+|---|---:|---:|
+| corner-turn (own slot) | 6.20 s | 0.00 s (folded into the merged slot below) |
+| corner-turn + FFT-2 (merged) | 6.20 + 11.37 = 17.57 s | 12.90 s |
+| **TOTAL** | **45.62 s** | **40.91 s** |
+
+Net **−4.35 s (−9.6%)**, ≈75% of the corner-turn's time hidden under FFT-2 — a bit less than the
+81% a free-running (non-strip, correctness-unsafe) micro-benchmark measured for the same two kernels
+in isolation (`H4BT` mailbox command, `docs/fpga/SAR_PIPELINE_STATUS.md`), because the 8 strip
+kernel-DONE handshakes add re-arm overhead the free-running benchmark didn't pay. Output crop
+(top-left 1024², from `sar_form_image`) **bit-identical** between the two modes over all 1,048,576
+pixels.
+
 ### 2.4 Detect
 
 Per-pixel magnitude `sqrt(I² + Q²)`, saturated to uint16.

@@ -195,6 +195,16 @@ dynamically-bounded kernel; (c) the explicit `axi_m_read_req`/`write_req` interf
 handshake, not schedule-dependent). Do not ship a dynamically-bounded `axi_initiator` loop kernel
 on schedule/timing gates alone.
 
+**Resolution confirmed 2026-07-23 — option (a) works.** Rebuilt `corner_turn` with BOTH outer loop
+bounds kept as the original compile-time constants (`r0 < CT_H`, `c0 < CT_W` — never a runtime
+`ce`), gating only the tile BODY with `if (c0 >= cb && c0 < ce)`. Same board-free gates (II=1, timing
+MET), but this time the silicon A/B matched: corner-turn back to 6.20 s, bit-identical output to the
+pre-strip baseline — the regression is specific to changing the loop's own trip count, not to a
+runtime skip condition guarding an unconditionally-full-trip-count loop. This became the corner-turn
+strip kernel behind the Step-2 corner-turn/FFT-2 overlap (`docs/SAR_DESIGN.md` §2.3a, `sar_form_image`
+`SAR_OVERLAPMODE`): 45.26 s -> 40.91 s, ~75% of the corner-turn hidden under FFT-2, bit-identical
+crop. Options (b) and (c) were never needed and remain untested.
+
 <!-- LINT
 id: axi-initiator-runtime-loop-bound
 severity: warn

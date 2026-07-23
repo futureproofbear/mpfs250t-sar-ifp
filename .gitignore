@@ -184,3 +184,14 @@ config.local.yaml
 
 # gdb scripts generated at runtime by the run_*.sh harnesses
 mpfs/host/jtag_full/*.gen.gdb
+
+# SAR path loaders: the stock-Python `lib/` rule (near the top of this file) otherwise
+# swallows mpfs/host/lib/ and mpfs/fpga/lib/, which hold the sar_env.sh / sar_env.tcl path
+# loaders that ~57 run_*.sh scripts and the Libero TCL flow SOURCE. They are portable
+# (derive the repo root from their own location) and secret-free (machine paths live in the
+# git-ignored config.local.yaml). Force-keep them; without them every set -u harness dies with
+# "unbound variable" and the few without set -u run destructive commands on empty paths.
+!mpfs/host/lib/
+!mpfs/fpga/lib/
+!mpfs/host/lib/sar_env.sh
+!mpfs/fpga/lib/sar_env.tcl

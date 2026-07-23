@@ -56,15 +56,18 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
 > § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
-> **Pipeline total: 48.19 s** (measured 2026-07-22, azimuth-gather-fused build). Window AND detect
-> are now fused into the FFT passes; no CPU stage remains in the datapath.
+> **Pipeline total: 40.91 s** (measured 2026-07-23, azimuth-gather + detect + corner-turn/FFT-2 overlap
+> fused build). Window AND detect are now fused into the FFT passes; no CPU stage remains in the datapath.
 > How it got here: 110.8 s -> 88.1 s (targeted CCACHE `FLUSH64` writeback of the coefficient banks
 > replacing a per-line whole-L2 flush) -> 79.79 s (2-D Hamming window fused into the range-FFT
 > feeder, deleting a 512 MB-read + 512 MB-write pass) -> ~78.6 s (resample coefficient closed form)
 > -> 58.12 s (magnitude detect fused into the azimuth-FFT unloader, deleting a 512 MB-read +
 > 128 MB-write pass AND halving that pass's write traffic)
 > -> 48.19 s (azimuth resample gather fused into the FFT-1 feeder, deleting its DDR round-trip;
-> resample 27.19 -> 13.46 s).
+> resample 27.19 -> 13.46 s)
+> -> 45.26 s (corner-turn CT_T 32->128: 512B bursts, each transpose 7.68->6.20s)
+> -> 40.91 s (corner-turn/FFT-2 overlap, Step 2: concurrent strip-pipelined execution of the
+> inter-FFT corner-turn with FFT-2).
 > **The CRC gate no longer applies.** ROI crc `0xd596c9eb` held from the 110.8 s build through the
 > window fusion, but the coefficient rewrite and the detect fusion change values deliberately (both
 > are MORE accurate). Correctness is now gated by an A/B against the known-good CPU detect on

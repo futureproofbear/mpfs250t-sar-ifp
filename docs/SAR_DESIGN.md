@@ -45,7 +45,7 @@ burst FIFOs.
 | 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
 | 6 | Detect (magnitude) | *fused into the azimuth-FFT unloader (fabric)* | — | — |
 
-Total 48.19 s (2026-07-22, azimuth-gather fused); the per-stage breakdown is in
+Total 40.91 s (2026-07-23, azimuth-gather + detect + corner-turn/FFT-2 overlap fused); the per-stage breakdown is in
 [`fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5, which is the single numeric
 source of truth. Orchestration is `sar_form_image()` in `src/sar/sar_sequencer.c`.
 
@@ -609,7 +609,7 @@ problem, which is why the order is stated explicitly.
 | 2 | Flash the application to eNVM (`run_program.sh`) | Programming the fabric requires re-flashing the app afterwards |
 | 3 | Power-cycle | The freshly flashed app must actually boot |
 | 4 | `ELOD` — load the scene from eMMC (81.5 s) | DDR was wiped by step 3; SIG must be populated |
-| 5 | `PIPE` — run the pipeline (48.19 s) | Needs SIG and the geometry tables in DDR |
+| 5 | `PIPE` — run the pipeline (40.91 s) | Needs SIG and the geometry tables in DDR |
 | 6 | `EROI` / `ESAV` — crop or persist the result | Needs OUT populated |
 
 Steps 4-6 may repeat freely without re-flashing, provided the board is not power-cycled between

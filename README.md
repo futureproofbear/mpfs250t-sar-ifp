@@ -23,7 +23,7 @@ implementations:
    the pipeline and do the final detect.
 
 **Status:** the full deci-1 Centerfield scene has been focused **end-to-end on
-silicon** (`SAR_SEQ_OK`, **48.19 s**, measured 2026-07-22 (azimuth-gather + detect fused) — scene loaded from the
+silicon** (`SAR_SEQ_OK`, **40.91 s**, measured 2026-07-23 (azimuth-gather + detect + corner-turn/FFT-2 overlap) — scene loaded from the
 board's own eMMC in 81.5 s, no host JTAG data load), and the 8192² image reconstructed from DDR matches
 the reference scene-for-scene (river, field parcels, pivot-irrigation circles,
 roads) — 0.9923 correlation vs the golden, speckle-limited at full

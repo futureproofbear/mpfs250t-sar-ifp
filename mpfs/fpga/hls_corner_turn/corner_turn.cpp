@@ -29,7 +29,12 @@
                            // ~67 MB/s / row-activation bound; see SAR_PIPELINE_STATUS priority 1).
 #endif
 
-void corner_turn(uint32_t *src, uint32_t *dst) {
+// STRIP support (Step 2 overlap): transpose only the source-column band [c_base, c_base+c_count),
+// i.e. produce dst ROWS [c_base, c_base+c_count) -- one range-bin strip. c_count==0 means the WHOLE
+// frame (backward-compatible: the sequential full-frame callers pass 0/unset). c_base/c_count must be
+// CT_T-aligned. This lets the firmware transpose a strip at a time and overlap strip s's corner-turn
+// with strip s-1's FFT (the strip-kernel-DONE handshake that keeps the non-coherent handoff safe).
+void corner_turn(uint32_t *src, uint32_t *dst, uint32_t c_base, uint32_t c_count) {
 #pragma HLS function top
 #pragma HLS interface default type(axi_target)
 #pragma HLS interface argument(src) type(axi_initiator)                        \
@@ -41,8 +46,11 @@ void corner_turn(uint32_t *src, uint32_t *dst) {
 
     uint32_t tile[CT_T][CT_T];
 
+    const int cb = (int)c_base;
+    const int ce = (c_count == 0u) ? CT_W : (int)(c_base + c_count);   // 0 => full frame
+
     for (int r0 = 0; r0 < CT_H; r0 += CT_T) {
-        for (int c0 = 0; c0 < CT_W; c0 += CT_T) {
+        for (int c0 = cb; c0 < ce; c0 += CT_T) {
             for (int i = 0; i < CT_T; i++) {
                 uint32_t *rp = &src[(r0 + i) * CT_W + c0];
 #pragma HLS loop pipeline II(1)
@@ -65,12 +73,27 @@ int main() {
     static uint32_t src[CT_H * CT_W];
     static uint32_t dst[CT_W * CT_H];
     for (int i = 0; i < CT_H * CT_W; i++) src[i] = (uint32_t)(i * 2654435761u);
-    corner_turn(src, dst);
+
+    /* (1) full frame via c_count=0 (backward-compat path the sequential pipeline uses) */
+    for (int i = 0; i < CT_W * CT_H; i++) dst[i] = 0u;
+    corner_turn(src, dst, 0u, 0u);
     int errors = 0;
     for (int r = 0; r < CT_H; r++)
         for (int c = 0; c < CT_W; c++)
             if (dst[c * CT_H + r] != src[r * CT_W + c]) errors++;
-    printf("corner_turn %dx%d tile %d: %s (%d errors)\n",
+    printf("corner_turn %dx%d tile %d FULL: %s (%d errors)\n",
            CT_H, CT_W, CT_T, errors ? "FAIL" : "PASS", errors);
-    return errors ? 1 : 0;
+
+    /* (2) strip-by-strip must reconstruct the SAME dst as the full frame (Step 2 overlap path).
+     * Each strip transposes source columns [cb, cb+S) -> dst rows [cb, cb+S). */
+    static uint32_t dst2[CT_W * CT_H];
+    for (int i = 0; i < CT_W * CT_H; i++) dst2[i] = 0u;
+    const uint32_t S = 1024u;                       /* strip width (CT_T-aligned; 8192 = 8 strips) */
+    for (uint32_t cb = 0; cb < (uint32_t)CT_W; cb += S)
+        corner_turn(src, dst2, cb, S);
+    int serr = 0;
+    for (int i = 0; i < CT_W * CT_H; i++) if (dst2[i] != dst[i]) serr++;
+    printf("corner_turn strip S=%u: %s (%d mismatches vs full)\n", S, serr ? "FAIL" : "PASS", serr);
+
+    return (errors || serr) ? 1 : 0;
 }

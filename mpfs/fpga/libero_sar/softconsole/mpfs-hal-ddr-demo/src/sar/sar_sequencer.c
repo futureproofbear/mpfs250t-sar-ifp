@@ -317,6 +317,94 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
     return 0;
 }
 
+/* ---- STEP 2: overlap the inter-FFT corner-turn (CT#2) with FFT-2 -------------------------------
+ * Hides the ~6.2 s corner-turn under FFT-2's ~11 s by running them CONCURRENTLY on FIC_0 (measured
+ * 81% overlap by the H4BT benchmark). Correctness (the critic's H1/H2) is kept by the STRIP-KERNEL
+ * structure: the corner-turn runs as one bounded kernel PER STRIP, each to DONE, and FFT-2 reads a
+ * strip only AFTER its corner-turn kernel completed -- the exact producer->consumer barrier the
+ * sequential pipeline already relies on. The concurrency is between DISJOINT strips:
+ *   CT#2(strip s):   SCRATCH cols [s*S,(s+1)*S) -> SIG rows [s*S,(s+1)*S)   (writes SIG strip s)
+ *   FFT-2(strip s-1): SIG rows [(s-1)*S, s*S) -> OUT                        (reads SIG strip s-1)
+ * SCRATCH read-only, OUT write-only, SIG strips disjoint -> no aliasing (why CT#2+FFT-2, not CT#1).
+ * Only for the shipping gather-fused + det-fused config. PASS-2 renorm stays global at the end. */
+#define SAR_OVERLAPMODE_ADDR  0xB0059130u    /* 0 = sequential (default), 1 = CT#2/FFT-2 overlap */
+
+/* FFT-2 PASS-1 transform for rows [r0,r1): det (uint16 out), no window. Bit-identical to
+ * fft_fabric_pass PASS 1 with det_en=1/win_en=0; captures each row's SCALE_EXP. */
+static int fft2_pass1_rows(uint32_t src, uint32_t dst, uint32_t r0, uint32_t r1, uint32_t budget)
+{
+    for (uint32_t row = r0; row < r1; row++) {
+        uint32_t s = src + row * SAR_ROW_BYTES;
+        uint32_t d = dst + row * SAR_ROW_BYTES_U16;                 /* det: uint16 magnitudes */
+        sar_reg_w(K_FFT_UNLOADER, K_UNL_DET_CTRL, 1u);
+        sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, d);
+        sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);
+        sar_k_start(K_FFT_UNLOADER);
+        sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL, 0u);                /* FFT-2 has no fused window */
+        sar_reg_w(K_FFT_FEEDER, HLS_ARG0, s);
+        sar_reg_w(K_FFT_FEEDER, HLS_ARG1, SAR_ROW_BEATS);
+        sar_k_start(K_FFT_FEEDER);
+        uint32_t n = budget;
+        while (n) { if (sar_k_idle(K_FFT_FEEDER) && sar_k_idle(K_FFT_UNLOADER)) break; n--; }
+        if (n == 0u) return sar_k_idle(K_FFT_FEEDER) ? 1 : 2;
+        sar_row_exp[row] = (uint8_t)(sar_reg_r(K_FFT_FEEDER, K_FFT_SCALE_EXP) & 0xFu);
+    }
+    return 0;
+}
+
+/* Arm CT#2 for one strip: SCRATCH cols [cb, cb+S) -> SIG rows [cb, cb+S). No wait. */
+static void ct2_strip_arm(uint32_t cb, uint32_t S)
+{
+    sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG2, cb);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG3, S);
+    sar_k_start(K_CORNER_TURN);
+}
+
+/* Overlapped CT#2 + FFT-2 (det). Replaces sar_form_image steps 4+5 when overlap mode is on. */
+static int fft2_ct_overlap(uint32_t spins)
+{
+    uint32_t budget = spins ? spins : SAR_DEFAULT_SPINS;
+    const uint32_t S = 1024u;                 /* strip width: CT_T=128-aligned, SAR_GRID/S = 8 strips */
+    const uint32_t K = SAR_GRID / S;
+
+    flush_l2_cache(1u);                        /* match fft_pass's before-flush (SCRATCH/SIG to DDR) */
+    __asm volatile ("fence rw, rw");
+
+    /* prologue: strip 0 corner-turn to DONE (makes SIG rows [0,S) observable to the FFT feeder) */
+    ct2_strip_arm(0u, S);
+    if (!sar_k_wait(K_CORNER_TURN, budget)) return SAR_SEQ_TIMEOUT_CORNER;
+
+    for (uint32_t s = 1u; s < K; s++) {
+        ct2_strip_arm(s * S, S);                                    /* producer: strip s (no wait) */
+        int r = fft2_pass1_rows(BUF_SIG, BUF_OUT, (s - 1u) * S, s * S, budget);  /* consumer: strip s-1 */
+        if (r) { (void)sar_k_wait(K_CORNER_TURN, budget);
+                 return (r == 1) ? SAR_SEQ_TIMEOUT_FFT2 : SAR_SEQ_TIMEOUT_DMA; }
+        if (!sar_k_wait(K_CORNER_TURN, budget)) return SAR_SEQ_TIMEOUT_CORNER;   /* join strip s */
+        SAR_PROG(4u, s, K);
+    }
+    { int r = fft2_pass1_rows(BUF_SIG, BUF_OUT, (K - 1u) * S, K * S, budget);    /* epilogue: last strip */
+      if (r) return (r == 1) ? SAR_SEQ_TIMEOUT_FFT2 : SAR_SEQ_TIMEOUT_DMA; }
+
+    /* global PASS-2 renorm over OUT (det), identical to fft_fabric_pass PASS 2 (det branch) */
+    uint8_t emax = 0;
+    for (uint32_t row = 0; row < SAR_GRID; row++) if (sar_row_exp[row] > emax) emax = sar_row_exp[row];
+    uint32_t headroom = *(volatile uint32_t *)(uintptr_t)SAR_FFT_HEADROOM_ADDR;
+    if (headroom > 12u) headroom = 0u;
+    __asm volatile ("fence rw, rw");
+    flush_l2_cache(1u);
+    for (uint32_t row = 0; row < SAR_GRID; row++) {
+        uint32_t sh = (uint32_t)(emax - sar_row_exp[row]) + headroom;
+        if (sh == 0u) continue;
+        uint16_t *d = (uint16_t *)(uintptr_t)(BUF_OUT + row * SAR_ROW_BYTES_U16);
+        for (uint32_t i = 0; i < SAR_GRID; i++) d[i] = (uint16_t)(d[i] >> sh);
+    }
+    __asm volatile ("fence rw, rw");
+    flush_l2_cache(1u);
+    return 0;
+}
+
 /* ---- H4 CONCURRENCY MICRO-BENCHMARK (firmware-only; current bitstream) ------------------------
  * Measures whether two fabric masters overlap or SERIALIZE on the single shared FIC_0 write channel
  * -- the H4 hazard the architectural-critic flagged, unmeasurable in cosim, that gates BOTH the
@@ -343,6 +431,8 @@ int fft_h4_bench(uint32_t spins)
     /* 1) corner-turn ALONE: SCRATCH -> SIG */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
     sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
+    sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     t0 = readmtime();
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) { rec[15] = 0xDEAD0001u; goto pub; }
@@ -358,6 +448,8 @@ int fft_h4_bench(uint32_t spins)
     /* 3) CONCURRENT: arm CT free-running, run the FFT pass while it writes SIG, then join CT. */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
     sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
+    sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     ficmon_clear();
     t0 = readmtime();
     sar_k_start(K_CORNER_TURN);                   /* CT free-runs on FIC_0 ... */
@@ -583,6 +675,8 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     /* transpose SCRATCH(Mp x Np) -> SIG(Np x Mp) */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
     sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
+    sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) return 0;
     sar_resample_ts[2] = readmtime();          /* internal corner-turn done */
@@ -766,25 +860,36 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     }
     sar_stage_ts[3] = readmtime();
 
-    /* 4) corner-turn (transpose). Non-fused: SIG->SCRATCH (FFT-1 out is in SIG).
-     *    Fused: SCRATCH->SIG (FFT-1 out is in SCRATCH). */
-    sar_reg_w(K_CORNER_TURN, HLS_ARG0, gather_fused ? BUF_SCRATCH : BUF_SIG);
-    sar_reg_w(K_CORNER_TURN, HLS_ARG1, gather_fused ? BUF_SIG     : BUF_SCRATCH);
-    sar_k_start(K_CORNER_TURN);
-    if (!sar_k_wait(K_CORNER_TURN, spins)) return SAR_SEQ_TIMEOUT_CORNER;
-    sar_stage_ts[4] = readmtime();
-
-    /* 5) azimuth FFT (the true RANGE-axis FFT). Non-fused: SCRATCH->{OUT|SIG}. Fused: SIG->{OUT|SIG}
-     *    -- corner-turn wrote SIG, so FFT-2 reads SIG.
-     * FUSED DETECT (runtime, DETECTMODE 3): the unloader takes |z| as this FFT streams out, so it
-     * writes uint16 magnitudes DIRECTLY to OUT and step 6 disappears. */
+    /* 4+5) corner-turn (CT#2) then range-axis FFT (FFT-2). Buffers: non-fused CT SIG->SCRATCH,
+     * FFT-2 SCRATCH->{OUT|SIG}; gather-fused CT SCRATCH->SIG, FFT-2 SIG->{OUT|SIG}. */
     const int det_fused = (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR == 3u);
     const uint32_t f2_src = gather_fused ? BUF_SIG : BUF_SCRATCH;
     const uint32_t f2_dst = det_fused ? BUF_OUT : (gather_fused ? BUF_SCRATCH : BUF_SIG);
-    { int r = fft_pass(f2_src, f2_dst, spins, 0, det_fused);
-      if (r == 1) return SAR_SEQ_TIMEOUT_FFT2;          /* feeder stalled */
-      if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (azimuth) */
-    sar_stage_ts[5] = readmtime();
+    /* STEP 2 OVERLAP (SAR_OVERLAPMODE=1): fold steps 4+5, hiding CT#2 under FFT-2 via the
+     * strip-kernel pipeline. Only for the shipping gather+det-fused config (SCRATCH->SIG->OUT,
+     * disjoint buffers -- see fft2_ct_overlap). Any other config falls through to sequential. */
+    const int overlap = (*(volatile uint32_t *)(uintptr_t)SAR_OVERLAPMODE_ADDR == 1u)
+                        && gather_fused && det_fused;
+    if (overlap) {
+        int r = fft2_ct_overlap(spins);
+        if (r) return (sar_seq_status_t)r;
+        sar_stage_ts[4] = sar_stage_ts[3];            /* corner-turn hidden under FFT-2 */
+        sar_stage_ts[5] = readmtime();                /* merged CT#2 + FFT-2 wall time */
+    } else {
+        /* 4) corner-turn (full frame) */
+        sar_reg_w(K_CORNER_TURN, HLS_ARG0, gather_fused ? BUF_SCRATCH : BUF_SIG);
+        sar_reg_w(K_CORNER_TURN, HLS_ARG1, gather_fused ? BUF_SIG     : BUF_SCRATCH);
+        sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
+        sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
+        sar_k_start(K_CORNER_TURN);
+        if (!sar_k_wait(K_CORNER_TURN, spins)) return SAR_SEQ_TIMEOUT_CORNER;
+        sar_stage_ts[4] = readmtime();
+        /* 5) FFT-2. FUSED DETECT (DETECTMODE 3): unloader writes uint16 |z| to OUT, step 6 vanishes. */
+        { int r = fft_pass(f2_src, f2_dst, spins, 0, det_fused);
+          if (r == 1) return SAR_SEQ_TIMEOUT_FFT2;          /* feeder stalled */
+          if (r == 2) return SAR_SEQ_TIMEOUT_DMA; }          /* DMA S2MM stalled (azimuth) */
+        sar_stage_ts[5] = readmtime();
+    }
 
     /* 6) detect (sqrt(I^2+Q^2)): SIG -> OUT (azimuth-FFT output is in SIG).
      * DEFAULT = CPU detect (correct sqrt, corr 0.97 on silicon -- the SHIPPING path). The fabric

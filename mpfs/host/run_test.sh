@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Isolation test runner: OpenOCD runs efp6_test.cfg (halt -> stage geometry+job ->
 # call sar_form_image -> read status -> dump 1MB OUT -> shutdown). Skips big xfers.
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"   # SAR_ROOT / tool paths (see config.yaml)
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh" \
+  || { echo "FATAL: cannot load lib/sar_env.sh -- is it present? (see README / config.yaml)"; exit 3; }
+: "${SAR_ROOT:?sar_env.sh did not set SAR_ROOT -- refusing to run with empty paths}"   # no set -u here; guard rm/exec off empty vars
 NEW="$SAR_OPENOCD"
 CFG="$SAR_ROOT/mpfs/fpga/efp6_test.cfg"
 LOG="$SAR_SCRATCH/test.log"

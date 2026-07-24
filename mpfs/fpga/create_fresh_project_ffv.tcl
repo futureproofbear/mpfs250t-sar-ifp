@@ -40,8 +40,9 @@ source "$here/axiic_ctrl_params.tcl"      ;# -> $AXIIC_CTRL_PARAMS
 create_and_configure_core -core_vlnv {Actel:DirectCore:COREAXI4INTERCONNECT:3.0.130} -component_name {AXIIC_CTRL} -params $AXIIC_CTRL_PARAMS
 generate_component -component_name {AXIIC_CTRL}
 
-## Clock: PF_CCC @ 62.5 MHz (OUT0) + 7.8125 MHz (OUT1 = CoreFFT SLOWCLK). Full param TCL from the as-built.
-source "$here/PF_CCC_C0_62p5.tcl"         ;# create_and_configure_core PF_CCC_C0
+## Clock: PF_CCC @ 100 MHz (OUT0) + 12.5 MHz (OUT1 = CoreFFT SLOWCLK, OUT0/8). Clock-sweep build
+## (2026-07-24); revert to PF_CCC_C0_62p5.tcl if 100 MHz does not close timing. Full param TCL.
+source "$here/PF_CCC_C0_100.tcl"          ;# create_and_configure_core PF_CCC_C0 (OUT0=100, OUT1=12.5)
 generate_component -component_name {PF_CCC_C0}
 
 ## Reset controller (CORERESET_PF).

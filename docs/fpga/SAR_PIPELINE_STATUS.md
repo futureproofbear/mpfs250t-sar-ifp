@@ -114,17 +114,33 @@ net −10.1 s (≈3.6 s re-surfaced inside the FFT-1 feeder, the rest hides unde
 crop **bit-identical** to the standalone-resample output over all 1,048,576 pixels (the value gate,
 since the CRC gate no longer applies). Combined with fused detect: **58.12 → 48.19 s**.
 
-**1. Increase the range gather THROUGHPUT — OPEN and UNDER-DIAGNOSED (do not read as "no lever").**
-The gather kernel schedules at II=1 (verified) yet runs ~880 µs/line against a 361 µs schedule — 2.44×
-AXI stall on a correct schedule (`axi_ii_lie`). The FIC_0 monitor (2026-07-22 bitstream, reg base
-`0x6000_6000`) measured line 0 of both gathers: reads are LONG bursts (72 beats avg), so burst-length
-is NOT the lever. BUT the monitor taps only the READ channel, so it cannot tell whether the
-distributed idle is WRITE time (invisible) or intra-burst read throttling — opposite fixes, and still
-unresolved. Priority 2 (above) already deleted the azimuth gather's DDR round-trip; what remains under
-this priority is the pass-1 RANGE gather (5.78 s within "resample") + the internal corner-turn (6.20 s,
-now also latency-bound per 1a — cannot be overlap-hidden the same way as 1b, see §2.3a). The right next
-diagnostic step is a v2 monitor that adds the WRITE channel + intra-burst RVALID-gap counting;
-whichever it shows (write-bound → a fusion; read-throttled → DDR/outstanding depth) decides the fix.
+**1. Increase the range gather THROUGHPUT — DIAGNOSED 2026-07-24: READ-LATENCY-BOUND (parallelism, not
+FIC_1, not fusion).** The gather kernel schedules at II=1 (verified) yet runs ~880 µs/line against a
+361 µs schedule — 2.44× AXI stall on a correct schedule (`axi_ii_lie`). The v2 FIC_0 monitor
+(2026-07-24 bitstream, write channel + intra-burst RVALID-gap counting, reg base `0x6000_6000`,
+`decode_ficmon.py`) resolved the read-only v1's write-vs-throttle ambiguity. Range-gather line 0,
+908.8 µs @ 100 MHz, decomposes as:
+
+| read data moving | read outstanding, DDR not returning (r_datawait) | write data moving | genuine idle (kernel issues nothing) |
+|---:|---:|---:|---:|
+| 16% | **40%** | 9% | 35% |
+
+Bursts are 72 beats avg (98% are 65–256) → burst length was never the lever (confirms v1). The stall is
+**DDR read throttle (40%)**, NOT write time (9%) and NOT bursts. This DECIDES the fix:
+- **FIC_1 will NOT help** — read-throttle is the shared DDR *controller* (row activations / access
+  pattern), not an AXI-channel conflict. Takes FIC_1 off the table as a gather lever (confirms the
+  `multific-step4` no-op-as-a-bandwidth-lever finding).
+- **Output fusion buys ≤9%** (the write fraction) — low value for the gather itself.
+- **Parallelism is the lever (→ priority 3a).** The FIC_0 data plane is only ~25% active during the
+  gather, so a 2nd gather instance fits on the *shared* FIC_0 with large headroom; two latency-bound
+  gathers stall independently → ~2× throughput, no FIC_1 needed. Cheap kernel-side try first: raise
+  `max_outstanding_reads`/prefetch depth to attack the 40% read-wait and the 35% idle.
+
+Priority 2 (above) already deleted the azimuth gather's DDR round-trip; the v2 capture of the (still
+present in the non-fused path) azimuth gather showed it even more latency-bound (67% idle) — which is
+why fusing it was a −10 s win. What remains under this priority is the pass-1 RANGE gather (5.78 s
+within "resample") + the internal corner-turn (6.20 s, also latency-bound per 1a — cannot be
+overlap-hidden the same way as 1b, see §2.3a).
 
 **4. ✅ DONE (2026-07-24) — Increase the clock frequency, CCC OUT0 62.5 → 100 MHz.** Regenerated
 `PF_CCC_C0` (`GL0_0_OUT_FREQ` 62.5 → 100, `GL1_0_OUT_FREQ` → 12.5; SLOWCLK stays CLK/8, under CoreFFT's
@@ -151,7 +167,9 @@ instances of the ROW-INDEPENDENT stages, syncing at the single shared corner-tur
   - **3a — range-gather N=2 (cheap, do alongside clock).** 5.78 → ~3.4 s (~2.4 s saved). Reuse a dead
     DIC slot (WIN/DET, both fused away); `sar_axi_idconv` fix (2026-07-22, silicon-inert) routes it;
     +32 LSRAM. Shared FIC_0 first — gate with a two-`RES` H4BT microbench for the identical-pair
-    contention; FIC_1 only if the v2 monitor shows CHANNEL-level (not DDR-row-level) contention.
+    contention. FIC_1 is now RULED OUT for the gather: the v2 monitor showed the stall is DDR-row-level
+    read throttle (priority 1), not AXI-channel contention, so a 2nd port cannot help — stay on the
+    shared FIC_0 (25% active, ample headroom).
   - **3b — parallel FFT via a 2nd CoreFFT chain (expensive; the big FFT lever).** ~2× on FFT compute,
     but STRICTLY DOMINATED by the clock lever on value/cost for the same target — only worth it to
     STACK on clock (1.76 × 2 ≈ 3.5× on FFT). Costs a 2nd CoreFFT + gearbox + feeder + unloader

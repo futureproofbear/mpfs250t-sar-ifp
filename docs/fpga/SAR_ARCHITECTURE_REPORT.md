@@ -212,8 +212,13 @@ re-running the pipeline: `bash mpfs/host/run_stage_timing.sh`.
 
 **Current (measured 2026-07-20, eMMC boot-load path, `fft_mode=1` fabric CoreFFT verified at runtime):**
 
-CURRENT BASELINE — measured 2026-07-23, azimuth-gather-fused + detect-fused + corner-turn CT_T=128
-+ **corner-turn/FFT-2 overlap (Step 2, `SAR_OVERLAPMODE=1`)** build:
+CURRENT SHIPPING BUILD — **37.72 s** total, measured 2026-07-24, CCC OUT0 fabric clock 100 MHz
+(from 62.5 MHz). Bit-identical output. The per-stage decomposition below is the **62.5 MHz** build
+(40.91 s); the 100 MHz delta is analysed in the CLOCK block that follows the table — only FFT-2's
+compute scaled with the clock, so the split shifts but the picture (latency-bound) does not.
+
+DECOMPOSITION (measured 2026-07-23 @ 62.5 MHz), azimuth-gather-fused + detect-fused + corner-turn
+CT_T=128 + **corner-turn/FFT-2 overlap (Step 2, `SAR_OVERLAPMODE=1`)** build:
 
 | Stage | Time | Share | Where |
 |---|---:|---:|---|
@@ -222,7 +227,7 @@ CURRENT BASELINE — measured 2026-07-23, azimuth-gather-fused + detect-fused + 
 | Corner-turn (inter-FFT) + FFT-2, **overlapped** | 12.90 s | 31.6% | CoreFFT + fused detect (fabric), concurrent with the strip-pipelined corner-turn — see §2.3a |
 | Window | **0.00 s** | 0% | fused into the FFT-1 feeder |
 | Detect | **0.00 s** | 0% | fused into the FFT-2 unloader |
-| **Total** | **40.91 s** | | `SAR_SEQ_OK` |
+| **Total (62.5 MHz)** | **40.91 s** | | `SAR_SEQ_OK` |
 
 Both CPU stages are gone from the datapath, and the azimuth resample gather no longer round-trips
 DDR — it streams straight into the FFT-1 feeder. The whole pipeline is fabric except coefficient
@@ -243,6 +248,25 @@ can be overlapped: [`../SAR_DESIGN.md`](../SAR_DESIGN.md) §2.3a. Headline:
 ~75% of the corner-turn hidden under FFT-2 (vs. 81% for the same two kernels free-running in
 isolation — `H4BT` micro-benchmark — the gap is the 8 strip kernel-DONE handshakes' re-arm cost).
 Output crop **bit-identical** between the two modes over all 1,048,576 pixels.
+
+CLOCK — CCC OUT0 62.5 → 100 MHz, measured 2026-07-24 (priority 4). The fabric clock (and its /8
+SLOWCLK for CoreFFT) was raised by regenerating `PF_CCC_C0` (`GL0_0_OUT_FREQ` 62.5 → 100,
+`GL1_0_OUT_FREQ` 7.8125 → 12.5); no RTL change. Timing MET multi-corner (authoritative VIOLRPT
+clean; the single-cycle `pinslacks` report reads −5.6 ns *false* on HLS multicycle paths — the
+gate now decides on VIOLRPT, not pinslacks). Headline:
+
+| | 62.5 MHz | 100 MHz | Δ |
+|---|---:|---:|---:|
+| TOTAL | 40.91 s | 37.72 s | **−3.19 s (−7.8%)** |
+
+KEY FINDING — a 1.6× clock bought only 1.08× wall-clock. Only **FFT-2's compute** portion scaled
+with the clock. FFT-1 did **not** speed up: it is dominated by the fused azimuth-resample *gather*,
+which is DDR-read-latency-bound, and latency does not scale with the fabric clock. The gathers and
+corner-turns (the transpose kernel is latency/path-bound — see the CT_T finding below) are the
+residual cost, so **the pipeline is now latency-bound, not compute-bound.** Further clock increase
+(150 MHz explored) would need pipeline registers on the long HLS paths and would still only scale
+the shrinking compute fraction — the lever with headroom is now the gathers (priorities 1–3:
+throughput, fusion, parallel fabric), not the clock.
 
 CORNER-TURN TILE SIZE — measured 2026-07-23. The tiled DDR→DDR transpose (`hls_corner_turn`,
 CT_H=CT_W=8192) was rebuilt with the tile `CT_T` 32 → 128, lengthening its AXI bursts 128 B → 512 B.

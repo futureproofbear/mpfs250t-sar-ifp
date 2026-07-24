@@ -12,15 +12,18 @@ The full PFA (polar-format) SAR pipeline runs on the PolarFire SoC MPFS250T_ES (
 JTAG/FlashPro6) and produces the correct focused image, autonomously from the board's own eMMC:
 
 - Scene loads eMMC → DDR in **81.5 s** (`sig_crc 0x89fa12dc` verified), retiring the ~3 h JTAG input load.
-- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **40.91 s** (2026-07-23,
-  azimuth-gather-fused + detect-fused + corner-turn/FFT-2 **overlap** build, `SAR_GATHERMODE=1` +
-  `DETMODE=3` + `SAR_OVERLAPMODE=1`), with `fft_mode=1` (fabric CoreFFT) confirmed at runtime. The
-  azimuth resample gather is fused into the FFT-1 feeder (priority 2): resample 27.19 → 13.46 s.
-  The inter-FFT corner-turn now runs CONCURRENTLY with FFT-2 (Step 2): 45.26 → 40.91 s, ~75% of the
-  corner-turn hidden. Output crop **bit-identical** across every fusion/overlap mode over all
-  1,048,576 pixels — see `SAR_ARCHITECTURE_REPORT.md` §5 and `../SAR_DESIGN.md` §2.3a for the full
-  mechanism. Earlier window-fused-only build ran 79.79 s (crc `0xd596c9eb`); detect fusion took it to
-  58.12 s; azimuth-gather fusion + CT_T=128 took it to 45.26 s.
+- `sar_form_image` (PIPE mailbox cmd) returns `SAR_SEQ_OK` in **37.72 s** (2026-07-24, the
+  azimuth-gather-fused + detect-fused + corner-turn/FFT-2 **overlap** build now clocked at **100 MHz**,
+  `SAR_GATHERMODE=1` + `DETMODE=3` + `SAR_OVERLAPMODE=1`), with `fft_mode=1` (fabric CoreFFT) confirmed
+  at runtime. The azimuth resample gather is fused into the FFT-1 feeder (priority 2): resample
+  27.19 → 13.46 s. The inter-FFT corner-turn runs CONCURRENTLY with FFT-2 (Step 2): 45.26 → 40.91 s,
+  ~75% of the corner-turn hidden. Raising CCC OUT0 62.5 → 100 MHz (priority 4) then took 40.91 → 37.72 s
+  — only 1.08× for a 1.6× clock, because only FFT-2's compute scaled; FFT-1 is gather-bound and the
+  pipeline is now latency-bound (see §5 CLOCK block). Output crop **bit-identical** across every
+  fusion/overlap mode AND across 62.5/100 MHz over all 1,048,576 pixels — see
+  `SAR_ARCHITECTURE_REPORT.md` §5 and `../SAR_DESIGN.md` §2.3a for the full mechanism. Earlier
+  window-fused-only build ran 79.79 s (crc `0xd596c9eb`); detect fusion took it to 58.12 s;
+  azimuth-gather fusion + CT_T=128 took it to 45.26 s; Step 2 overlap to 40.91 s.
 - Correlation vs golden reference = **0.9923** (Centerfield decimated 705×540 scene, band rows
   896:1152, 1.05 M unsaturated pixels; a point-target crop hits 0.9962). The board image matches
   `golden_small_mag.npy` in the **`T.rot180`** orientation (`board == golden.T[::-1,::-1]`) — exactly
@@ -123,16 +126,22 @@ now also latency-bound per 1a — cannot be overlap-hidden the same way as 1b, s
 diagnostic step is a v2 monitor that adds the WRITE channel + intra-burst RVALID-gap counting;
 whichever it shows (write-bound → a fusion; read-throttled → DDR/outstanding depth) decides the fix.
 
-**4. Increase the clock frequency — the recommended NEXT lever (biggest cheap win, lowest risk).**
-CLK is the binding constraint (~110 MHz *estimated* ceiling; SLOWCLK/CoreFFT has +113 ns slack and is
-not the limiter). The register slices already broke the interconnect combinational critical path and
-have closed timing at 62.5 MHz across THREE builds this session (CT_T=128, the reverted strip kernel,
-Option A), so the prerequisite is proven. CLK 62.5 → ~110 raises SLOWCLK 7.8 → 13.75 MHz (still under
-CoreFFT's ~10–20 MHz in-place ceiling), giving **~1.76× on the ~23 s of SLOWCLK-bound FFT compute**
-(~88 % of each FFT stage) → saves ~10 s, **40.91 → ~28–30 s**. No new logic, output bit-identical,
-timing-gated. Do it as a SWEEP (build 80/100/110, find where timing stops closing) — "110" is an
-estimate. The latency-bound stages (corner-turns, gather AXI stall) scale little with fabric clock
-(different/DDR clock domain), so most of the win is the FFT.
+**4. ✅ DONE (2026-07-24) — Increase the clock frequency, CCC OUT0 62.5 → 100 MHz.** Regenerated
+`PF_CCC_C0` (`GL0_0_OUT_FREQ` 62.5 → 100, `GL1_0_OUT_FREQ` → 12.5; SLOWCLK stays CLK/8, under CoreFFT's
+in-place ceiling); no RTL change, output **bit-identical**, timing MET multi-corner. Measured on
+silicon: **40.91 → 37.72 s (−3.19 s, −7.8%)**. The register slices that broke the interconnect
+combinational path (proven at 62.5 across CT_T=128 / strip-kernel / Option A) held at 100.
+
+CORRECTION TO THE PRE-MEASUREMENT ESTIMATE — this block predicted ~28–30 s (~1.76× on ~23 s of
+"SLOWCLK-bound FFT compute"). Actual was −3.19 s, not −10 s. The estimate was wrong because it treated
+BOTH FFT stages as compute-bound. On silicon **only FFT-2's compute scaled with the clock; FFT-1 did
+not** — FFT-1 is dominated by the fused azimuth-resample *gather* (DDR-read-latency-bound), which does
+not scale with the fabric clock. Lesson: the pipeline is now **latency-bound, not compute-bound**, so
+the clock's remaining leverage is small. 150 MHz was explored — it would need pipeline registers on the
+long HLS paths and would still only scale the shrinking compute fraction; not worth it before the
+latency levers. The gate false-negative found along the way (single-cycle `pinslacks` reads −5.6 ns on
+HLS multicycle paths; decide on the authoritative multi-corner VIOLRPT instead) is in
+`build_full_prog_ffv.tcl` and `SMARTHLS_ANTIPATTERNS.md`.
 
 **3. Parallel fabric — a WIDE PER-STAGE pipeline, not whole-chain replication.** Literal whole-chain
 parallelism hits two walls: (a) the corner-turn is a GLOBAL transpose, so one frame cannot be split
@@ -150,10 +159,13 @@ instances of the ROW-INDEPENDENT stages, syncing at the single shared corner-tur
     real justification for FIC_1** (split 2+2 across two ports; NOT a bandwidth lever — the data plane
     is at ~17 % of the FIC_0 ceiling, see `multific-step4-foundation`). Post-clock FFT ~13 → ~7 s.
 
-**Composition + recommended sequence:** clock (28–30 s) → +range-gather N=2 (26–28 s) → +parallel-FFT
-+FIC_1 (20–22 s). Clock and parallel-FFT MULTIPLY (same target); range-gather is additive. Floor after
-all of it ≈ the two corner-turns (~12 s of DDR-latency-bound transpose that none of clock/parallel/
-overlap removes — the internal one can't even be overlap-hidden, §2.3a). Breaking below ~20 s needs a
+**Composition + recommended sequence (revised after the clock result):** clock is DONE at **37.72 s**
+(not the 28–30 s predicted — see priority 4; the FFT compute the clock scales is a smaller fraction
+than assumed). The remaining levers are all **latency**, not compute: range-gather N=2 (priority 3a,
+~2.4 s) → parallel FFT-2 (3b; note parallel FFT-1 buys little now that FFT-1 is gather- not
+compute-bound) + FIC_1 for the concurrent masters → the two corner-turns are the floor (~12 s of
+DDR-latency-bound transpose that none of clock/parallel/overlap removes — the internal one can't even
+be overlap-hidden, §2.3a). Breaking below ~20 s needs a
 fundamentally different transpose (CoreAXI4DMA scatter, or a layout eliminating one transpose —
 research, not a known win). FIC study detail: the `H4BT` concurrency microbench (81 % two-master
 overlap, `SAR_ARCHITECTURE_REPORT.md` §5) and the FIC_1 MSS-regen groundwork in

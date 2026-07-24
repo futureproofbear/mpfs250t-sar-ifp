@@ -2,7 +2,7 @@
   <rect width="1240" height="446" fill="#ffffff"/>
 
   <text x="620" y="34" text-anchor="middle" font-size="19" font-weight="600" fill="#1a1a1a">SAR image-formation pipeline — as built on MPFS250T_ES</text>
-  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-23: 40.91 s total. Window, detect AND the azimuth resample gather are FUSED INTO FABRIC; the corner-turn below runs CONCURRENTLY with FFT-2 (Step 2) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
+  <text x="620" y="56" text-anchor="middle" font-size="13" fill="#555555">Polar-Format Algorithm, 8192 x 8192 complex frame. Measured 2026-07-24 at 100 MHz: 37.72 s total (the per-stage boxes below are the 62.5 MHz decomposition, 40.91 s; only FFT-2 compute scaled with the clock -- FFT-1 is gather-bound, pipeline is latency-bound). Window, detect AND the azimuth resample gather are FUSED INTO FABRIC; the corner-turn below runs CONCURRENTLY with FFT-2 (Step 2) -- no CPU stage remains in the datapath.  NOTE: the two FFTs transform the axis shown; the code names ("range/azimuth FFT") are the historical labels and are swapped vs the true axis.</text>
 
   <!-- overlap indicator: corner-turn (box 4) runs CONCURRENTLY with FFT-2 (box 5), Step 2 -->
   <rect x="690" y="76" width="308" height="9" rx="3" fill="none" stroke="#a03535" stroke-width="1.3" stroke-dasharray="4 2"/>
@@ -133,7 +133,7 @@
   <rect x="756" y="368" width="17" height="14" rx="3" fill="#f7dede" stroke="#a03535" stroke-width="1.4"/>
   <text x="780" y="380" font-size="11.5" fill="#333333">DDR magnitude image (uint16, 2 B/px)</text>
 
-  <text x="24" y="404" font-size="11" fill="#777777">Times are wall-clock per stage from sar_stage_ts[0..6] (MTIME, 1 us/tick), full deci-1 Centerfield scene, fabric at 62.5 MHz. Re-read with mpfs/host/run_stage_timing.sh</text>
+  <text x="24" y="404" font-size="11" fill="#777777">Times are wall-clock per stage from sar_stage_ts[0..6] (MTIME, 1 us/tick), full deci-1 Centerfield scene; per-stage boxes are the 62.5 MHz decomposition (shipping build is 100 MHz / 37.72 s total). Re-read with mpfs/host/run_stage_timing.sh</text>
   <text x="24" y="421" font-size="11" fill="#777777">Numeric source of truth: docs/fpga/SAR_ARCHITECTURE_REPORT.md section 5. If this diagram disagrees with it, the report is right and this diagram is stale.</text>
   <text x="24" y="438" font-size="11" fill="#a03535">* Corner-turn and FFT-2 run CONCURRENTLY (SAR_OVERLAPMODE=1, SAR_DESIGN.md sec2.3a): 6.20 s is corner-turn's own-slot time in SEQUENTIAL mode; 12.90 s is the MERGED wall-clock of both boxes together in OVERLAP mode (was 17.57 s sequential).</text>
 </svg>

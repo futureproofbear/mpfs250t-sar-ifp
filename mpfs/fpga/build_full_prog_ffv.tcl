@@ -88,7 +88,7 @@ if {!$ok} {
   puts "FFV_BUILD_DONE"
   return
 }
-puts "TIMING_MET (pre-progdata)  [authoritative multi-corner VIOLRPT clean; pinslacks nviol=$sv is multicycle-blind, informational]"
+puts "TIMING_MET (pre-progdata)  (authoritative multi-corner VIOLRPT clean; pinslacks nviol=$sv is multicycle-blind, informational)"
 
 ## Programming data can re-place the design. Fingerprint the layout, generate, compare.
 set sig_before [sar_layout_sig $pd]

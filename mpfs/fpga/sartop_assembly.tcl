@@ -192,6 +192,16 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RREADY"  "FIC0MON
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RRESP"   "FIC0MON:mon_rresp"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RID"     "FIC0MON:mon_rid"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_RLAST"   "FIC0MON:mon_rlast"} }
+## v2 (2026-07-24): WRITE-channel taps -- same ID_FIX:M_AXI boundary, observe-only. Lets the monitor
+## separate write time from intra-burst read throttle in the gather stall (see sar_fic0s_mon.v v2 map).
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWVALID" "FIC0MON:mon_awvalid"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_AWREADY" "FIC0MON:mon_awready"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WVALID"  "FIC0MON:mon_wvalid"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WREADY"  "FIC0MON:mon_wready"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WLAST"   "FIC0MON:mon_wlast"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BVALID"  "FIC0MON:mon_bvalid"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BREADY"  "FIC0MON:mon_bready"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BRESP"   "FIC0MON:mon_bresp"} }
 
 ## ---------------- CoreFFT streaming path ----------------
 catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var"       "GBX:s_axis_tdata"} }

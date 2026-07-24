@@ -10,10 +10,12 @@ fixes and were not observable until the monitor (sar_fic0s_mon.v, 2026-07-22 bit
   B. LONG IDLE GAPS -- bursts are long (histogram weighted to 65-256) but a large MAX_GAP sits
      between them, bus mostly idle. Fix: DDR/interconnect latency / prefetch depth (system side).
 
-The firmware (sar_sequencer.c ficmon_snapshot) writes two 12-word records to 0xB0059240:
-  slot 0 = pass-1 range gather line 0, slot 1 = pass-2 azimuth gather line 0.
+The firmware (sar_sequencer.c ficmon_snapshot) writes two 20-word records to 0xB0059240:
+  slot 0 = pass-1 range gather line 0, slot 1 = pass-9 concurrent CT+FFT-2 overlap run.
 Word layout: [0]=0xF1C0AA0p [1]=STATUS [2..6]=ARLEN hist(1/2-4/5-16/17-64/65-256)
-             [7]=busy [8]=elapsed [9]=max_gap [10]=beats_this_line [11]=0.
+             [7]=busy [8]=elapsed [9]=max_gap [10]=beats_this_line
+  v2: [11]=aw_count [12]=w_beats [13]=b_status [14]=write_busy [15]=r_datawait
+      [16]=max_r_datawait [17]=total_active [18..19]=0.
 
 USAGE: dump the 96 bytes at 0xB0059240 over JTAG, then
     python mpfs/host/decode_ficmon.py <dump.bin>
@@ -23,7 +25,7 @@ or pass the eight hex words of a single record on the command line:
 import struct
 import sys
 
-FCLK_HZ = 62.5e6            # OUT0 fabric clock the monitor counts on
+FCLK_HZ = 100e6            # OUT0 fabric clock the monitor counts on (100 MHz build, 2026-07-24)
 BUCKETS = ["len=1", "2-4", "5-16", "17-64", "65-256"]
 
 
@@ -58,7 +60,42 @@ def decode_record(w):
         print(f"  beats/line  {beats:10d} (expected)   avg burst = {beats/total:.1f} beats"
               if total else f"  beats/line  {beats}")
 
-    # ---- verdict ----
+    # ---- v2 fields (write channel + intra-burst read throttle) ----
+    if len(w) >= 18:
+        aw_count, w_beats, b_status, write_busy = w[11], w[12], w[13], w[14]
+        r_datawait, max_r_datawait, total_active = w[15], w[16], w[17]
+        sig2 = (b_status >> 24) & 0xFF
+        b_count = b_status & 0xFF
+        el = elapsed if elapsed else 1
+        print(f"  -- v2 (write channel + read-throttle) {'' if sig2==0x5A else '*** sig2!=0x5A, v1 bitstream? ***'}")
+        print(f"  AW bursts   {aw_count:10d}   W beats {w_beats:10d}   B resp {b_count:6d}"
+              + (f"   avg write burst {w_beats/aw_count:.1f}" if aw_count else ""))
+        print(f"  write_busy  {write_busy:10d} cyc = {100*write_busy/el:5.1f}% of elapsed   (WRITE time on the bus)")
+        print(f"  r_datawait  {r_datawait:10d} cyc = {100*r_datawait/el:5.1f}% of elapsed   (read outstanding but RVALID low = DDR read latency/throttle)")
+        print(f"  max_r_datawait {max_r_datawait:7d} cyc = {max_r_datawait/FCLK_HZ*1e9:8.0f} ns  (longest single read-data stall)")
+        print(f"  total_active {total_active:9d} cyc = {100*total_active/el:5.1f}% util (ANY handshake; v1 busy omitted writes)")
+        # decompose elapsed: read_busy + write_busy + read_datawait + genuine idle
+        genuine_idle = max(0, elapsed - total_active - r_datawait)
+        print(f"  ELAPSED decomposition: read_busy {100*busy/el:.0f}%  write_busy {100*write_busy/el:.0f}%"
+              f"  read_datawait {100*r_datawait/el:.0f}%  genuine_idle ~{100*genuine_idle/el:.0f}%")
+        print("  V2 VERDICT:", end=" ")
+        wf, rf = write_busy/el, r_datawait/el
+        if wf > 0.30 and wf >= rf:
+            print(f"WRITE-BOUND ({100*wf:.0f}% of the line is writing output). The read-only v1 monitor "
+                  "counted this as 'idle'. Fix = overlap read/write (explicit AXI iface / cross-line "
+                  "pipeline) or DELETE the write round-trip (fuse the output). FIC_1 helps only if the "
+                  "writes contend with another master's writes.")
+        elif rf > 0.30:
+            print(f"READ-THROTTLE-BOUND ({100*rf:.0f}% of the line the DDR is not returning read data "
+                  "while a burst is outstanding). DDR-controller-level (row activations / access pattern) "
+                  "-> FIC_1 will NOT help (same controller). Lever = access pattern / prefetch depth, or "
+                  "accept it and parallelise (divide the latency-bound work).")
+        else:
+            print(f"NEITHER dominates (write {100*wf:.0f}%, read_datawait {100*rf:.0f}%). Re-read the "
+                  "decomposition; the stall may be arbitration/inter-burst (see MAX_GAP) or coeff-gen "
+                  "limited (CPU side, not on this bus at all).")
+
+    # ---- v1 verdict (read channel only) ----
     # NOTE: this monitor taps only the READ channel (AR/R). Writes (AW/W/B) are NOT counted, so
     # (elapsed - busy) is write-time PLUS genuine idle, and low read-utilization does NOT by itself
     # mean the bus is idle. Weigh that before concluding "stalled".
@@ -105,10 +142,12 @@ def main():
         words = list(struct.unpack("<%dI" % n, data[: n * 4]))
     else:
         words = [int(a, 0) for a in args]
-    # split into 12-word records
-    for slot in range(len(words) // 12):
-        rec = words[slot * 12: slot * 12 + 12]
-        label = {1: "PASS-1 range gather (line 0)", 2: "PASS-2 azimuth gather (line 0)"}.get(
+    # split into 20-word records (v2; v1 was 12). Falls back to 12 for old dumps.
+    recw = 20 if len(words) >= 20 else 12
+    for slot in range(len(words) // recw):
+        rec = words[slot * recw: slot * recw + recw]
+        label = {1: "PASS-1 range gather (line 0)", 2: "PASS-2 azimuth gather (line 0)",
+                 9: "CONCURRENT CT+FFT-2 overlap run"}.get(
             rec[0] & 0xF, f"slot {slot}")
         print(f"\n=== {label} ===")
         decode_record(rec)

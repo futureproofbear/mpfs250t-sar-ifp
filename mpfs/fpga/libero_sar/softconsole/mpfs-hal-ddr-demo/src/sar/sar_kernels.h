@@ -35,6 +35,15 @@
 #define FICMON_BUSY          0x24u   /* cycles with an AR or R handshake in flight */
 #define FICMON_ELAPSED       0x28u   /* total cycles since clear (utilization = busy/elapsed) */
 #define FICMON_MAX_GAP       0x2cu   /* longest idle run between AR/R events (short-burst vs long-gap) */
+/* v2 (2026-07-24): WRITE channel + intra-burst read-throttle -- splits "write time" from "DDR read
+ * throttle" in the gather stall (see sar_fic0s_mon.v v2 map). */
+#define FICMON_AW_COUNT      0x30u   /* AW handshakes (write bursts issued) */
+#define FICMON_W_COUNT       0x34u   /* W beats accepted */
+#define FICMON_B_STATUS      0x38u   /* [7:0]b_count [9:8]bresp [16..19]aw/w/b sticky [31:24]0x5A sig */
+#define FICMON_WRITE_BUSY    0x3cu   /* cycles with AW/W/B handshake -> WRITE time */
+#define FICMON_R_DATAWAIT    0x40u   /* cycles read-outstanding but RVALID low -> DDR read throttle */
+#define FICMON_MAX_R_DATAWAIT 0x44u  /* longest such run */
+#define FICMON_TOTAL_ACTIVE  0x48u   /* cycles with ANY handshake (true utilization numerator) */
 
 /* SmartHLS control register offsets (common across all kernels). */
 #define HLS_START            0x08u   /* write 1 = start; read == 0 = done */

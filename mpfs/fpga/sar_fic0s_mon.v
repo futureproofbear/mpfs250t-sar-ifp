@@ -56,9 +56,32 @@
 //   read 0x10-0x2C immediately after that line's sar_k_wait completes -- counters then cover
 //   exactly that line's AXI activity (thousands of cycles; 32-bit saturation is not a
 //   practical concern for a single line).
+//
+//   ==== v2 (2026-07-24): WRITE channel + intra-burst read-throttle ====================
+//   The v1 fields above tap only AR/R, so they CANNOT tell whether the gather kernel's
+//   distributed idle is (a) time spent WRITING output (invisible to a read-only tap) or
+//   (b) DDR returning read data slower than 1 beat/cyc within an outstanding burst. These
+//   v2 counters split exactly that -- the decision the gather-stall root-cause hinges on.
+//   0x30 AW_COUNT         AW handshakes (write bursts issued), saturating 0xFFFFFFFF
+//   0x34 W_COUNT          W beats accepted (mon_wvalid&mon_wready)
+//   0x38 B_STATUS         [7:0] b_count(resp count, sat 0xFF) [9:8] bresp_last
+//                         [16] aw_valid_seen [17] aw_accepted [18] w_last_seen [19] b_seen
+//                         [31:24] 0x5A signature (v2 slave-alive)
+//   0x3C WRITE_BUSY       cycles with an AW, W, or B handshake in flight  -> WRITE time.
+//                         (write_busy/elapsed answers "is the idle actually writes?" = cause (a))
+//   0x40 R_DATAWAIT       cycles where a read burst is OUTSTANDING (AR accepted, not yet
+//                         RLAST) but RVALID is LOW -> DDR not delivering read data = cause (b)
+//                         (read latency + intra-burst throttle). r_datawait/elapsed sizes it.
+//   0x44 MAX_R_DATAWAIT   longest single run of read-outstanding-but-RVALID-low cycles
+//                         (a big value => one long DDR stall; many small => steady throttle).
+//   0x48 TOTAL_ACTIVE     cycles with ANY handshake (AR|R|AW|W|B) -- the true utilization
+//                         numerator (v1 BUSY_CYCLES omitted writes). util = TOTAL_ACTIVE/ELAPSED.
+//   Decode: ELAPSED = read_busy(0x24) + write_busy(0x3C) + genuine_idle + overlap; and
+//   R_DATAWAIT attributes the read-side idle to DDR throttle vs. inter-burst arbitration.
 
 module sar_fic0s_mon #(
-    parameter SIG = 8'hA5
+    parameter SIG    = 8'hA5,
+    parameter SIG_V2 = 8'h5A
 )(
     input  wire        aclk,
     input  wire        aresetn,        // active low
@@ -74,6 +97,16 @@ module sar_fic0s_mon #(
     input  wire [1:0]  mon_rresp,
     input  wire [3:0]  mon_rid,
     input  wire        mon_rlast,
+
+    // ---- v2: tapped FIC0_S WRITE channel (observe-only) ----
+    input  wire        mon_awvalid,
+    input  wire        mon_awready,
+    input  wire        mon_wvalid,
+    input  wire        mon_wready,
+    input  wire        mon_wlast,
+    input  wire        mon_bvalid,
+    input  wire        mon_bready,
+    input  wire [1:0]  mon_bresp,
 
     // ---- AXI4-Lite slave (read verdict / write-clear) ----
     input  wire [11:0] s_axi_awaddr,
@@ -181,6 +214,59 @@ module sar_fic0s_mon #(
         end
     end
 
+    // ---- v2: WRITE channel + intra-burst read-throttle -----------------------------------
+    reg        aw_valid_seen, aw_accepted, w_last_seen, b_seen;
+    reg [1:0]  bresp_last;
+    reg [7:0]  b_count;
+    reg [31:0] aw_count, w_count, write_busy, total_active;
+    reg [3:0]  rd_outstanding;                       // in-flight read bursts (max_outstanding_reads=8)
+    reg [31:0] r_datawait, max_r_datawait, run_r_datawait;
+
+    wire aw_hs   = mon_awvalid & mon_awready;
+    wire w_hs    = mon_wvalid  & mon_wready;
+    wire b_hs    = mon_bvalid  & mon_bready;
+    wire wr_act  = aw_hs | w_hs | b_hs;
+    wire any_act = act_cycle | wr_act;               // act_cycle = ar_hs|r_hs (v1)
+    wire rd_inflight = (rd_outstanding != 4'd0);
+    wire r_stall = rd_inflight & ~mon_rvalid;        // read burst outstanding but no data arriving
+    wire rburst_done = r_hs & mon_rlast;
+
+    always @(posedge aclk or negedge aresetn) begin
+        if (!aresetn || clr) begin
+            aw_valid_seen<=0; aw_accepted<=0; w_last_seen<=0; b_seen<=0; bresp_last<=0;
+            b_count<=0; aw_count<=0; w_count<=0; write_busy<=0; total_active<=0;
+            rd_outstanding<=0; r_datawait<=0; max_r_datawait<=0; run_r_datawait<=0;
+        end else begin
+            // write-channel sticky + counts
+            if (mon_awvalid) aw_valid_seen <= 1'b1;
+            if (aw_hs) begin aw_accepted<=1'b1; if (aw_count!=32'hFFFFFFFF) aw_count<=aw_count+32'd1; end
+            if (w_hs)  begin if (mon_wlast) w_last_seen<=1'b1; if (w_count!=32'hFFFFFFFF) w_count<=w_count+32'd1; end
+            if (b_hs)  begin b_seen<=1'b1; bresp_last<=mon_bresp; if (b_count!=8'hFF) b_count<=b_count+8'd1; end
+
+            if (wr_act   && write_busy   !=32'hFFFFFFFF) write_busy   <= write_busy   + 32'd1;
+            if (any_act  && total_active !=32'hFFFFFFFF) total_active <= total_active + 32'd1;
+
+            // outstanding read bursts: +1 on AR accept, -1 on RLAST beat (both can occur same cycle)
+            case ({ar_hs, rburst_done})
+                2'b10:   rd_outstanding <= rd_outstanding + 4'd1;
+                2'b01:   if (rd_outstanding!=4'd0) rd_outstanding <= rd_outstanding - 4'd1;
+                default: ;
+            endcase
+
+            // R_DATAWAIT: read outstanding but RVALID low = DDR read latency / intra-burst throttle
+            if (r_stall) begin
+                if (r_datawait     != 32'hFFFFFFFF) r_datawait     <= r_datawait     + 32'd1;
+                if (run_r_datawait != 32'hFFFFFFFF) run_r_datawait <= run_r_datawait + 32'd1;
+            end else begin
+                if (run_r_datawait > max_r_datawait) max_r_datawait <= run_r_datawait;
+                run_r_datawait <= 32'd0;
+            end
+        end
+    end
+
+    wire [31:0] b_status = { SIG_V2, 4'b0, b_seen, w_last_seen, aw_accepted, aw_valid_seen,
+                             6'b0, bresp_last, b_count };
+
     // ---- minimal AXI4-Lite (single-beat, always OKAY) ----
     reg wr_clr;
     assign clr = wr_clr;
@@ -221,6 +307,13 @@ module sar_fic0s_mon #(
                     10'd9:   s_axi_rdata <= busy_cycles;      // 0x24 BUSY_CYCLES
                     10'd10:  s_axi_rdata <= elapsed_cycles;   // 0x28 ELAPSED_CYCLES
                     10'd11:  s_axi_rdata <= max_gap;          // 0x2C MAX_GAP
+                    10'd12:  s_axi_rdata <= aw_count;         // 0x30 AW_COUNT
+                    10'd13:  s_axi_rdata <= w_count;          // 0x34 W_COUNT
+                    10'd14:  s_axi_rdata <= b_status;         // 0x38 B_STATUS (+SIG_V2)
+                    10'd15:  s_axi_rdata <= write_busy;       // 0x3C WRITE_BUSY
+                    10'd16:  s_axi_rdata <= r_datawait;       // 0x40 R_DATAWAIT
+                    10'd17:  s_axi_rdata <= max_r_datawait;   // 0x44 MAX_R_DATAWAIT
+                    10'd18:  s_axi_rdata <= total_active;     // 0x48 TOTAL_ACTIVE
                     default: s_axi_rdata <= 32'hDEAD_0000;
                 endcase
             end else if (s_axi_rvalid & s_axi_rready) begin

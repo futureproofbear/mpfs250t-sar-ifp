@@ -127,7 +127,8 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
  * Decode with mpfs/host/decode_ficmon.py. Needs the 2026-07-22 monitor bitstream; on an older
  * bitstream K_FIC0MON does not decode and reads return the AXI default (harmless, obviously bogus). */
 #define SAR_FICMON_ADDR        0xB0059240u
-#define FICMON_REC(slot)  ((volatile uint32_t *)(uintptr_t)(SAR_FICMON_ADDR + (slot) * 48u))
+#define FICMON_RECW            20u          /* words per record (v2: 12 v1 + 7 v2 + spare) */
+#define FICMON_REC(slot)  ((volatile uint32_t *)(uintptr_t)(SAR_FICMON_ADDR + (slot) * FICMON_RECW * 4u))
 
 static inline void ficmon_clear(void) { sar_reg_w(K_FIC0MON, FICMON_STATUS, 1u); }
 
@@ -145,9 +146,17 @@ static void ficmon_snapshot(uint32_t slot, uint32_t pass, uint32_t beats)
     r[8]  = sar_reg_r(K_FIC0MON, FICMON_ELAPSED);
     r[9]  = sar_reg_r(K_FIC0MON, FICMON_MAX_GAP);
     r[10] = beats;
-    r[11] = 0u;
+    /* v2: write channel + intra-burst read-throttle */
+    r[11] = sar_reg_r(K_FIC0MON, FICMON_AW_COUNT);
+    r[12] = sar_reg_r(K_FIC0MON, FICMON_W_COUNT);
+    r[13] = sar_reg_r(K_FIC0MON, FICMON_B_STATUS);
+    r[14] = sar_reg_r(K_FIC0MON, FICMON_WRITE_BUSY);
+    r[15] = sar_reg_r(K_FIC0MON, FICMON_R_DATAWAIT);
+    r[16] = sar_reg_r(K_FIC0MON, FICMON_MAX_R_DATAWAIT);
+    r[17] = sar_reg_r(K_FIC0MON, FICMON_TOTAL_ACTIVE);
+    r[18] = 0u; r[19] = 0u;
     __asm volatile ("fence rw, rw");
-    flush_range_to_ddr(SAR_FICMON_ADDR + slot * 48u, 48u);   /* publish for a JTAG physical read */
+    flush_range_to_ddr(SAR_FICMON_ADDR + slot * FICMON_RECW * 4u, FICMON_RECW * 4u); /* publish for JTAG read */
 }
 #define RP_T0(v)  uint64_t v = readmtime()
 #define RP_ACC(i, v) do { RPROF[i] += readmtime() - (v); } while (0)
@@ -456,7 +465,7 @@ int fft_h4_bench(uint32_t spins)
     (void)fft_fabric_pass(BUF_SIG, BUF_OUT, spins, 0, 1);  /* ... while the FFT hammers FIC_0 too */
     if (!sar_k_wait(K_CORNER_TURN, spins)) rec[15] = 0xDEAD0002u;   /* join CT (should be long done) */
     t1 = readmtime();
-    ficmon_snapshot(0u, 9u, SAR_ROW_BEATS);       /* concurrent-run bus behaviour -> 0xB0059240 */
+    ficmon_snapshot(1u, 9u, SAR_ROW_BEATS);       /* concurrent-run bus behaviour -> slot 1 (0xB0059290); slot 0 keeps range gather */
     rec[3] = (uint32_t)(t1 - t0);                 /* t_conc (us) */
 
     {

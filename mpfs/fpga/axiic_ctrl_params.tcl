@@ -1,3 +1,13 @@
+# AXIIC_CTRL (CIC) parameters -- control plane, 1 initiator (MSS FIC_0_AXI4_M) -> N targets @0x6000_n000.
+#
+# 2026-07-25 -- SECOND CoreFFT CHAIN. NUM_TARGETS 8 -> 9 and TARGET8 remapped from its unused
+# default (0x4000_0000, TYPE:0) to the 2nd coefficient generator (COEFG_B) @0x6000_8000,
+# TYPE:1 / DATA_WIDTH:32 -- byte-for-byte the TARGET7 (COEFG) shape, because it IS the same core.
+# Targets 1 and 2 are NOT new: they were WIN (window, fused into the feeder -> dead) and RES2
+# (unproven dual-lane resample, 99.64%-of-pixels-wrong on silicon -> reverted), and are REUSED
+# in place for FEED_B (0x6000_1000) and UNLD_B (0x6000_2000). Reusing them keeps every EXISTING
+# kernel address unchanged (RES 0x3000, FEED 0x4000, UNLD 0x5000, FIC0MON 0x6000, COEFG 0x7000)
+# -- renumbering would have moved all of them and broken every firmware address and host script.
 set AXIIC_CTRL_PARAMS [list \
     "ADDR_WIDTH:32"  \
     "ADDR_WIDTH_INT:32"  \
@@ -1310,7 +1320,7 @@ set AXIIC_CTRL_PARAMS [list \
     "NUM_RS_STAGES_TRGT29:0"  \
     "NUM_RS_STAGES_TRGT30:0"  \
     "NUM_RS_STAGES_TRGT31:0"  \
-    "NUM_TARGETS:8"  \
+    "NUM_TARGETS:9"  \
     "OPTIMIZATION:3"  \
     "PIPE:0"  \
     "PROTOCONV_RAM_TYPE:3"  \
@@ -1465,15 +1475,15 @@ set AXIIC_CTRL_PARAMS [list \
     "TARGET8_CDC_PLACEMENT:1"  \
     "TARGET8_CHAN_RS:true"  \
     "TARGET8_CLOCK_DOMAIN_CROSSING:false"  \
-    "TARGET8_DATA_WIDTH:64"  \
+    "TARGET8_DATA_WIDTH:32"  \
     "TARGET8_DWC_CHAN_RS:false"  \
     "TARGET8_DWC_DATA_FIFO_DEPTH:16"  \
-    "TARGET8_END_ADDR:0x47ffffff"  \
+    "TARGET8_END_ADDR:0x60008fff"  \
     "TARGET8_END_ADDR_UPPER:0x0"  \
     "TARGET8_READ_INTERLEAVE:false"  \
-    "TARGET8_START_ADDR:0x40000000"  \
+    "TARGET8_START_ADDR:0x60008000"  \
     "TARGET8_START_ADDR_UPPER:0x0"  \
-    "TARGET8_TYPE:0"  \
+    "TARGET8_TYPE:1"  \
     "TARGET9_CDC_ADDR_RESP_FIFO_DEPTH:1"  \
     "TARGET9_CDC_FIFO_DEPTH:16"  \
     "TARGET9_CDC_PLACEMENT:1"  \

@@ -748,6 +748,29 @@ silicon behaviour.**
   errors that magnitude correlation cannot. See §4.7.
 - **Model-on-real-scene** — `real_board_scene_test.py` / `real_data_model_test.py` — CPU-vs-fabric BFP
   model on the actual board scene (distinguishes an algorithm-sound-but-implementation-bug case).
+- **Dual-CoreFFT-chain gate** — `bash mpfs/fpga/tb/run_dual_chain_gate.sh` (~40 s) — run after ANY edit
+  to `sartop_assembly.tcl`, `fft_feeder_v.v`, `fft_unloader_v.v` or the per-chain firmware. Two parts:
+  * **GATE W** (`tb/check_sartop_wiring.tcl`, plain `tclsh`) mocks SmartDesign, sources the REAL
+    `sartop_assembly.tcl` and asserts the connection GRAPH — per-chain closure, `FFT_x:SCALE_EXP →
+    FEED_x` only, `COEFG_x → FEED_x` only, 6 DIC initiators (never >5, or `NUM_INITIATORS_WIDTH`
+    goes 3→4 and `sar_axi_idconv.v` truncates the master-select silently), the CIC target map, and
+    no dangling chain-B pin. **This is the only check that can catch a SCALE_EXP cross-wire** —
+    synthesis, timing closure and a correlation check are all blind to it (it produces a smooth,
+    plausible, wrong-brightness image). Takes an optional path argument so mutated copies can be
+    checked. Expect `==== SAR_TOP wiring: PASS ====`.
+  * **GATE S** (`tb/tb_fft_dual_chain.v`, ModelSim) runs TWO complete chains sharing one DDR through a
+    single-outstanding-read (SASD) arbiter against ONE chain over the same rows, and requires
+    byte-identical DDR, identical per-row exponents and **100% destination mutation coverage** (the
+    destination is poisoned with a run-specific pattern and every LSRAM array in both chains is
+    poisoned between runs — an earlier A/B on this project passed only because the second path
+    inherited the first's buffers). Expect `==== dual-chain FFT: PASS ====`.
+  * Both parts run their own mutation battery (5 wiring + 5 simulation) and FAIL if any mutation goes
+    undetected, so the gate cannot silently become vacuous.
+  * Sim caveat, stated deliberately: `tb_corefft_model` in that testbench is a CoreFFT-CONTRACT stand-in
+    (64-point integer Hadamard with a data-dependent BFP exponent) that RE-ARMS — `sim/corefft_behav.v`
+    does exactly one transform and cannot drive a multi-row test. It proves the plumbing, the row
+    partition, DDR disjointness and the exponent capture; it proves nothing about CoreFFT's arithmetic
+    (unchanged hard IP, same `COREFFT_C0` component instantiated twice).
 
 **On silicon (JTAG; observe `docs/USER_GUIDE.md` §3.3 hygiene, plus §4.8 below):**
 - **Full pipeline (acceptance)** — `bash run_pipe_small.sh` → expect **RETURN=0**; then dump the OUT band

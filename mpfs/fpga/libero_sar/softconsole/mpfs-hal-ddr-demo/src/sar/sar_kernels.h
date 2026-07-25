@@ -1,13 +1,13 @@
 /*
  * sar_kernels.h -- register map for the SAR fabric accelerator as actually built
  * in Libero (SAR_TOP). The control plane is the MSS FIC0 initiator -> AXIIC_CTRL
- * (1 master -> 8 slaves); each slave is a 4 KiB window at 0x6000_n000.
+ * (1 master -> 9 slaves); each slave is a 4 KiB window at 0x6000_n000.
  *
- * Five of the slaves are SmartHLS kernels; each exposes the SmartHLS control
- * register layout (see each kernel's generated accelerator_drivers driver):
+ * Each kernel exposes the SmartHLS control register layout (the hand-written
+ * Verilog replacements deliberately preserve it -- see each kernel's generated
+ * accelerator_drivers driver):
  *     +0x08  START / STATUS  -- write 1 to start; reads back 0 when idle/done
  *     +0x0c  arg0 pointer/scalar, then +0x10 arg1, +0x14 arg2, +0x18 arg3 ...
- * The sixth slave is the CoreAXI4DMAController control port.
  */
 #ifndef SAR_KERNELS_H_
 #define SAR_KERNELS_H_
@@ -17,14 +17,24 @@
 /* MSS FIC0 initiator window -> AXIIC_CTRL slaves (4 KiB each). */
 #define SAR_FIC0_CTRL_BASE   0x60000000u
 #define K_CORNER_TURN        (SAR_FIC0_CTRL_BASE + 0x0000u)  /* AXIIC_CTRL SLAVE0 */
-#define K_WINDOW             (SAR_FIC0_CTRL_BASE + 0x1000u)  /* SLAVE1 */
-#define K_RESAMPLE2          (SAR_FIC0_CTRL_BASE + 0x2000u)  /* SLAVE2: 2nd resample lane (was DET; DET fused into FFT-2 unloader) */
+/* SLAVE1/SLAVE2 REASSIGNED 2026-07-25 to the SECOND CoreFFT chain. They were K_WINDOW (the 2-D
+ * Hamming window, fused into the feeder 2026-07-21 -- no firmware user since) and K_RESAMPLE2
+ * (the 2-lane range gather: 4.85 s vs 5.78 s but 99.64% of a 1024x1024 ROI wrong on silicon,
+ * openspec add-res2-dual-lane-gather -> verdict DO NOT COMMIT). Reusing them IN PLACE is what
+ * keeps every other kernel at the address the firmware and the host .gdb scripts already use,
+ * and keeps the DIC at NUM_INITIATORS=6 (the 8-master ceiling in sar_axi_idconv.v:145,153).
+ * ANY firmware still writing 0x60001000/0x60002000 as a window/resample kernel now drives the
+ * second FFT chain -- both old symbols are therefore DELETED, not redefined, so a stale user
+ * fails to compile instead of silently arming an FFT feeder mid-resample. */
+#define K_FFT_FEEDER_B       (SAR_FIC0_CTRL_BASE + 0x1000u)  /* SLAVE1: 2nd chain fft_feeder  (was K_WINDOW)   */
+#define K_FFT_UNLOADER_B     (SAR_FIC0_CTRL_BASE + 0x2000u)  /* SLAVE2: 2nd chain fft_unloader (was K_RESAMPLE2) */
 #define K_RESAMPLE           (SAR_FIC0_CTRL_BASE + 0x3000u)  /* SLAVE3 */
 #define K_FFT_FEEDER         (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (CoreFFT build: fft_feeder) */
 #define K_FFT_UNLOADER       (SAR_FIC0_CTRL_BASE + 0x5000u)  /* SLAVE5 (CoreFFT build: fft_unloader) */
 #define K_FFT                (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (HLS-FFT build: fft_kernel, replaces feeder+unloader chain) */
 #define K_FIC0MON            (SAR_FIC0_CTRL_BASE + 0x6000u)  /* SLAVE6: FIC_0 AXI monitor (sar_fic0s_mon.v, 2026-07-22 build) */
 #define K_COEFFGEN           (SAR_FIC0_CTRL_BASE + 0x7000u)  /* SLAVE7: on-fabric azimuth resample coefficient generator (sar_coeffgen.v) */
+#define K_COEFFGEN_B         (SAR_FIC0_CTRL_BASE + 0x8000u)  /* SLAVE8: 2nd chain's coefficient generator (2nd sar_coeffgen instance) */
 
 /* On-fabric azimuth coefficient generator (sar_coeffgen.v). Hand-written Verilog; its output is
  * a {idx,wq} STREAM straight into the FFT-1 feeder's gather engine (no DDR, no DIC port), enabled

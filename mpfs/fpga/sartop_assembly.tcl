@@ -13,15 +13,40 @@ sd_instantiate_component -sd_name $sd -component_name {COREFFT_C0}   -instance_n
 ## AXI4 write master. Replaces the deadlocking CoreAXI4DMAController (AXIDMA_C0) S2MM stream target.
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_unloader_top}          -instance_name {UNLD}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corner_turn_top}          -instance_name {CT}
-sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {window_top}               -instance_name {WIN}
-## DET slot repurposed 2026-07-24: a 2nd resample_top (RES2) = lane 2 of the parallel range gather
-## (priority 3a). detect_top is fused into the FFT-2 unloader in the shipping path; the only firmware
-## user of the standalone K_DETECT was the known-broken DETMODE==2 HLS-detect test, now removed.
-sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {resample_top}             -instance_name {RES2}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {resample_top}             -instance_name {RES}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_feeder_top}           -instance_name {FEED}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corefft_stream64_adapter} -instance_name {GBX}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_axi_idconv}           -instance_name {ID_FIX}
+## =====================================================================================
+## SECOND CoreFFT CHAIN (2026-07-25) -- FFT_B + GBX_B + FEED_B + UNLD_B + COEFG_B.
+##
+## WHY: a pass's rows are INDEPENDENT (each row is its own 8192-pt transform with its own BFP
+## exponent), and one chain leaves the shared FIC_0 read slot 92.5% idle -- measured on silicon
+## with the fabric coefficient generator on: READ_BUSY 2,862 + R_DATAWAIT 3,762 of ELAPSED 88,231
+## cycles for one FFT-1 row = 7.5% read-channel occupancy, 45 AR bursts averaging 182 beats. Two
+## chains therefore need ~15% of the slot. The two PASSES cannot overlap (FFT-2 consumes the
+## corner-turn of FFT-1's output), so splitting ROWS WITHIN a pass is the only available form.
+##
+## THE TWO INSTANCES WIN AND RES2 ARE RECLAIMED, NOT ADDED TO. That keeps the DIC at
+## NUM_INITIATORS=6 / NUM_INITIATORS_WIDTH=3, so sar_axi_idconv.v:145,153 still forwards a 3-bit
+## master_number into FIC_0's 4-bit ARID/AWID with nothing truncated, and the AXIIC_C0 arbiter/mux
+## does not widen at all (see axiic_c0_params_330.tcl -- UNCHANGED by this design).
+##   WIN  (initiator1 / CIC target1) : the 2-D Hamming window has been fused into fft_feeder_v.v
+##                                     since 2026-07-21; window_top has had no firmware user since.
+##   RES2 (initiator2 / CIC target2) : the 2-lane range gather. Silicon 2026-07-25: 4.85 s vs 5.78 s
+##                                     but 99.64% of a 1024x1024 ROI wrong (openspec
+##                                     add-res2-dual-lane-gather/tasks.md -- verdict DO NOT COMMIT).
+##                                     The firmware lane is removed with it in this change.
+## FEED_B takes initiator1/target1 (read-only master, exactly like FEED on initiator4) and UNLD_B
+## takes initiator2/target2 (write-only, exactly like UNLD on initiator5). Every OTHER kernel keeps
+## its address, so no firmware or host script address moves.
+##
+## FFT_B is a SECOND INSTANCE of the SAME COREFFT_C0 component, not a second component: identical
+## configuration is then structural, not a copied parameter list that can drift.
+sd_instantiate_component -sd_name $sd -component_name {COREFFT_C0}   -instance_name {FFT_B}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corefft_stream64_adapter} -instance_name {GBX_B}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_feeder_top}           -instance_name {FEED_B}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_unloader_top}         -instance_name {UNLD_B}
 ## RSLICE_DIC/RSLICE_CIC: ONE axi4_regslice HDL+ core, TWO instances (timing fix -- see
 ## axi4_regslice_core.tcl / axi4_regslice.v headers). RSLICE_DIC sits on the existing
 ## DIC:AXI4mtarget0<->ID_FIX:S_AXI link (11-bit ID/32-bit addr, matches ID_FIX:S_AXI exactly).
@@ -52,6 +77,22 @@ sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_fic0s_mon}            
 ## FEED's idx+wq DDR load passes (6144 of 8961 read beats/row). Runtime-gated at FEED reg 0x20
 ## bit1, DEFAULT OFF -- this build is behaviour-neutral until the firmware sets it.
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_coeffgen}             -instance_name {COEFG}
+## COEFG_B: the SECOND chain's coefficient generator, a full 2nd instance (NEW 9th CIC target
+## @0x6000_8000, axiic_ctrl_params.tcl TARGET8). The two chains process DIFFERENT rows at the same
+## time and a row's coefficients depend on the scalar KR[j], so they need two INDEPENDENT streams.
+##
+## WHY A FULL SECOND INSTANCE AND NOT A SHARED TABLE STORE (tan_s/inv_tan/KC are row-invariant, so
+## sharing is arithmetically legal): sharing would need ONE WRITE + TWO READ ports on each 8192x32
+## table. PolarFire LSRAM gives 1W+1R (two-port) or 2 x R/W (dual-port); a 1W2R array is mapped by
+## REPLICATION unless the tool chooses to fold the write onto one dual-port port, and THIS DESIGN
+## ALREADY HAS THE COUNTEREXAMPLE: fft_feeder_v.v:642 adds a second reader to `wtab` and the
+## comment records that synthesis replicates it. A shared store would therefore very likely cost
+## the SAME 96 blocks while adding a long cross-module RAM read path onto COEFG/u_mul_fr -- which
+## is the design's critical path at +0.266 ns. Betting the LSRAM budget on an inference nobody can
+## verify without a synthesis run is exactly how the last coeffgen estimate came in 50 blocks
+## optimistic. Two instances cost a deterministic +48 LSRAM and replicate the critical path rather
+## than lengthening it.
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_coeffgen}             -instance_name {COEFG_B}
 
 ## ---------------- clocks ----------------
 sd_create_scalar_port -sd_name $sd -port_name {REF_CLK_50MHz} -port_direction {IN}
@@ -60,9 +101,12 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"REF_CLK_50MHz" "CLKREF:A"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CLKREF:Y" "CCC:REF_CLK_0"} }
 sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT0_FABCLK_0" \
     "MSS:FIC_0_ACLK" "DIC:ACLK" "CIC:ACLK" "UNLD:clk" "FFT:CLK" "GBX:clk" \
-    "CT:clk" "WIN:clk" "RES2:clk" "RES:clk" "FEED:clk" "RST:CLK" "ID_FIX:ACLK" \
-    "RSLICE_DIC:ACLK" "RSLICE_CIC:ACLK" "FIC0MON:aclk" "COEFG:clk"}
-catch { sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT1_FABCLK_0" "FFT:SLOWCLK"} }
+    "CT:clk" "RES:clk" "FEED:clk" "RST:CLK" "ID_FIX:ACLK" \
+    "RSLICE_DIC:ACLK" "RSLICE_CIC:ACLK" "FIC0MON:aclk" "COEFG:clk" \
+    "UNLD_B:clk" "FFT_B:CLK" "GBX_B:clk" "FEED_B:clk" "COEFG_B:clk"}
+## BOTH CoreFFT instances take the SAME OUT1 SLOWCLK. constraints/sar_fft_cdc.sdc declares the
+## OUT0<->OUT1 false paths clock-to-clock (not per instance), so it already covers FFT_B.
+catch { sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT1_FABCLK_0" "FFT:SLOWCLK" "FFT_B:SLOWCLK"} }
 
 ## ---------------- reset (CORERESET_PF) ----------------
 catch { sd_connect_pins_to_constant -sd_name $sd -pin_names {RST:BANK_x_VDDI_STATUS} -value {VCC} }
@@ -76,17 +120,32 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"RST:PLL_POWERDOWN_B"   "CCC:PL
 catch { sd_connect_pins -sd_name $sd -pin_names {"MSS:MSS_RESET_N_M2F"   "RST:EXT_RST_N"} }
 sd_connect_pins -sd_name $sd -pin_names {"RST:FABRIC_RESET_N" \
     "FFT:NGRST" "DIC:ARESETN" "CIC:ARESETN" "GBX:resetn" "ID_FIX:ARESETN" \
-    "RSLICE_DIC:ARESETN" "RSLICE_CIC:ARESETN" "FIC0MON:aresetn" "COEFG:resetn"}
+    "RSLICE_DIC:ARESETN" "RSLICE_CIC:ARESETN" "FIC0MON:aresetn" "COEFG:resetn" \
+    "FFT_B:NGRST" "GBX_B:resetn" "COEFG_B:resetn"}
 ## UNLD (HLS kernel) uses an active-high synchronous reset -> invert FABRIC_RESET_N like the other kernels.
-foreach k {CT WIN RES2 RES FEED UNLD} {
+foreach k {CT RES FEED UNLD FEED_B UNLD_B} {
     sd_invert_pins -sd_name $sd -pin_names "${k}:reset"
     sd_connect_pins -sd_name $sd -pin_names "RST:FABRIC_RESET_N ${k}:reset"
 }
 
 ## ---------------- data plane (AXIIC 3.0.130): 6 initiators -> DIC -> ID_FIX -> MSS FIC0 ----------------
+## STILL SIX. Slots 1 and 2 are RECLAIMED from the dead WIN/RES2 kernels for the second chain, so
+## NUM_INITIATORS stays 6 and NUM_INITIATORS_WIDTH stays 3 -- the 8-master ceiling that
+## sar_axi_idconv.v:145,153 imposes (master_number[2:0] -> FIC_0's 4-bit ARID/AWID) is not
+## approached, and axiic_c0_params_330.tcl needs NO change at all.
+##   0 CT      read+write   corner turn
+##   1 FEED_B  read-only    2nd chain feeder   (was WIN,  dead: window fused into the feeder)
+##   2 UNLD_B  write-only   2nd chain unloader (was RES2, dead: reverted dual-lane resample)
+##   3 RES     read+write   resample
+##   4 FEED    read-only    1st chain feeder
+##   5 UNLD    write-only   1st chain unloader
+## SASD IS UNTOUCHED (CROSSBAR_MODE:0, OPEN_TRANS_MAX:1, NUM_THREADS:1, READ_INTERLEAVE:false).
+## Both feeders tie m_arid to 0 (fft_feeder_top.v:120 leaves .m_arid() open, fft_feeder_v.v:382
+## drives zero) and are safe ONLY because SASD permits one outstanding read interconnect-wide.
+## Do NOT add read parallelism to SASD in the same change as a second ID-less read master.
 catch { sd_connect_pins -sd_name $sd -pin_names {"CT:axi4initiator"        "DIC:AXI4minitiator0"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"WIN:axi4initiator"       "DIC:AXI4minitiator1"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"RES2:axi4initiator"      "DIC:AXI4minitiator2"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"FEED_B:axi4initiator"    "DIC:AXI4minitiator1"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"UNLD_B:axi4initiator"    "DIC:AXI4minitiator2"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"RES:axi4initiator"       "DIC:AXI4minitiator3"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:axi4initiator"      "DIC:AXI4minitiator4"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"UNLD:axi4initiator"      "DIC:AXI4minitiator5"} }
@@ -174,9 +233,13 @@ foreach {b} {
     WDATA WLAST WREADY WSTRB WVALID
 } { if {[catch { sd_connect_pins -sd_name $sd -pin_names "MSS:FIC_0_AXI4_M_$b RSLICE_CIC:S_AXI_$b" } err]} { puts "RSLICE_CIC_CONNECT_FAIL $b : $err" } else { puts "RSLICE_CIC_CONNECT_OK $b" } }
 if {[catch { sd_connect_pins -sd_name $sd -pin_names {"RSLICE_CIC:M_AXI" "CIC:AXI4minitiator0"} } err]} { puts "RSLICE_CIC_MAXI_CONNECT_FAIL : $err" } else { puts "RSLICE_CIC_MAXI_CONNECT_OK" }
+## Targets 1 and 2 are REUSED IN PLACE (see the instantiate block): FEED_B @0x60001000 and
+## UNLD_B @0x60002000. Reported, not bare-catch -- these two are the connections a silent failure
+## would leave dangling, and a dangling target bif promotes the whole interface to top-level I/O
+## (the 144-pin synthesis failure documented at RSLICE_CIC below).
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget0" "CT:axi4target"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget1" "WIN:axi4target"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget2" "RES2:axi4target"} }
+if {[catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget1" "FEED_B:axi4target"} } err]} { puts "FEEDB_CTRL_CONNECT_FAIL : $err" } else { puts "FEEDB_CTRL_CONNECT_OK" }
+if {[catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget2" "UNLD_B:axi4target"} } err]} { puts "UNLDB_CTRL_CONNECT_FAIL : $err" } else { puts "UNLDB_CTRL_CONNECT_OK" }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget3" "RES:axi4target"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget4" "FEED:axi4target"} }
 ## target5 now a standard AXI4 target (was AXI4Lmtarget5 for the DMA) -> fft_unloader control regs @ 0x60005000
@@ -221,49 +284,89 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BRESP"   "FIC0MON
 ## REPORTED, not bare-catch: a silently failed connect leaves a dangling interface and a netlist
 ## that differs from the one this script claims to build (the lesson behind the RSLICE puts below).
 if {[catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4Lmtarget7" "COEFG:s_axi"} } err]} { puts "COEFG_CTRL_CONNECT_FAIL : $err" } else { puts "COEFG_CTRL_CONNECT_OK" }
-## COEFG -> FEED coefficient stream, plain pins (no bus interface on either side, exactly like
-## FFT:SCALE_EXP -> FEED:scale_exp_in). This is the ONLY data-plane connection the generator has:
-## no FIC, no AXI4 initiator, no DIC port, nothing added to the FIC_0 read path. FEED consumes it
-## only when its GATHER_CTRL (0x20) bit1 is set; bit1 is 0 out of reset, so an unconsumed stream
-## simply back-pressures and the feeder behaves exactly as it does today.
-foreach {a b} {
-    COEFG:m_idx   FEED:c_idx
-    COEFG:m_wq    FEED:c_wq
-    COEFG:m_valid FEED:c_valid
-    COEFG:m_ready FEED:c_ready
-} { if {[catch { sd_connect_pins -sd_name $sd -pin_names "$a $b" } err]} { puts "COEFG_STREAM_CONNECT_FAIL $a : $err" } else { puts "COEFG_STREAM_CONNECT_OK $a" } }
+## target8 (NEW): COEFG_B, the 2nd chain's coefficient generator @0x6000_8000. Same AXI4-Lite
+## ("AXI4Lmtarget<n>", with an L) typing as targets 6/7 -- it is the same sar_coeffgen core.
+if {[catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4Lmtarget8" "COEFG_B:s_axi"} } err]} { puts "COEFGB_CTRL_CONNECT_FAIL : $err" } else { puts "COEFGB_CTRL_CONNECT_OK" }
 
-## ---------------- CoreFFT streaming path ----------------
-catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var"       "GBX:s_axis_tdata"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var_valid" "GBX:s_axis_tvalid"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var_ready" "GBX:s_axis_tready"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"GBX:datai_re"    "FFT:DATAI_RE"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"GBX:datai_im"    "FFT:DATAI_IM"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"GBX:datai_valid" "FFT:DATAI_VALID"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:BUF_READY"   "GBX:buf_ready"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:DATAO_RE"    "GBX:datao_re"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:DATAO_IM"    "GBX:datao_im"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:DATAO_VALID" "GBX:datao_valid"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:OUTP_READY"  "GBX:outp_ready"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"GBX:read_outp"   "FFT:READ_OUTP"} }
-## fan OUTP_READY out to the feeder too: it latches SCALE_EXP on OUTP_READY's falling edge
-## (frame boundary) so the CPU can read each row's block exponent for the global renormalize.
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:OUTP_READY"  "FEED:outp_ready_in"} }
-## CoreFFT output stream (gearbox 64-bit master) -> fft_unloader AXI4-Stream SLAVE. The unloader
-## drains the WHOLE frame in one continuous run (no descriptors, no per-transform re-arm, no TLAST),
-## so there is never a "2nd back-to-back transaction" for a stream target FSM to deadlock on.
-catch { sd_connect_pins -sd_name $sd -pin_names {"GBX:m_axis_tdata"  "UNLD:in_var"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"GBX:m_axis_tvalid" "UNLD:in_var_valid"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"UNLD:in_var_ready" "GBX:m_axis_tready"} }
-## TLAST/TDEST were DMA-framing only; the unloader ignores them. Leave the gearbox outputs unused.
-catch { sd_mark_pins_unused -sd_name $sd -pin_names {GBX:m_axis_tlast} }
-catch { sd_mark_pins_unused -sd_name $sd -pin_names {GBX:m_axis_tdest} }
+## =====================================================================================
+## PER-CHAIN WIRING -- CoreFFT streaming path, SCALE_EXP capture, coefficient stream.
+##
+## Written as ONE loop over the two chains so chain B's wiring is LITERALLY the same code as
+## chain A's with a different instance quadruple. That is deliberate and is the whole point:
+##
+##   H-2 / SCALE_EXP.  fft_feeder_v.v:149-155 latches SCALE_EXP on the FALLING edge of
+##   OUTP_READY and holds it only until the next frame. `FFT_x:SCALE_EXP -> FEED_x:scale_exp_in`
+##   and `FFT_x:OUTP_READY -> FEED_x:outp_ready_in` MUST come from the SAME chain. A cross-wire
+##   (FFT_B's exponent latched into FEED, say) is invisible to synthesis, invisible to timing,
+##   and invisible to a correlation check -- it produces a smooth, wrong-brightness image,
+##   because the firmware renormalizes each row by >>(emax - exp_row) with the WRONG exp_row.
+##   A hand-copied second block of 15 connect lines is exactly how that typo gets made; a loop
+##   over {FFT GBX FEED UNLD COEFG} / {FFT_B GBX_B FEED_B UNLD_B COEFG_B} cannot make it.
+##
+##   Reported, not bare-catch, for the same reason: a silently failed connect leaves a dangling
+##   pin and a netlist that differs from the one this script claims to have built.
+##
+## The two chains share NOTHING on the data plane except DDR itself (disjoint rows -- chain A
+## writes dst + 2k*32768, chain B dst + (2k+1)*32768) and the FIC_0 read slot.
+## =====================================================================================
+foreach {F G FD U CG} {
+    FFT   GBX   FEED   UNLD   COEFG
+    FFT_B GBX_B FEED_B UNLD_B COEFG_B
+} {
+    foreach {a b} [list \
+        "$FD:out_var"       "$G:s_axis_tdata" \
+        "$FD:out_var_valid" "$G:s_axis_tvalid" \
+        "$FD:out_var_ready" "$G:s_axis_tready" \
+        "$G:datai_re"       "$F:DATAI_RE" \
+        "$G:datai_im"       "$F:DATAI_IM" \
+        "$G:datai_valid"    "$F:DATAI_VALID" \
+        "$F:BUF_READY"      "$G:buf_ready" \
+        "$F:DATAO_RE"       "$G:datao_re" \
+        "$F:DATAO_IM"       "$G:datao_im" \
+        "$F:DATAO_VALID"    "$G:datao_valid" \
+        "$F:OUTP_READY"     "$G:outp_ready" \
+        "$G:read_outp"      "$F:READ_OUTP" \
+    ] { if {[catch { sd_connect_pins -sd_name $sd -pin_names "$a $b" } err]} { puts "CHAIN_CONNECT_FAIL $a $b : $err" } else { puts "CHAIN_CONNECT_OK $a $b" } }
+
+    ## CoreFFT block-floating-point exponent -> THIS chain's feeder capture register (0x14), and
+    ## OUTP_READY fanned out to it as the frame-boundary strobe (falling edge = latch).
+    ## The firmware reads each row's exponent to reconstruct the CPU FFT's GLOBAL block exponent
+    ## (emax = max over sar_row_exp[], then Output[i] >>= emax-exp_i). emax is a MAX, so it is
+    ## order- and partition-independent -- which is precisely why splitting rows across two chains
+    ## is bit-exact, PROVIDED each chain latches its OWN row's exponent from its OWN CoreFFT.
+    foreach {a b} [list \
+        "$F:SCALE_EXP"  "$FD:scale_exp_in" \
+        "$F:OUTP_READY" "$FD:outp_ready_in" \
+    ] { if {[catch { sd_connect_pins -sd_name $sd -pin_names "$a $b" } err]} { puts "SCALEEXP_CONNECT_FAIL $a $b : $err" } else { puts "SCALEEXP_CONNECT_OK $a $b" } }
+
+    ## CoreFFT output stream (gearbox 64-bit master) -> fft_unloader AXI4-Stream SLAVE. The unloader
+    ## drains the WHOLE frame in one continuous run (no descriptors, no per-transform re-arm, no
+    ## TLAST), so there is never a "2nd back-to-back transaction" for a stream target FSM to
+    ## deadlock on. TLAST/TDEST were DMA-framing only; the unloader ignores them.
+    foreach {a b} [list \
+        "$G:m_axis_tdata"  "$U:in_var" \
+        "$G:m_axis_tvalid" "$U:in_var_valid" \
+        "$U:in_var_ready"  "$G:m_axis_tready" \
+    ] { if {[catch { sd_connect_pins -sd_name $sd -pin_names "$a $b" } err]} { puts "CHAIN_CONNECT_FAIL $a $b : $err" } else { puts "CHAIN_CONNECT_OK $a $b" } }
+    catch { sd_mark_pins_unused -sd_name $sd -pin_names "$G:m_axis_tlast" }
+    catch { sd_mark_pins_unused -sd_name $sd -pin_names "$G:m_axis_tdest" }
+
+    ## COEFG -> FEED coefficient stream, plain pins (no bus interface on either side, exactly like
+    ## SCALE_EXP above). This is the ONLY data-plane connection a generator has: no FIC, no AXI4
+    ## initiator, no DIC port, nothing added to the FIC_0 read path. The feeder consumes it only
+    ## when its GATHER_CTRL (0x20) bit1 is set; bit1 is 0 out of reset, so an unconsumed stream
+    ## simply back-pressures and the feeder behaves exactly as it does today.
+    foreach {a b} [list \
+        "$CG:m_idx"   "$FD:c_idx" \
+        "$CG:m_wq"    "$FD:c_wq" \
+        "$CG:m_valid" "$FD:c_valid" \
+        "$CG:m_ready" "$FD:c_ready" \
+    ] { if {[catch { sd_connect_pins -sd_name $sd -pin_names "$a $b" } err]} { puts "COEFG_STREAM_CONNECT_FAIL $a $b : $err" } else { puts "COEFG_STREAM_CONNECT_OK $a $b" } }
+}
 
 ## ---------------- misc + MSS ----------------
-## CoreFFT block-floating-point exponent -> feeder capture register (0x14). Was unused; now the
-## firmware reads it per row to reconstruct the CPU FFT's global block exponent (fix the per-row
-## BFP that corrupts the 2-D image -- corr~0 -> expect ~0.99 after the global renormalize).
-catch { sd_connect_pins -sd_name $sd -pin_names {"FFT:SCALE_EXP" "FEED:scale_exp_in"} }
+## (FFT:SCALE_EXP -> FEED:scale_exp_in now lives in the per-chain loop above, together with
+## FFT_B:SCALE_EXP -> FEED_B:scale_exp_in, so the two chains cannot be cross-wired.)
 catch { sd_connect_pins_to_constant -sd_name $sd -pin_names {MSS:MSS_INT_F2M} -value {GND} }
 sd_mark_pins_unused -sd_name $sd -pin_names {MSS:MSS_INT_M2F}
 sd_connect_instance_pins_to_ports -sd_name $sd -instance_name {MSS}

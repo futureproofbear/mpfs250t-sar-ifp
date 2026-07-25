@@ -27,14 +27,11 @@
 #define SOFT_RESET_CR    (MSS_SYSREG_BASE + 0x88u)  /* bit24-27 = FIC0-3 reset (1=held) */
 #define FIC_BITS_MASK    0x0F000000u                /* FIC0..FIC3 (bits 24..27) */
 
-/* FIC0_S transaction monitor (sar_fic0s_mon.v) -- NEVER BUILT. Do not enable it blind.
- * 0x6000_6000 is AXIIC_CTRL slave6, which is NOT in the shipping fabric: reading an
- * unmapped slave window hangs the AXI un-haltably. The slot is also earmarked for a second
- * resample instance (K_RESAMPLE2) if the ID_FIX response-routing limitation is ever fixed,
- * in which case MON_STATUS would alias that kernel's START/busy word and enabling this
- * would corrupt an image mid-gather. Either way the #error below makes it fail at compile
- * time. To resurrect the monitor, give it its own free window and confirm it is in the
- * programmed bitstream first. */
+/* FIC0_S transaction monitor (sar_fic0s_mon.v) -- this M2-era probe block predates the real
+ * monitor and its v1 register map is WRONG for the shipping sar_fic0s_mon.v (see K_FIC0MON /
+ * FICMON_* in sar_kernels.h, which is what sar_sequencer.c actually uses). It is left disabled
+ * behind the #error rather than deleted, because reading an unmapped or wrongly-decoded slave
+ * window hangs the AXI un-haltably and wedges JTAG examine at boot. */
 #define MON_BASE         0x60006000u
 #define MON_STATUS       (MON_BASE + 0x00u)   /* [0]ar_valid [1]ar_accepted [2]r_valid [3]r_accepted [4]r_last [6:5]rresp [15:8]ar_cnt [23:16]r_cnt [31:24]0xA5 */
 #define MON_ARADDR_LO    (MON_BASE + 0x04u)
@@ -42,7 +39,7 @@
 #define MON_IDS          (MON_BASE + 0x0Cu)
 #define M2_PROBE_MON     0
 #if M2_PROBE_MON
-#error "M2_PROBE_MON aliases K_RESAMPLE2 at 0x6000_6000 -- move the monitor to a free slave window"
+#error "M2_PROBE_MON uses the obsolete v1 monitor map -- use K_FIC0MON/FICMON_* from sar_kernels.h"
 #endif
 
 #define M2_RESULTS_ADDR  0xB0050000u    /* unused DDR gap (job 0xB0040000 .. geom 0xB0100000) */
@@ -230,7 +227,9 @@ static void m2_run_tests(void)
      * target: the CIC routes a read there to nothing and it HANGS the AXI un-haltably (same trap as
      * the SLAVE5 note above; m2_safe_r cannot catch a non-responding target -> wedges JTAG examine at
      * boot). MUST drop K_DETECT from the decode probe now that the instance is gone. */
-    const uint32_t slv[4] = { K_CORNER_TURN, K_WINDOW, K_RESAMPLE, K_FFT };
+    /* SLAVE1 is now the 2nd FFT chain's feeder (K_FFT_FEEDER_B), not the deleted K_WINDOW --
+     * same register contract (+0x08 reads 0 when idle), so the probe is unchanged in meaning. */
+    const uint32_t slv[4] = { K_CORNER_TURN, K_FFT_FEEDER_B, K_RESAMPLE, K_FFT };
     for (uint32_t i = 0u; i < 4u; i++) {
         v = m2_safe_r(slv[i] + HLS_START, &flt);
         m2_rec(0x10u + i, slv[i] + HLS_START, v, 0u,

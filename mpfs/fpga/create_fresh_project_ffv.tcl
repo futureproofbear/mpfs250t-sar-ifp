@@ -21,6 +21,9 @@ new_project \
 
 ## ---------------- IP components (DirectCore / SgCore) ----------------
 ## CoreFFT 8.1.100: in-place, 8192-pt, 16-bit, conditional-BFP SCALE_EXP.
+## ONE component, TWO instances (FFT and FFT_B in sartop_assembly.tcl) -- the second CoreFFT chain
+## must be configured identically, and instantiating the same component twice makes that
+## structural instead of a copied parameter list that can drift.
 create_and_configure_core -core_vlnv {Actel:DirectCore:COREFFT:8.1.100} -component_name {COREFFT_C0} \
     -params [list {CFG_ARCH:1} {POINTS:8192} {WIDTH:16} {SCALE:0} {SCALE_EXP_ON:true} {INVERSE:0}]
 generate_component -component_name {COREFFT_C0}
@@ -35,7 +38,7 @@ source "$here/axiic_c0_params_330.tcl"    ;# -> $AXIIC_C0_PARAMS
 create_and_configure_core -core_vlnv {Actel:DirectCore:COREAXI4INTERCONNECT:3.0.130} -component_name {AXIIC_C0} -params $AXIIC_C0_PARAMS
 generate_component -component_name {AXIIC_C0}
 
-## Control-plane interconnect AXIIC_CTRL (CIC): 3.0.130, 1 initiator -> 8 targets (target5 now = standard AXI4 for fft_unloader ctrl; was AXI4-Lite for DMA. target6 = sar_fic0s_mon monitor, AXI4-Lite. target7 = NEW sar_coeffgen @0x60007000, AXI4-Lite).
+## Control-plane interconnect AXIIC_CTRL (CIC): 3.0.130, 1 initiator -> 9 targets (target5 now = standard AXI4 for fft_unloader ctrl; was AXI4-Lite for DMA. target6 = sar_fic0s_mon monitor, AXI4-Lite. target7 = sar_coeffgen @0x60007000, AXI4-Lite. target8 = NEW 2nd sar_coeffgen COEFG_B @0x60008000, AXI4-Lite. targets 1/2 REUSED IN PLACE from the dead WIN/RES2 for the 2nd chain's FEED_B/UNLD_B, so no existing kernel address moves).
 source "$here/axiic_ctrl_params.tcl"      ;# -> $AXIIC_CTRL_PARAMS
 create_and_configure_core -core_vlnv {Actel:DirectCore:COREAXI4INTERCONNECT:3.0.130} -component_name {AXIIC_CTRL} -params $AXIIC_CTRL_PARAMS
 generate_component -component_name {AXIIC_CTRL}
@@ -64,7 +67,12 @@ set_root -module {COREFFT_C0::work}       ;# temp root so create_hdl_plus's SYNT
 ## magnitude detect). Detect cannot be done in SmartHLS -- it mis-synthesizes the signed
 ## narrowing (int16_t)(x>>16) as UNSIGNED, saturating ~50% of the image, and that passed both
 ## cosim and a correlation check. Same reason hls_fft_feeder was dropped for fft_feeder_top.
-foreach hls {hls_corner_turn hls_window hls_detect hls_resample} {
+## hls_window DROPPED 2026-07-25: the WIN instance is gone (the 2-D Hamming window has been fused
+## into fft_feeder_v.v since 2026-07-21) and its DIC initiator1 / CIC target1 are reused by the
+## second chain's FEED_B. hls_detect stays registered-but-uninstantiated, exactly as it has been
+## since the detect was fused into the unloader -- that is the precedent showing an unused HDL+
+## core registration is harmless (it is simply never synthesized).
+foreach hls {hls_corner_turn hls_detect hls_resample} {
     source "$here/$hls/hls_output/scripts/libero/create_hdl_plus.tcl"
 }
 ## gearbox (corefft_stream64_adapter, now WITH m_axis_tlast) + sar_axi_idconv (S_AXI/M_AXI bifs)

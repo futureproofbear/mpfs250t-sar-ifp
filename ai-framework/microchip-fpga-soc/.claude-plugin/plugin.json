@@ -1,0 +1,6 @@
+{
+  "name": "microchip-fpga-soc",
+  "description": "Microchip PolarFire SoC family development: Libero SoC headless flows, SmartHLS kernel authoring/pragmas, SmartDebug Active-Probe, FlashPro6/OpenOCD JTAG mechanics and hygiene. Spans the PolarFire SoC family (MPFS250T, MPFS095T, etc.) -- not tied to one exact die.",
+  "version": "0.1.0",
+  "author": { "name": "futureproofbear" }
+}

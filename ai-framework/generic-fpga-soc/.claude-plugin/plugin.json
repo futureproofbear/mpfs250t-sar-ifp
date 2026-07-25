@@ -1,0 +1,6 @@
+{
+  "name": "fpga-soc-generic",
+  "description": "Vendor-agnostic methodology for taking high-level requirements / Python algorithms through HLS/RTL to FPGA fabric + firmware implementation: reference-first design discipline, HLS-output distrust, value-level verification, and hardware-aware architectural critique.",
+  "version": "0.1.0",
+  "author": { "name": "futureproofbear" }
+}

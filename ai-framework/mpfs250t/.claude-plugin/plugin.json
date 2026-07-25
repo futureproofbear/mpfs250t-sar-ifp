@@ -1,0 +1,6 @@
+{
+  "name": "mpfs250t-es",
+  "description": "MPFS250T_ES engineering-sample-specific facts: known silicon errata, die/package limits, and toolchain interactions unique to this exact PolarFire SoC part. Layers on top of microchip-fpga-soc (the family-general tier).",
+  "version": "0.1.0",
+  "author": { "name": "futureproofbear" }
+}

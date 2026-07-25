@@ -33,7 +33,12 @@ if [ -n "$PREP" ]; then
 fi
 
 echo ">>> [2/3] LINT GATE (pre-synth firebreak)"
-if ! bash "$FPGA/lint_netlist.sh"; then
+# lint_netlist.sh defaults to the libero_sar project; THIS wrapper is the ffv flow throughout
+# (build_full_prog_ffv.tcl, libero_ffv/export/...), so point it at the netlist this build just
+# generated. Without it the gate aborts on "netlist not found" -- and worse, if a stale
+# libero_sar/ netlist ever exists it would gate the WRONG file and pass vacuously.
+NETLIST="$FPGA/libero_ffv/component/work/SAR_TOP/SAR_TOP.v"
+if ! bash "$FPGA/lint_netlist.sh" "$NETLIST"; then
     echo ">>> ========================================================"
     echo ">>> BUILD ABORTED by lint gate -- fix the CRITICAL(s) above"
     echo ">>> (saved a ~30-min synth+P&R cycle on a broken netlist)."

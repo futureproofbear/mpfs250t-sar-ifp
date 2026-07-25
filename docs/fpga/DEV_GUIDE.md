@@ -27,6 +27,7 @@ project already hit." It assumes you've already read the three documents above.
    - [3.7 Console output & long-run mechanics](#37-console-output--long-run-mechanics)
    - [3.8 Synthesis / P&R / bitstream flow — deeper gotchas](#38-synthesis--pr--bitstream-flow--deeper-gotchas)
    - [3.9 OpenOCD / JTAG register access technique](#39-openocd--jtag-register-access-technique)
+   - [3.9a Board-session discipline — READ BEFORE WRITING A NEW `.gdb`](#39a-board-session-discipline--read-before-writing-a-new-gdb)
    - [3.10 Toolchain instability — recovery checklist](#310-toolchain-instability--recovery-checklist)
    - [3.11 Coherent pipeline debug via GDB (bypassing the mailbox)](#311-coherent-pipeline-debug-via-gdb-bypassing-the-mailbox)
    - [3.12 Script inventory](#312-script-inventory)
@@ -634,6 +635,51 @@ Writing an internal descriptor then reading it back **immediately** vs **after a
 
 The board only halts for JTAG in **boot mode 0** (WFI) unless the app cooperates; otherwise use the
 firmware mailbox to trigger tests and read results from DDR.
+
+#### 3.9a Board-session discipline — READ BEFORE WRITING A NEW `.gdb`
+
+Board time is the scarcest resource in this project and the most common way to burn it is writing a
+new JTAG harness. On 2026-07-26 an attempt to run a two-arm A/B "in one attach" cost three board
+sessions by rediscovering three traps the existing scripts had **already solved**.
+
+**Rule: compose the existing proven scripts. Accept the extra attaches.**
+
+| Need | Use | Do not |
+|---|---|---|
+| boot → PIPE → poll | `run_pipe_test.sh` + `flow_pipe_live.gdb` | write a new poll loop |
+| eMMC boot-load (ELOD) | `run_m3_iso.sh` + `m3_iso.gen.gdb` | re-derive the mailbox arm sequence |
+| read timings/CRC after a run | `ab_metrics.gen.gdb` (read-only attach) | fold metrics into the run script |
+
+An extra attach costs ~1 min. A novel harness that fails on silicon costs a session. Only write new
+harness code when the existing scripts genuinely cannot express the experiment, and then lift the
+poll/sleep/ready idioms **verbatim**.
+
+Three traps, all already handled in the scripts above:
+
+1. **Never arm the mailbox on a `sleep N` timer — wait for the pc.** Arming before hart1 reaches
+   the mailbox loop DEADLOCKS in a way that looks exactly like a hung eMMC command:
+   gdb writes `mbx->cmd` to DDR; the hart later reaches `u54_1.c:339`
+   (`mbx->cmd = 0; mbx->status = 0; …`, after `m2_run_tests()`) and that zero lands in **its
+   cache**; the hart then spins forever on its own cached 0 while gdb, reading DDR **physically**,
+   still sees the command and concludes it is pending. Neither side re-arms. A
+   re-arm-on-`cmd==0` guard does *not* rescue this, because gdb never observes the zero.
+   u54_1 links at `0x0a00_xxxx` and eNVM boot runs at `0x2022_xxxx`, so poll `$pc` until it is in
+   u54_1's range before arming anything. Boot can exceed 45 s (M2 battery + eMMC init), especially
+   right after the fabric is reprogrammed.
+2. **Use a shell sleep, not `monitor sleep`, in a poll loop.** `monitor sleep` crashed gdb with
+   `internal-error: find_inferior_pid: Assertion 'pid != 0' failed` after ~12 iterations.
+   `flow_pipe_live.gdb` polls 75 times with
+   `shell …python.exe -c "import time;time.sleep(N)"` and is stable.
+3. **A crashed gdb wedges the FlashPro6.** Its process survives `taskkill /F` because it is stuck
+   in an uninterruptible USB wait, and the next OpenOCD fails with
+   `Failed to read data from USB buffer. Programmer reset is required.` Recovery needs a board
+   power cycle **and** a USB replug — software cannot clear it. So always confirm
+   `tasklist | grep -c openocd\|gdb` is 0 before starting a run.
+
+**Do not put a foreground timeout on a board run shorter than the sum of the script's own budgets.**
+One run was killed at 10 min while progressing normally, against ~14 min of internal budget. Run
+board scripts in the background and read the gdb-side log (`set logging file …`) for progress —
+piped stdout buffers and shows nothing until the process exits.
 
 ### 3.10 Toolchain instability — recovery checklist
 

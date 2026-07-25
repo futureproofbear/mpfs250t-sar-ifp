@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Dual-CoreFFT-chain silicon A/B in ONE JTAG attach: boot -> ELOD -> PIPE(1 chain) -> CRC
+# -> PIPE(2 chains) -> CRC -> verdict.  Board must be powered and FlashPro6 connected.
+#
+# Gate = CRC equality. See jtag_full/dualfft_ab.gdb for why that is the right gate.
+set -u
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"
+NEW="$SAR_OPENOCD"
+SC="$SAR_SOFTCONSOLE"
+GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
+ELF="$SAR_ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+LOG="$SAR_SCRATCH/dualfft_ab_openocd.log"
+cd "$SAR_ROOT/mpfs/host/jtag_full"
+cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
+: > "$LOG"
+"$NEW/bin/openocd.exe" -s "$NEW/openocd/scripts" --command "set DEVICE MPFS" -f board/microchip_riscv_efp6.cfg -l "$LOG" >/dev/null 2>&1 &
+echo ">>> openocd launching; gdb pre-loading + waiting for port..."
+"$GDB" "$ELF" -x dualfft_ab.gdb 2>&1 | tr -d '\r' | grep -avE '^Reading|warranty|GPL|free soft|GNU gdb|Copyright|documentation|bug report|configured as|^Type |sifive|For help|apropos'
+echo ">>> gdb session ended"
+echo "=== openocd log tail ==="
+tail -6 "$LOG" | tr -d '\r'

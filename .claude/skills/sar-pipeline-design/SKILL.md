@@ -13,8 +13,8 @@ description: >-
 
 Spotlight-mode SAR image former using the **Polar-Format Algorithm (PFA)**. The design is
 **target-neutral** — described here as a datapath; the current implementation is a hybrid
-MSS-CPU + FPGA-fabric realization on PolarFire SoC (see `docs/fpga/SAR_ARCHITECTURE_REPORT.md`
-for the as-built block/timing detail and `docs/fpga/SAR_PIPELINE_PROCESS.md` for the math).
+MSS-CPU + FPGA-fabric realization on PolarFire SoC (see `docs/ARCHITECTURE.md`
+for the as-built block/timing detail and kernel contracts/coefficient math).
 
 ## Stages (per frame; frame = full complex array, e.g. 8192×8192 = 256 MiB)
 

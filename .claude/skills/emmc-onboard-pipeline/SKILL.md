@@ -122,7 +122,7 @@ reference placement digit-for-digit). All paths below are relative to the repo r
   restore→DDR), `run_ddr_peek.sh`, `render_crop.py`, `jtag_full/` (gdb + `wait_port.py`).
 - **Host tooling** — `mpfs/host/`: `emmc_pack.py` (stage dir → packed SARI image), `ddr_layout.py`
   (address/struct single-source, mirror of `ddr_sar_layout.h`), `serialize_inputs.py` (CPHD → stage).
-- **Docs** — `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md` (§ eMMC M1/M2/M3 = authoritative recipe).
+- **Docs** — `docs/USER_GUIDE.md` §4 (eMMC boot-load) + this skill (= authoritative recipe).
 - **NOT committed** (large binaries; regenerate): the staged scene `jtag_stage_deci1/` and packed
   `emmc_input.img`. The Centerfield scene is ALREADY on the eMMC INPUT partition, so the immediate
   LOAD/PIPE/SAVEOUT run needs neither. To (re)provision a scene: `serialize_inputs.py <CPHD> ...` →
@@ -214,7 +214,7 @@ bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 81.5 s
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
 #    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
 #      TOTAL 37.72 s (2026-07-24, 100 MHz, azimuth-gather + detect + corner-turn/FFT-2 overlap fused into the FFT passes). Breakdown in
-#      exactly one place -- SAR_ARCHITECTURE_REPORT.md section 5 -- do not restate it here.
+#      exactly one place -- docs/SAR_GUIDE.md Part 3 -- do not restate it here.
 #    A 300000 ms (5 min) budget is ample; the runner POLLS and returns as soon as it completes.
 #    For CMD 0x50495045 the runner sets FFTMODE @0xB0059110 = 1 (FABRIC CoreFFT chain -- the
 #    shipping FFT path; mode 0 = legacy CPU FFT), and prints per-stage timing from sar_stage_ts
@@ -289,6 +289,20 @@ Single-block (LEGACY/25 MHz/8-bit): **write 0.13 MB/s** (~3.9 ms/block; per-CMD2
   (above), a `PIPE` that returns `SAR_SEQ_TIMEOUT_*` rather than hanging, or SmartDebug (out-of-band,
   cannot stall the hart). `mpfs/host/run_pipeline_probe.sh` documents this in-file. (2026-07-20.)
 
+- **`run_ddr_peek.sh 0x88000000`'s SARI-magic check is STALE for the ELOD boot-load path — a "NO
+  SARI" result there is NOT a LOAD failure.** That script's magic check was written for the OLD
+  `run_emmc_restore.sh` staging flow, where the WHOLE packed `emmc_input.img` (superblock + all)
+  was JTAG-restored to `0x88000000` as a scratch buffer before provisioning to eMMC. ELOD does NOT
+  do that: it reads the `SARI` superblock from the CARD into a local/scratch buffer, then SCATTERS
+  each of the 10 role segments to its own fixed DDR address (`sar_emmc_role_addr`) — SIG at
+  `0x88000000` receives raw complex sample data, never a SARI-prefixed blob (confirmed in
+  `sar_emmc.c`: the magic check at line ~240 is against the on-card superblock, and the scatter at
+  line ~257-259 writes segment payloads directly). **The correct "input is present" proof after
+  ELOD is the LOAD result record itself** (`0xB005E000`: verdict 0, nseg=10,
+  `sig_crc_exp==sig_crc_got`, matching the scene's known CRC) — cross-check with a plain
+  `x/8xw 0x88000000` for plausible non-garbage/non-zero/non-`0xdeadbeef` complex int16 samples,
+  not the SARI-magic branch. (Cost a false "did the restore land?" alarm on 2026-07-25 while A/B
+  testing RES2 — the LOAD record was a clean PASS with the exact expected CRC the whole time.)
 - **SAVEOUT is COMMIT-LAST**: INVALIDATE (magic→0) → write image → write superblock LAST. A power
   loss mid-image leaves an invalid superblock → readers reject the torn image. Never revert to
   superblock-first. `VERIFY_OUT` (EVOU) is the full-image integrity check; ROI's partial read can't

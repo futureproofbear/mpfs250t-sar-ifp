@@ -11,6 +11,11 @@ description: >-
 
 # SAR verification methodology
 
+> The vendor- and application-agnostic principle here (value-level over correlation, match a
+> bit-accurate emulator to golden first, watch for orientation artifacts) is also maintained as a
+> portable package: `ai-framework/generic-fpga-soc/skills/value-level-verification/`. This
+> project-local skill stays authoritative for the SAR/CPHD-specific application of it.
+
 Process rules learned from a multi-day pipeline debug that hit several false leads before the real
 bug. The theme: **correlation lies; test by value; find the right orientation before declaring a
 divergence.** These are target-neutral; the current tools live under `mpfs/host/`.
@@ -68,4 +73,4 @@ divergence.** These are target-neutral; the current tools live under `mpfs/host/
 
 See also: `sar-pipeline-design` (the contracts being verified), `mpfs-platform-gotchas` →
 `references/silicon-debug-methodology.md` (the platform-specific value-test entry points and JTAG
-hygiene), and `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`.
+hygiene), and `docs/fpga/DEV_GUIDE.md` §4.

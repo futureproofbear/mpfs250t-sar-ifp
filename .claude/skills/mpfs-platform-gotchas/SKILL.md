@@ -12,6 +12,14 @@ description: >-
 
 # MPFS250T_ES platform gotchas
 
+> This file's contents are split across two portable packages: family-general Microchip
+> toolchain/IP quirks live in `ai-framework/microchip-fpga-soc/skills/microchip-toolchain-quirks/`
+> (any PolarFire SoC die); MPFS250T_ES-only silicon errata live in
+> `ai-framework/mpfs250t/skills/mpfs250t-es-errata/`. This project-local skill stays authoritative
+> and is the one that actually auto-loads for this project — update it first, then port a fix to
+> the correct portable package if it's genuinely family-general or die-specific rather than
+> project-specific.
+
 Hard-won + documented peculiarities of THIS silicon and toolchain. This board is a **PolarFire SoC
 MPFS250T_ES, FCVG484, ES revision 1** (an *engineering sample*, not production silicon) driven over
 a FlashPro6/J33. When a silicon symptom looks impossible, check here before assuming your design is

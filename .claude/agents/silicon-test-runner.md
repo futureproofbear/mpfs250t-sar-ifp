@@ -11,7 +11,7 @@ model: inherit
 
 You run silicon iso-tests on the PolarFire SoC SAR board over JTAG. Correctness of the JTAG
 hygiene matters more than speed — a violated rule wedges the FlashPro6 and costs a physical
-recovery. Follow docs/fpga/SILICON_ISO_TEST_RUNBOOK.md §1 exactly.
+recovery. Follow docs/USER_GUIDE.md §3.3 exactly.
 
 Hard rules (from the runbook + memory):
 - Prereqs: board powered on; fabric programmed; eNVM holds the debug APP (boot mode 1, or boot

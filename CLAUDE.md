@@ -86,10 +86,12 @@ Project-specific rules earned on this SAR-on-silicon work. They complement the g
   the target is recoverable (in git / backed up), prefer in-place edits and work on copies. Fix your own
   messes headless rather than handing cleanup to the user.
 - **Capture and UPDATE runbooks the same session.** Store reusable procedures/gotchas in the runbook
-  docs (`docs/fpga/*RUNBOOK*.md`, `SAR_PIPELINE_STATUS.md`, `SAR_TOP_RECOVERY.md`, …) and write a proven
+  docs (`docs/fpga/DEV_GUIDE.md`, `docs/SAR_GUIDE.md` Part 3, …) and write a proven
   procedure or new gotcha back into the relevant runbook in the SAME turn it is established — with the
   exact command, expected output, and the failure mode it avoids — so it survives into new sessions.
-- **Environment:** no PowerShell (a standing preference and GPO-blocked here) — use `cmd`/git-bash;
-  `wmic` and `winget` are unavailable, prefer `reg query`/`pnputil`/`mode`.
+- **Environment:** no PowerShell — a standing preference, use `cmd`/git-bash instead. Machine/account
+  -specific admin-rights and IT-policy restrictions (what's GPO-blocked, portable-tool-install
+  workarounds, etc.) belong in the git-ignored `CLAUDE.local.md`, not here — verify fresh on a new
+  machine rather than assuming this repo's committed guidance covers your local policy.
 - **Prose style:** use **bold** sparingly — reserve it for a few key labels or the single headline
   result per document; keep body prose and equations plain.

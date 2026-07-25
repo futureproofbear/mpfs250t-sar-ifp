@@ -51,7 +51,7 @@ Correctness failures are recorded with `note` describing the missed flush.
 ### 4. `fic_axi_id` — FIC0 / AXI-ID routing
 Which master ID reaches which slave through FIC0, and any mis-route/ID-collision
 observed. Mostly qualitative; record `metric=observation` with the finding and a
-pointer to FABRIC_INTERCONNECT_CONVENTIONS.md.
+pointer to DEV_GUIDE.md §2.
 
 ### 5. `es_errata` — MPFS250T_ES errata (ER0219 &c.)
 Engineering-sample silicon deviations and their workarounds. Record each time an
@@ -79,6 +79,6 @@ memory: resample-latency chunked-flush, Step B silicon test outstanding).
 | es_errata | mpfs250t_es | observation | — | ER0219; see mpfs-platform-gotchas |
 | corefft_rearm | k_fft | observation | — | golden TB ran one transform, never the re-arm path |
 
-See also: HLS_SILICON_STATS drives the batch-confidence gates in
-[`SAR_PIPELINE_STATUS.md`](SAR_PIPELINE_STATUS.md) and the
+See also: HLS_SILICON_STATS drives the batch-confidence gates described in
+[`../SAR_GUIDE.md`](../SAR_GUIDE.md) Part 3 and the
 `hls-trust-harness` skill.

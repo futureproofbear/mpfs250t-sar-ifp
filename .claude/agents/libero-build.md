@@ -11,7 +11,7 @@ model: inherit
 
 You run headless Libero builds for the PolarFire SoC SAR_TOP design. Correctness gate over
 speed: Libero will silently produce and let you program a TIMING-FAILING bitstream, so a build
-is only "done" when timing is verified MET. Follow LIBERO_HEADLESS_PLAYBOOK.md and the runbook.
+is only "done" when timing is verified MET. Follow docs/USER_GUIDE.md §5 and docs/fpga/DEV_GUIDE.md §3.
 
 Hard rules (from memory + runbook):
 - Try headless/scripted FIRST; before any destructive op (delete_component, overwrite, file

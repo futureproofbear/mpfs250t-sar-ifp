@@ -15,7 +15,7 @@
 > **Repo consolidation (2026-06-28):** the former standalone `explorePolarFireSOC` folder — an
 > out-of-sync mirror whose `src/sar/` and `src/ddr_test/` were byte-identical to this repo's
 > SoftConsole copies (its hart apps were older stubs) — has been **removed**. Its unique assets
-> (this index, `docs/FLOW.md`, the PCB board file, the board-design PDF) were migrated here. Nothing
+> (this index, the PCB board file, the board-design PDF) were migrated here. Nothing
 > outside this repo is a *firmware* build input. (That sentence used to read "no build input" without
 > qualification and was wrong — the Libero fabric build runs from the `sarProcessor` sibling. See the
 > 2026-07-14 block below.)
@@ -53,9 +53,9 @@
 > @`0xB0059110` = 1**, which the pipeline flow scripts (`flow_pipe_*.gdb`) set before PIPE. CPU
 > `sar_cpu_fft` (`src/sar/sar_fft.c`, mode 0) is the **legacy fallback** — the 2026-07-04 note below that
 > calls the FFT a CPU path is superseded. The 2026-07-20 board run confirmed `fft_mode=1` (fabric CoreFFT)
-> at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`
-> § eMMC M1/M2/M3 + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
-> `docs/AI_FABRIC_FIRMWARE_FRAMEWORK.md` + the personas under `.claude/agents/`.
+> at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/USER_GUIDE.md`
+> §4 (eMMC boot-load) + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
+> §10 below + the personas under `.claude/agents/`.
 > **Pipeline total: 37.72 s** (measured 2026-07-24, 100 MHz, azimuth-gather + detect + corner-turn/FFT-2 overlap
 > fused build). Window AND detect are now fused into the FFT passes; no CPU stage remains in the datapath.
 > How it got here: 110.8 s -> 88.1 s (targeted CCACHE `FLUSH64` writeback of the coefficient banks
@@ -81,11 +81,11 @@
 > from the pre-packing kernel). Scheduled 22,545 cycles = 361 us/line against ~880 us measured, so
 > the 2.44x gap is AXI STALL on a correct schedule (`axi_ii_lie`), not a burst failure. Localising
 > it needs the FIC_0 monitor (ARLEN histogram + inter-burst gap counters), still unbuilt. See
-> `docs/fpga/SAR_ARCHITECTURE_REPORT.md` §5 and the `axi_ii_lie` entries in
+> `docs/SAR_GUIDE.md` Part 3 and the `axi_ii_lie` entries in
 > `docs/fpga/hls_silicon_stats.jsonl`. The per-stage breakdown lives in exactly one place,
-> [`docs/fpga/SAR_ARCHITECTURE_REPORT.md`](fpga/SAR_ARCHITECTURE_REPORT.md) §5; detailed current
+> [`docs/SAR_GUIDE.md`](SAR_GUIDE.md) Part 3; detailed current
 > design (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
-> [`docs/SAR_DESIGN.md`](SAR_DESIGN.md). Open next: the NDSU production scene; and automating the
+> [`docs/ARCHITECTURE.md`](ARCHITECTURE.md). Open next: the NDSU production scene; and automating the
 > closed-loop sim→HIL gate.
 >
 > **✅ STATUS (2026-07-04) — SAR PIPELINE VALIDATED END-TO-END ON SILICON, image
@@ -96,8 +96,8 @@
 > into the FFT unloader -- see the status block above)* detect ran on the MSS CPU (`detect_mode`
 > @`0xB0059118`) because
 > SmartHLS mis-synthesizes the fabric detect's sign extension. Full status + per-stage timing + latency roadmap:
-> [`docs/fpga/SAR_PIPELINE_STATUS.md`](fpga/SAR_PIPELINE_STATUS.md); silicon-debug harness + learnings:
-> [`docs/fpga/SILICON_ISO_TEST_RUNBOOK.md`](fpga/SILICON_ISO_TEST_RUNBOOK.md). The CoreFFT note below is historical.
+> [`docs/SAR_GUIDE.md`](SAR_GUIDE.md) Part 3; silicon-debug harness + learnings:
+> [`docs/fpga/DEV_GUIDE.md`](fpga/DEV_GUIDE.md) §4. The CoreFFT note below is historical.
 >
 > **CURRENT STATUS (2026-07-04) — CoreFFT write-back reworked (DMA → HLS unloader → gearbox skid FIFO).**
 > The `CoreAXI4DMAController` that drained CoreFFT→DDR is **removed** (it deadlocked on the 2nd
@@ -151,10 +151,10 @@
 
 ## 2. Architecture map (the hardware, fixed facts)
 
-> **AMBA / interconnect architecture (definitive):** [`fpga/AMBA_ARCHITECTURE.md`](fpga/AMBA_ARCHITECTURE.md)
+> **AMBA / interconnect architecture (definitive):** [`ARCHITECTURE.md`](ARCHITECTURE.md) §9
 > — DIC (data) / CIC (control) interconnect topology, masters/slaves, address map, clocking & reset,
 > FFT stream path, the ID converter, and the AXI4-Lite `TARGET_TYPE` rule. Conventions that prevent the
-> silent-integration failures: [`fpga/FABRIC_INTERCONNECT_CONVENTIONS.md`](fpga/FABRIC_INTERCONNECT_CONVENTIONS.md).
+> silent-integration failures: [`fpga/DEV_GUIDE.md`](fpga/DEV_GUIDE.md) §2.
 
 - **Device:** Microchip **PolarFire SoC MPFS250T_ES** (engineering sample, FCVG484), Icicle Kit.
 - **Cores:** **1× E51** monitor hart (hart0 — boot/HSS/control) + **4× U54** application harts
@@ -204,7 +204,7 @@ Highest-value docs for this project:
 
 > Two memory/config docs (`mpfs-memory-configuration.md`, `mpfs-memory-hierarchy.md`) are the most
 > load-bearing for the current data-plane debug — see the analysis in
-> `docs/fpga/history/SAR_BRINGUP_REPORT.md` §9.
+> `docs/ARCHITECTURE.md` §5.
 
 ---
 
@@ -317,7 +317,6 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
   (PFA orchestration), `sar_resample_coeffs.{c,h}` (on-MSS coeff gen), `sar_accel_driver.{c,h}`
   (**legacy** monolithic driver — see §4.3).
 - `<SC>/platform/` — the compiled-against MPFS HAL copy (§5).
-- `docs/FLOW.md` — build/run tutorial (migrated from the old explore folder).
 
 ### src/ (Python golden — algorithm source of truth)
 - `form_image_pfa.py` (PFA focuser + golden + geocode), `fixedpoint.py` (BFP emulation/compare),
@@ -336,15 +335,15 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 - Data-plane fix RTL: `sar_axi_idconv.v` (AXI ID converter — the fix), `sar_id_restore.v`
   (superseded), `sar_fic0s_mon.v` (handshake monitor).
 - **FPGA docs — organised set (read before re-deriving):**
-  - *Architecture & conventions (current):* `docs/fpga/AMBA_ARCHITECTURE.md` (definitive interconnect
-    design), `docs/fpga/FABRIC_INTERCONNECT_CONVENTIONS.md` (silent-failure firebreaks +
-    `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/history/WIRING_GUIDE.md`, `docs/fpga/history/regmap.md`.
-  - *Status / active:* `docs/fpga/history/SAR_BRINGUP_REPORT.md` (full on-silicon bring-up + doc cross-check §9),
-    `docs/fpga/history/dma_fix_plan.md` (DMA control-slave root-cause→fix, §7g RESOLVED),
-    `docs/fpga/history/SMARTDEBUG_RUNBOOK.md` (reusable active-probe runbook), `docs/BRINGUP.md`.
-  - *History (resolved journey — `docs/fpga/history/`):* `M1_cosim.md`, `M2_integration.md`,
-    `dataplane_bringup_vplan.md`, `dataplane_fix_plan.md` (superseded), `fic0s_probe_plan.md`,
-    `id_restore_integration.md`, `idconv_gui_steps.md`, `sim-README.md`.
+  - *Architecture & conventions (current):* `docs/ARCHITECTURE.md` §9 (definitive interconnect
+    design), `docs/fpga/DEV_GUIDE.md` §2 (silent-failure firebreaks +
+    `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/DEV_GUIDE.md` §3, `docs/ARCHITECTURE.md` §8 (register map).
+  - *Status / active:* `docs/ARCHITECTURE.md` §5 (full on-silicon bring-up + cache-coherency doc cross-check),
+    `docs/SAR_GUIDE.md` (DMA control-slave root-cause→fix, RESOLVED),
+    `docs/fpga/DEV_GUIDE.md` §4 (reusable active-probe methodology), `docs/USER_GUIDE.md`.
+  - *History (resolved journey — narrative now told in* `docs/SAR_GUIDE.md` *):* the CoreFFT milestone
+    decisions (M1/M2), the dataplane bring-up + fix incidents, the FIC0 probe plan, the AXI ID-restore
+    integration, and the SmartDesign ID-converter GUI steps.
 
 ### reference/ (migrated board collateral)
 - `reference/icicle_kit_rev_1p0_20-0532_pcb_0624_01.brd` — Icicle Kit PCB layout (LFS).
@@ -370,7 +369,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
   `sd_connect_pins` works but can't remove a slice. IP *reconfigure* (`delete_component` +
   `create_and_configure_core` + `generate_component -component_name` + `run_tool`) **does** work.
   Always cross-check generated Tcl against the Microchip command reference; prefer the GUI for
-  SmartDesign edits (see `docs/fpga/history/idconv_gui_steps.md`).
+  SmartDesign edits (see `docs/fpga/DEV_GUIDE.md` §3).
 - **JTAG transfer speed & HID behaviour (measured 2026-06-30):** bulk DDR load over JTAG is
   **latency-bound, not bandwidth-bound** — ~390 µs per JTAG word-scan through the embedded FlashPro6
   USB-HID gives a measured **~84 kbit/s (~111 s/MB, ~10 kB/s)**, identical at 2 MHz and 6 MHz and for
@@ -402,7 +401,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
   feeding the DMA's reduced AXI4-Lite control through a 64→32 DWC, black-holing reads; fix = CIC
   `TARGET5_TYPE=1` (AXI4-Lite) + 11-bit address slice (`sd_create_pin_slices`). **Both interconnects
   upgraded to CoreAXI4Interconnect 3.0.130** (was 2.9.100; DMA = CoreAXI4DMAController 2.2.107, CoreFFT
-  8.1.100). Detail: `docs/fpga/history/dma_fix_plan.md` §7g + `docs/fpga/AMBA_ARCHITECTURE.md`.
+  8.1.100). Detail: `docs/SAR_GUIDE.md` + `docs/ARCHITECTURE.md` §9.
 - DDR JTAG loopback + CRC integrity (M0). **Bulk JTAG load integrity proven** (2026-06-30): 1 MB and
   8 MB loads byte-identical to source (`dump_image` + host cmp, MD5 match), and confirmed via the
   on-target CRC32 mailbox (§4.5).
@@ -437,7 +436,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
   clock-lowering fix is confirmed. **Caveat:** a fully *bootable* bitstream still needs the SAR_TOP
   SmartDesign rebuilt with the (already regenerated) 62.5 MHz CCC — the PolarFire-SoC MSS is coupled to
   the SmartDesign flow and resists the pure headless netlist flow (verified recipe in
-  `docs/fpga/SAR_TOP_RECOVERY.md`). Pending: that bootable rebuild + reprogram + re-run; firmware itself
+  `docs/fpga/DEV_GUIDE.md` §5). Pending: that bootable rebuild + reprogram + re-run; firmware itself
   is valid (PIPE/CRC mailboxes, DMA external-stream-descriptor, bounded harness).
 - **Full DMA *transfer* test** — the DMA *control* plane is verified, but a real descriptor+START
   data-move (CoreFFT stream → DDR S2MM) has not yet been exercised.
@@ -453,9 +452,102 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 ---
 
 ## 9. Cross-references
-- Deep bring-up + Microchip-doc cross-check: `docs/fpga/history/SAR_BRINGUP_REPORT.md`.
-- Persistent memory notes:
-  `~/.claude/projects/c--Users-<you>-Documents-github-sarProcessor/memory/`
-  (`sar-polarfire-architecture`, `sar-onsilicon-fabric-dataplane`, `mpfs-boot-mode-0-for-debug`,
-  `no-powershell-use-cmd`, `project-source-of-truth-index`).
+- Algorithm, staged fabric port, and optimization history: [`docs/SAR_GUIDE.md`](SAR_GUIDE.md).
+- Detailed design/architecture reference: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
+- Operate the board (bring-up/load/build/program/run/verify): [`docs/USER_GUIDE.md`](USER_GUIDE.md).
+- Fabric development gotchas (SmartHLS antipatterns, interconnect conventions, Libero/Tcl traps,
+  iso-test methodology): [`docs/fpga/DEV_GUIDE.md`](fpga/DEV_GUIDE.md).
+- Living report-vs-silicon HLS ledger: [`docs/fpga/HLS_SILICON_STATS.md`](fpga/HLS_SILICON_STATS.md).
+- Persistent memory notes (this repo, `mpfs250t-sar-ifp`):
+  `~/.claude/projects/c--Users-<you>-Documents-github-mpfs250t-sar-ifp/memory/`.
+
+## 10. The AI agent framework (skills + agents)
+
+This repo ships a Claude Code / Agent framework so a new session gets the accumulated knowledge
+automatically, rather than re-deriving it.
+
+![AI framework: a HUMAN layer (intent, hardware actions, approval gates, judgement) over an AI
+agent with four stacked layers — Knowledge (skills + runbooks + memory), Execution (hygiene-baked
+headless harnesses), Verification (goal-driven, value-level, loop-until-proven), and Handoff
+(self-contained baselines + skills).](img/ai_framework_diagram.svg)
+
+Two kinds of block:
+
+- **Skills** (`.claude/skills/`) — knowledge packs that load into the session when their topic comes
+  up: proven facts, procedures, traps. Start with `project-orientation`, then the domain skill for
+  the task at hand.
+- **Agents** (`.claude/agents/`) — execution specialists that run as scoped sub-processes with one
+  job and a guardrail that job must never violate (e.g. "build a bitstream, but refuse to hand it
+  back unless setup AND hold timing are met").
+
+| Domain | Skills (knowledge) | Agents (specialists) | Guarantee it enforces |
+|---|---|---|---|
+| Orientation & input | `project-orientation`, `umbra-cphd-data` | `Explore`, `Plan` | a new session starts from proven-vs-open + this index, not from zero |
+| Fabric (RTL + hard IP) | `sar-pipeline-design`, `fpga-ref-check`, `mpfs-platform-gotchas` | `fpga-ref-verifier`, `smartdebug-planner` | RTL/IP matches the vendor User Guide + golden TB *before* silicon |
+| Firmware (MSS bare-metal) | `emmc-onboard-pipeline`, `mpfs-platform-gotchas`, `jtag-recover` | `silicon-test-runner` | coherency/boot/clock-gating traps avoided; the debugger is never wedged |
+| Synthesis / P&R / timing | `hls-trust-harness`, `mpfs-platform-gotchas` | `libero-build` | no bitstream is trusted unless setup AND hold are MET |
+| Verification | `sar-verification-methodology`, `hls-trust-harness`, `fpga-ref-check` | `fpga-ref-verifier` | correctness by VALUE against a bit-accurate mirror, not correlation |
+| On-silicon testing | `silicon-iso-test`, `smartdebug-probe`, `jtag-recover` | `silicon-test-runner`, `smartdebug-planner` | one-command iso-test with JTAG hygiene; internal visibility when register reads can't see |
+
+**How they compose, end to end on a fabric change:** `fpga-ref-verifier` confirms the RTL/IP
+integration matches the reference → `libero-build` runs synth + P&R + the timing gate and *refuses*
+to emit a bitstream unless timing closes → `silicon-test-runner` runs the iso-test over JTAG with
+hygiene baked in → `sar-verification-methodology` checks the output by value against the bit-accurate
+emulator, in the correct golden orientation. If a kernel stalls, `smartdebug-planner` produces an
+active-probe plan against the *programmed* netlist; if the debugger wedges, `jtag-recover` tears it
+down without a further wedge. Every new trap found is written back into `mpfs-platform-gotchas` (or
+the relevant domain skill) the same session, so the next pass avoids it — see
+[`docs/fpga/DEV_GUIDE.md`](fpga/DEV_GUIDE.md) for where those traps actually live.
+
+For a silicon deadlock specifically, the blueprint is a 3-persona split under an orchestrator so no
+single context carries software bias into a hardware problem — `ingestion-triage` (raw JTAG/ILA to
+ground-truth state, proposes no fixes), `architectural-critic` (spatial concurrency/arbitration/CDC
+laws, assumes every software-correctness claim is false until routing is shown unblocked), and
+`synthesis-repair` (localized HLS/Verilog/C patches strictly within the Critic's constraints):
+
+![Multi-agent topology: an Orchestrator/Judge over three agents — Ingestion & Triage (raw JTAG/ILA
+to semantic JSON state), Architectural Critic (concurrency/arbitration/handshake laws), and
+Synthesis & Repair (localized HLS/Verilog/C patches).](img/ai_agent_topology.svg)
+
+The target execution model wraps that loop in an explicit multi-stage gate — compile, then a
+virtual-simulation gate that must first *reproduce* the failure and then clear it, then a
+hardware-in-the-loop gate on real silicon — so a fix is never accepted on a claim, only on evidence
+from the next gate up:
+
+![Closed-loop harness: deadlock -> JTAG capture -> Agents 1+2 diagnose -> Agent 3 repair -> compile
+gate -> virtual-sim gate (reproduce then clear the lockup) -> hardware-in-the-loop gate (TREADY high,
+count past threshold, deadlock cleared) -> verified fix; any gate failure feeds telemetry back to the
+Critic.](img/ai_closed_loop_harness.svg)
+
+This closed-loop harness is still `[Target]`, not `[As-run]` — today a person runs it stage by stage
+and reads each gate's result rather than a deterministic runner enforcing it end to end.
+
+**Reusable substrate vs. application layer.** Most of this is platform-specific, not
+application-specific: `mpfs-platform-gotchas`, `fpga-ref-check`, `hls-trust-harness`,
+`silicon-iso-test`, `smartdebug-probe`, `jtag-recover`, and every agent carry over unchanged to the
+next application on this silicon. Only a thin layer is SAR-specific: `sar-pipeline-design`,
+`sar-verification-methodology`, `umbra-cphd-data`, `emmc-onboard-pipeline`.
+
+**Five operating pillars** (the discipline behind the substrate above):
+1. **Durable knowledge capture** — every hard-won fact is written into a skill/runbook/memory the
+   moment it's proven, so it survives the session *and* the engineer.
+2. **Hygiene-baked headless execution** — the common ways to wreck a board are structurally
+   prevented in the harness itself (never force-kill the debugger; bound every wait with a watchdog;
+   never program a bitstream that hasn't met timing).
+3. **Goal-driven, value-level verification** — work is framed as a concrete, objectively-checkable
+   goal and looped until it is actually met, not until it "seems to run"; verify by value against a
+   bit-accurate mirror, never by correlation alone.
+4. **Human-in-the-loop for the physical and the irreversible** — the AI is aggressive on headless
+   work and conservative on anything a person must own: powering the board, closing timing,
+   destructive actions, ambiguous requirements.
+5. **Self-contained handoff** — every effort ends at a baseline a cold engineer + fresh AI session
+   can continue from, with the operational skill committed alongside the code.
+
+**Honest limitations** (open problems the framework manages but hasn't eliminated): HLS synthesis is
+not trustworthy for silicon on this toolchain (§4.3, §8 — every HLS kernel needs a same-session
+value-check after rebuild); verification is still largely manual hand-work (building the bit-accurate
+mirror, running the orientation scan); timing closure remains a human-owned gate (the toolchain will
+silently program a timing-failing bitstream); host↔board bandwidth is JTAG-limited (~9 KB/s, so a
+scene/image move to/from a PC is hours) — on-board eMMC fixes on-board transfers only, not host
+offload.
 </content>

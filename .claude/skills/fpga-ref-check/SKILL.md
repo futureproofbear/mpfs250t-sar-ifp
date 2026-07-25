@@ -10,6 +10,10 @@ description: >-
 
 # fpga-ref-check
 
+> The vendor-agnostic version of this methodology is also a portable package:
+> `ai-framework/generic-fpga-soc/skills/reference-first-verification/`. This project-local skill
+> stays authoritative for this project's exact IPs/paths.
+
 The project's first rule (CLAUDE.md + memory `check-docs-and-refdesigns-first`): **read the IP
 User Guide and the golden testbench BEFORE committing to a design or fix.** This skill makes that
 a repeatable gate.

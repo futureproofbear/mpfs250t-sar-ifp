@@ -15,6 +15,13 @@ description: >-
 
 # HLS trust harness
 
+> The vendor-agnostic "distrust HLS output" methodology and the SmartHLS-specific pragma/API
+> reference here are also maintained as portable, reusable packages:
+> `ai-framework/generic-fpga-soc/skills/hls-output-distrust/` and
+> `ai-framework/microchip-fpga-soc/skills/smarthls-kernel-authoring/`. This project-local skill
+> stays authoritative for THIS project's specifics; update the portable versions too if a fix
+> here is genuinely generic/Microchip-wide, not just true for this one kernel.
+
 ## Rule: A gate must require positive evidence, never the absence of a match
 - **TRIGGER**: writing or trusting any check that concludes "0 violations", "PASS", or "OK".
 - **ACTION**: make the check fail when its input is missing, empty, or stale. Require a minimum
@@ -57,7 +64,7 @@ description: >-
     `https://microchiptech.github.io/fpga-hls-docs/2023.1/userguide.html`
   - Official examples (working reference code):
     `https://github.com/MicrochipTech/fpga-hls-examples`
-  Then check `docs/fpga/SMARTHLS_ANTIPATTERNS.md` for whether that shape has already burned us.
+  Then check `docs/fpga/DEV_GUIDE.md` §1 for whether that shape has already burned us.
 - **HALT**: if you cannot cite the option in the manual, do NOT assert it exists and do NOT plan
   around it. On 2026-07-20 a roadmap recommended "give `out` its own AXI ID" — no such option
   exists on the pointer-based `axi_initiator` pragma. Guessing a knob wastes a ~40 min build.
@@ -142,7 +149,7 @@ cannot predict** — so failures are caught, attributable, and never rediscovere
 Run in order; each is cheap relative to the next. All live in `mpfs/host/`.
 
 0. **Anti-pattern pre-screen** — `python mpfs/host/hls_antipattern_lint.py`
-   Checks source against `docs/fpga/SMARTHLS_ANTIPATTERNS.md` (proven mis-synthesis
+   Checks source against `docs/fpga/DEV_GUIDE.md` §1 (proven mis-synthesis
    shapes). Blocks on high-precision patterns; prints the manual checklist.
 1. **Report gate (II)** — `python mpfs/host/hls_report_lint.py`
    Parses the pipelining report, fails if achieved II > requested II (the silent
@@ -188,7 +195,7 @@ session you confirm a new mis-synthesis. Both are CLAUDE.md runbook rules.
 
 Gates 0–2 are exactly the per-change, board-free value verification a change must
 pass before it is eligible to be batched onto silicon (see the batch-confidence
-protocol in `SAR_PIPELINE_STATUS.md`). The ledger's `lie_ratio → 1.0` is the
+protocol in `docs/SAR_GUIDE.md` Part 3). The ledger's `lie_ratio → 1.0` is the
 evidence that a restructure actually removed a Class-B dependency.
 
 See also: `sar-verification-methodology` (the value gate), `mpfs-platform-gotchas`

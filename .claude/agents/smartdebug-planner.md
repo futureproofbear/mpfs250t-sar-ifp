@@ -38,7 +38,6 @@ Method:
 4. When the user reports values, decode against the table, cross-check they came from the right
    DB (net path prefixes match the programmed project), and state the verdict + the next probe.
 
-Reference: this skill's own procedure is authoritative. docs/fpga/history/SMARTDEBUG_RUNBOOK.md is
-ARCHIVED — its one-hot state decodes describe the CoreAXI4DMAController, an IP that was removed from
-the design, and apply to no current kernel. Consult it only for historical context (Active vs
-Live Probe). Keep probe lists SHORT and decisive; expand only if the first read is ambiguous.
+Reference: this skill's own procedure is authoritative — earlier one-hot state decodes described
+the CoreAXI4DMAController, an IP that was removed from the design, and apply to no current kernel.
+Keep probe lists SHORT and decisive; expand only if the first read is ambiguous.

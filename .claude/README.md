@@ -18,7 +18,7 @@ is relevant.
 | Skills | `.claude/skills/*/SKILL.md` | Task-scoped knowledge packets | Auto-loaded when a trigger phrase matches, or on `/skill` |
 | Agents | `.claude/agents/*.md` | Specialized sub-agents with scoped tools | Delegated to for long / hands-on flows |
 | Commands | `.claude/commands/opsx/*.md` | OpenSpec slash-command workflow | On `/opsx:*` invocation |
-| Handoff / docs | `HANDOFF.md`, `docs/**` | The knowledge base the above point into | Read on demand |
+| Handoff / docs | `README.md`, `docs/**` | The knowledge base the above point into | Read on demand |
 
 ## Discipline layer — `CLAUDE.md`
 
@@ -105,7 +105,7 @@ on the OpenSpec CLI.
 ## How a session uses it
 
 1. `CLAUDE.md` is always present, so the engineering discipline is in force from the first turn.
-2. `project-orientation` (or `HANDOFF.md`) gives the lay of the land and points at the source-of-truth
+2. `project-orientation` (or `README.md`) gives the lay of the land and points at the source-of-truth
    docs under `docs/`.
 3. As the task takes shape, the matching skill auto-loads its knowledge (e.g. mention CPHD dimensions
    → `umbra-cphd-data`; a stalling IP → `fpga-ref-check`).

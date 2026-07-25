@@ -9,6 +9,10 @@ description: >-
 
 # jtag-recover
 
+> The FlashPro6/OpenOCD-specific mechanics here are also a portable package:
+> `ai-framework/microchip-fpga-soc/skills/flashpro6-jtag-recovery/`. This project-local skill
+> stays authoritative for this project's exact scripts/addresses.
+
 Safe teardown + recovery for a stuck JTAG toolchain on the PolarFire SoC SAR board. The whole
 point is to NOT compound the problem: force-killing openocd mid-operation wedges the FlashPro6
 DM, and a board power-cycle alone does not clear that. Reference: runbook §1.

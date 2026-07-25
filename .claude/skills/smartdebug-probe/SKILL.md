@@ -9,9 +9,13 @@ description: >-
 
 # smartdebug-probe
 
+> The SmartDebug-specific mechanics here are also a portable package:
+> `ai-framework/microchip-fpga-soc/skills/smartdebug-active-probe/`. This project-local skill
+> stays authoritative for this project's exact net names/addresses.
+
 Plans and interprets SmartDebug Active-Probe sessions for the SAR fabric. You cannot drive the
-GUI — produce an exact probe list for the user to add/read, then decode. See
-`docs/fpga/history/SMARTDEBUG_RUNBOOK.md` (ARCHIVED — its DMA one-hot decodes describe a removed IP; this skill is authoritative).
+GUI — produce an exact probe list for the user to add/read, then decode. Earlier DMA one-hot
+decodes described a removed IP and no longer apply; this skill is authoritative.
 
 ## THE critical rule (cost a full round on 2026-07-09)
 The SmartDebug design database MUST match the bitstream programmed on the board. This repo has

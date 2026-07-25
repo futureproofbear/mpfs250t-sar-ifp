@@ -9,9 +9,15 @@ description: >-
 
 # silicon-iso-test
 
+> The generic isolation-testing concept is also a portable package:
+> `ai-framework/generic-fpga-soc/skills/kernel-isolation-testing/`. The Microchip-specific
+> openocd/gdb/FlashPro6 mechanics are portable too: `ai-framework/microchip-fpga-soc/skills/
+> microchip-iso-test-harness/`. This project-local skill stays authoritative for this project's
+> exact scripts/addresses.
+
 Runs a silicon iso-test on the PolarFire SoC SAR board. JTAG hygiene correctness beats speed:
 a violated rule wedges the FlashPro6 and forces a physical recovery. Full detail in
-`docs/fpga/SILICON_ISO_TEST_RUNBOOK.md` §1-§4.
+`docs/USER_GUIDE.md` §3.3 (JTAG hygiene) and `docs/fpga/DEV_GUIDE.md` §4 (iso-test methodology).
 
 ## Prerequisites (confirm first)
 - Board powered ON; fabric programmed with the build under test; eNVM holds the debug APP

@@ -182,6 +182,9 @@ docs/fpga/SAR_ARCHITECTURE_REPORT.pdf
 # machine-specific toolchain paths (never commit)
 config.local.yaml
 
+# machine/account-specific admin-rights + IT-policy notes (never commit)
+CLAUDE.local.md
+
 # gdb scripts generated at runtime by the run_*.sh harnesses
 mpfs/host/jtag_full/*.gen.gdb
 

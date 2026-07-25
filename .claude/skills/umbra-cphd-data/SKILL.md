@@ -48,4 +48,4 @@ Measured over a random ~477-file sample of the catalog:
   the decimated capture fits the target grid.
 
 See `sar-pipeline-design` for how these dimensions feed the FFT/buffer contracts, and
-`docs/fpga/SAR_ARCHITECTURE_REPORT.md` §1 for the as-built frame size.
+`docs/ARCHITECTURE.md` §1 for the as-built frame size.

@@ -44,6 +44,43 @@
  * number of harts to use for coefficient generation. 0 or 1 = OFF (original single-hart path). */
 #define SAR_CWRK_NW_ADDR 0xB0059134u
 
+/* ---- SECOND JOB TYPE: the block-floating-point RENORMALIZE epilogue ------------------------
+ * The FFT passes end with a one-shot CPU read-modify-write over the WHOLE 8192x8192 frame
+ * (>>= emax - exp_row), bracketed by two whole-L2 flushes because FIC_0 is non-coherent and the
+ * fabric reads the result. Silicon 2026-07-25: RPROF[8] = 2.915 s = 28% of FFT-1, and it is
+ * single-threaded CPU work that NO amount of fabric parallelism touches -- with a 2nd CoreFFT
+ * chain halving the fabric term it becomes 44% of the stage.
+ *
+ * Rows are INDEPENDENT (a row's shift depends only on the scalar emax and its own exponent), so
+ * the same dispatcher+workers split them. Two structural differences from the COEFF job:
+ *  - Slice boundaries need NO alignment quantum. A row is SAR_ROW_BYTES = 8192*4 = 32768 B (det
+ *    rows 8192*2 = 16384 B); both are multiples of the 64 B cache line and rows are contiguous,
+ *    so ANY row boundary is a cache-line boundary and no line is ever shared between two harts.
+ *  - The work is NOT idempotent. Coefficient generation is a pure function, so the COEFF job can
+ *    recover from a deadline miss by recomputing the whole line; a right-shift-in-place cannot be
+ *    replayed (it would shift twice). So sar_cwrk_renorm() FAILS LOUD on a deadline miss instead
+ *    of redoing the work -- a partially renormalized frame is a plausible, quietly wrong image.
+ */
+#define SAR_CWRK_JOB_COEFF   0u
+#define SAR_CWRK_JOB_RENORM  1u
+
+/* Runtime knob for the renormalize split, same discipline as SAR_CWRK_NW_ADDR/SAR_CGENMODE_ADDR:
+ * the word is uninitialised DDR on a cold boot (0xdeadbeef has been seen), so accept ONLY the
+ * exact magic with a valid hart count in the low byte -- 'RWR' | nw, i.e. 0x52575202 / 03 / 04.
+ * Anything else (0, 1, 4, garbage) means OFF and the epilogue runs exactly as it does today, so
+ * the change is behaviour-neutral until switched on and the A/B is same-binary. */
+#define SAR_RWRK_NW_ADDR 0xB005912Cu   /* free: 0x120 = RPROF_PROBE, 0x130 = OVERLAPMODE,
+                                        * 0x134 = CWRK_NW, 0x138 = CGENMODE, 0x13C = DUALFFT */
+#define SAR_RWRK_MAGIC   0x52575200u
+
+static inline uint32_t sar_rwrk_nw(void)
+{
+    uint32_t v = *(volatile uint32_t *)(uintptr_t)SAR_RWRK_NW_ADDR;
+    if ((v & 0xFFFFFF00u) != SAR_RWRK_MAGIC) return 1u;      /* not the magic -> OFF */
+    v &= 0xFFu;
+    return (v >= 2u && v <= SAR_CWRK_MAXW) ? v : 1u;
+}
+
 typedef struct {
     volatile uint32_t magic;                 /* SAR_CWRK_MAGIC once workers are parked+ready */
     volatile uint32_t seq;                   /* dispatcher bumps to release a job */
@@ -67,6 +104,17 @@ typedef struct {
     volatile uint64_t geom_addr;             /* const sar_geom_t * */
     volatile uint64_t idx_addr;              /* int32_t * bank base */
     volatile uint64_t wq_addr;               /* int16_t * bank base */
+    /* ---- appended for the RENORM job (kept at the END so the COEFF field offsets, and any
+     * host-side decode of this block, are unchanged) ---- */
+    volatile uint32_t job;                   /* SAR_CWRK_JOB_* -- which kind of work `seq` released */
+    volatile uint32_t rows;                  /* rows to split */
+    volatile uint32_t cols;                  /* elements per row */
+    volatile uint32_t emax;                  /* global block exponent */
+    volatile uint32_t headroom;              /* extra right-shift */
+    volatile uint32_t det;                   /* 0 = complex int32 rows, 1 = uint16 detect rows */
+    volatile uint64_t dst_addr;              /* frame base */
+    volatile uint64_t exp_addr;              /* const uint8_t * per-row captured exponents */
+    volatile uint64_t prog_addr;             /* 4-word JTAG progress record (0 = none) */
 } sar_cwrk_t;
 
 #define SAR_CWRK ((sar_cwrk_t *)(uintptr_t)SAR_CWRK_ADDR)
@@ -82,6 +130,15 @@ static inline uint32_t sar_cwrk_bound(uint32_t w, uint32_t nw, uint32_t Q)
     return (b > Q) ? Q : b;
 }
 
+/* Slice boundary for the RENORM job: a plain even split of `rows`, no alignment quantum needed
+ * (see the cache-line note above). Both the dispatcher and the workers MUST use this definition. */
+static inline uint32_t sar_cwrk_row_bound(uint32_t w, uint32_t nw, uint32_t rows)
+{
+    if (w == 0u) return 0u;
+    if (w >= nw) return rows;
+    return (uint32_t)(((uint64_t)w * rows) / nw);
+}
+
 /* Entry point for U54_2/3/4. w = 1..3. Never returns. */
 void sar_coeff_worker_main(uint32_t w);
 
@@ -93,5 +150,16 @@ void sar_cwrk_init(void);
  * Publishes every slice to DDR. Returns the number of harts that actually participated. */
 uint32_t sar_cwrk_line(const sar_geom_t *g, uint32_t pass, uint32_t line,
                        int32_t *idx, int16_t *wq, uint32_t q_total, uint32_t nw);
+
+/* Global block-floating-point renormalize of `rows` x `cols` at `dst`, split across `nw` harts.
+ *   det = 0: rows are complex int32 (re/im int16 packed);  det = 1: rows are uint16 magnitudes.
+ *   prog_addr: 4-word JTAG progress record, written by the DISPATCHER's slice only (0 = none).
+ * nw <= 1, workers absent/disabled -> the original single-hart epilogue, same instruction
+ * sequence and the same two whole-L2 flushes.
+ * Returns the number of harts that participated, or 0 if a worker missed its deadline -- in
+ * which case the frame is PARTIALLY shifted and the caller MUST abort the pass (see above). */
+uint32_t sar_cwrk_renorm(uint64_t dst, const uint8_t *row_exp, uint32_t rows, uint32_t cols,
+                         uint32_t emax, uint32_t headroom, uint32_t det,
+                         uint64_t prog_addr, uint32_t nw);
 
 #endif /* SAR_COEFF_WORKERS_H_ */

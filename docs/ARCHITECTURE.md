@@ -669,6 +669,10 @@ Runtime engine-select knobs (environment variables to `run_m3_iso.sh` for A/B te
 | `SAR_GATHERMODE` @ `0xB005911C` | 1 = fuse the azimuth-resample gather into the FFT-1 feeder, 0 = standalone azimuth resample |
 | `detect_mode` @ `0xB0059118` | 3 = fused fabric detect (shipping default, see §2.5's caveat), 0/1/2 = CPU / test paths |
 | `SAR_OVERLAPMODE` @ `0xB0059130` | 1 = corner-turn/FFT-2 strip overlap (§2.4a), 0 = sequential |
+| `SAR_CWRK_NW` @ `0xB0059134` | 2/3/4 = spread per-line resample-coefficient generation over that many U54 harts; anything else (incl. cold-boot garbage) = 1 = single-hart |
+| `SAR_RWRK_NW` @ `0xB005912C` | `0x52575202/03/04` (`'RWR'\|nw`) = split the FFT block-exponent renormalize epilogue over 2/3/4 harts; **any other value = OFF** (the word is uninitialised DDR on a cold boot, so only the exact magic enables it). A/B is same-binary: run once without it, once with `0x52575204`, and compare `RPROF[8]` and the output CRC — the split is bit-identical by construction (`mpfs/host/check_renorm_split.py`), so the CRC MUST NOT move |
+| `SAR_CGENMODE` @ `0xB0059138` | `0x43474E31` (`'CGN1'`) = azimuth resample coefficients from the on-fabric `sar_coeffgen`; **any other value = OFF** (DDR/CPU coefficient path). Bit-exact by construction, so the output CRC MUST NOT move |
+| `SAR_DUALFFT` @ `0xB005913C` | `0x44464632` (`'DFF2'`) = split each FFT pass's ROWS across TWO CoreFFT chains (chain A even rows, chain B odd rows); **any other value = ONE chain** (the word is uninitialised DDR on a cold boot, so only the exact magic enables it). Requires `SAR_CGENMODE` on for FFT-1 — on the CPU coefficient path the stage is already CPU-paced and the firmware silently drops back to one chain, recording that in `RPROF[11]`. The BFP contract (`emax` = max over all `sar_row_exp[]`, then per-row shift) is order- and partition-independent, so the split is bit-exact: the A/B is same-bitstream and same-binary, and the output CRC MUST NOT move |
 
 Fabric kernels are controlled over AXI4-Lite through FIC0; per-kernel register offsets are in
 `src/sar/sar_kernels.h`. There are two register-map models in the project's history — the

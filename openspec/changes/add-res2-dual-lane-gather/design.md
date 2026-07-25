@@ -4,12 +4,12 @@
 
 - `RES2` = 2nd instance of the `resample_top` HDL+ core, replacing the unused `DET`
   (`detect_top`) SmartDesign slot. Control @ `0x60002000` (the old K_DETECT window, reused).
-- `RSLICE_DIC` / `RSLICE_CIC` — one `axi4_regslice` HDL+ core, two instances, inserted as a
-  timing fix on the DIC target0<->ID_FIX and MSS-initiator<->CIC links (needed once RES2 added a
-  6th/7th target and pushed placement density up).
-- `FIC0MON` (`sar_fic0s_mon`) — new 7th CIC target @ `0x60006000` (AXI4-Lite), a FIC_0
-  transaction monitor (v2: write channel + intra-burst read-throttle counters) used to produce
-  the read-latency-bound diagnosis this change acted on, and to capture the A/B evidence below.
+- `RSLICE_DIC` / `RSLICE_CIC` (`axi4_regslice`) and `FIC0MON` (`sar_fic0s_mon`, 7th CIC target
+  @ `0x60006000`) are **pre-existing in `HEAD`** — they entered at commit `964b702`, which predates
+  the 100 MHz/37.72 s rebaseline (`a626892`). CORRECTION 2026-07-25: an earlier revision of this
+  document claimed they were added *with* RES2 and might have perturbed the measurement. That was
+  wrong — the uncommitted RES2 diff changes only `DET -> RES2`, so **both A/B arms shared identical
+  regslice/monitor topology** and they cannot explain any part of the result.
 - Built and timing-gated via `create_fresh_project_ffv.tcl` -> `build_full_prog_ffv.tcl` in this
   repo (see `docs/USER_GUIDE.md` SS5).
 

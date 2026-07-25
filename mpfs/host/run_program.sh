@@ -13,7 +13,7 @@ export FPGENPROG="$SAR_LIBERO/Libero_SoC/Designer/bin64/fpgenprog.exe"
 JAVA="$SC/eclipse/jre/bin/java.exe"
 [ -x "$JAVA" ] || JAVA="java"
 
-cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
+cmd //c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
 ## $BM1 is a gitignored scratch workdir, so it is ABSENT on a fresh clone. Without this mkdir the
 ## cp silently fails, the `cd` below does not happen, and the programmer runs from the repo root
 ## against a non-existent app.elf -- it exits with a usage dump, having never touched the board,

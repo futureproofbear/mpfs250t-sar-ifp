@@ -56,7 +56,22 @@ set {unsigned int}0xB005911C = $GATHMODE"
   OVLMODE="${OVLMODE:-0}"
   FFTSET="$FFTSET
 set {unsigned int}0xB0059130 = $OVLMODE"
-  FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u (1=azimuth resample fused into FFT-1)\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C'
+  # SAR_CGENMODE @0xB0059138: 0x43474E31 ('CGN1') = generate the azimuth resample coefficients on
+  # fabric (sar_coeffgen), anything else = the CPU/DDR path. Pinned explicitly for the same reason
+  # as GATHMODE -- the word is uninitialised DDR on a cold boot.
+  CGENMODE="${CGENMODE:-0}"
+  # SAR_DUALFFT @0xB005913C: 0x44464632 ('DFF2') = second CoreFFT chain, anything else = one chain.
+  # REQUIRES CGENMODE='CGN1'; on the CPU coefficient path the firmware drops back to one chain and
+  # records that in RPROF[11].
+  DUALFFT="${DUALFFT:-0}"
+  # SAR_RWRK_NW @0xB005912C: 0x52575202/03/04 ('RWR'|nw) = split the block-exponent renormalize
+  # epilogue over 2/3/4 harts, anything else = single-hart.
+  RWRKNW="${RWRKNW:-0}"
+  FFTSET="$FFTSET
+set {unsigned int}0xB0059138 = $CGENMODE
+set {unsigned int}0xB005913C = $DUALFFT
+set {unsigned int}0xB005912C = $RWRKNW"
+  FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u cgen=0x%08x dualfft=0x%08x rwrk=0x%08x\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C, *(unsigned int*)0xB0059138, *(unsigned int*)0xB005913C, *(unsigned int*)0xB005912C'
 fi
 
 cat > "$GDBSCRIPT" <<GDBEOF

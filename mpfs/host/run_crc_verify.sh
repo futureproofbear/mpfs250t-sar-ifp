@@ -45,7 +45,7 @@ echo ">>> CRCVERIFY DONE"
 shutdown
 CFGEOF
 
-cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
+cmd //c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
 echo "file=$FILE len=$LEN base=$BASE host_zlib_crc=$EXP sleep_ms=$SLEEP_MS"
 echo "load start: $(date +%H:%M:%S)"
 "$NEW/bin/openocd.exe" -s "$NEW/openocd/scripts" -f "$CFG" -l "$LOG" >/dev/null 2>&1

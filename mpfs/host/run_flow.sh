@@ -8,7 +8,7 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh" \
 NEW="$SAR_OPENOCD"
 CFG="$SAR_ROOT/mpfs/fpga/efp6_flow.cfg"
 LOG="$SAR_SCRATCH/flow.log"
-cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
+cmd //c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
 : > "$LOG"
 rm -f $SAR_ROOT/mpfs/host/jtag_full/out.bin
 "$NEW/bin/openocd.exe" -s "$NEW/openocd/scripts" -f "$CFG" -l "$LOG" >/dev/null 2>&1

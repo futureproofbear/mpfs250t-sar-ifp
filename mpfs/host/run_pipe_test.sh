@@ -10,7 +10,7 @@ GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
 ELF="$SAR_ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
 LOG="$SAR_SCRATCH/combined.log"
 cd "$SAR_ROOT/mpfs/host/jtag_full"
-cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
+cmd //c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
 : > "$LOG"
 # start OpenOCD (background) and GDB (parallel) at the same time
 "$NEW/bin/openocd.exe" -s "$NEW/openocd/scripts" --command "set DEVICE MPFS" -f board/microchip_riscv_efp6.cfg -l "$LOG" >/dev/null 2>&1 &

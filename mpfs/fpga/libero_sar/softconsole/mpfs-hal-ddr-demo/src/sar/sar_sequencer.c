@@ -276,6 +276,20 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
  * Two chains need ~15% of the single SASD read slot. CoreFFT itself is 69,790 cycles/row
  * (8192 load + 13x4106 compute + 8192 unload + ~25) = 698 us at 100 MHz, and that is the floor
  * the second chain halves. */
+/* !! DO NOT ENABLE -- SILICON 2026-07-26 !!
+ * The second chain CORRUPTS PERSISTENT DDR STATE, and the damage SURVIVES ELOD: after any dual
+ * run, SINGLE-chain runs also produce wrong output, with a DIFFERENT CRC each time, until the
+ * board is POWER CYCLED. Proven by: power cycle -> fresh ELOD -> single chain -> 0x319037b2
+ * (reference, 32.23 s) after a sequence of dual runs had left single chain at 0x0593e49a.
+ *
+ * Dual runs are non-deterministically wrong at EVERY row-block size tried (blk = 1, 64, 256,
+ * 4096): some pass, some fail, failures differ run to run. Earlier passes at blk 64/4096 were
+ * luck on not-yet-damaged state, NOT evidence that a block split fixes anything -- commit
+ * b0030da's claim to that effect is RETRACTED.
+ *
+ * ELOD restores SIG + the geometry role segments, so the damaged region is OUTSIDE that set --
+ * the coefficient banks or another scratch area a second unloader is writing past. Find the
+ * out-of-bounds write before re-enabling. */
 #define SAR_DUALFFT_ADDR   0xB005913Cu       /* free: 0x134 = SAR_CWRK_NW, 0x138 = SAR_CGENMODE */
 #define SAR_DUALFFT_ENABLE 0x44464632u       /* 'DFF2' -- the ONLY accepted value */
 
@@ -327,13 +341,35 @@ static inline uint32_t fft_seg(uint32_t r0, uint32_t r1, uint32_t nch)
     return ((r1 - r0) + nch - 1u) / nch;
 }
 
+/* BLOCK SIZE: how many consecutive rows a chain takes before handing over. One knob spans the
+ * whole space -- blk == 1 is the old interleave, blk == seg is the contiguous halves. Silicon
+ * 2026-07-26 measured the two ends: interleave 27.51 s but WRONG, halves 28.28 s and bit-exact.
+ * The 0.78 s is DRAM locality -- under SASD the interconnect alternates between the chains, and at
+ * blk == seg every alternation is 128 MiB away, so it pays a precharge+activate. A coarse blk
+ * should keep each chain in its own pages (correct) while amortising the seek over blk rows.
+ * Must DIVIDE seg so the mapping tiles the frame exactly; anything else falls back to seg. */
+#define SAR_FFTBLK_ADDR 0xB0059140u        /* free: 0x13C = SAR_DUALFFT is the last one used */
+static inline uint32_t fft_blk(uint32_t seg)
+{
+    uint32_t v = *(volatile uint32_t *)(uintptr_t)SAR_FFTBLK_ADDR;
+    if (v == 0u || v > seg || (seg % v) != 0u) return seg;   /* cold-boot garbage -> halves */
+    return v;
+}
+
+/* Row owned by chain c on turn `row`. Chain c takes rows [.., ..+blk) then jumps nch*blk ahead. */
+static inline uint32_t fft_row_of(uint32_t c, uint32_t row, uint32_t nch, uint32_t blk)
+{
+    return ((row / blk) * nch + c) * blk + (row % blk);
+}
+
 /* Capture this group's exponents, each from its own chain. Rule (a): called immediately after
  * fft_join() and always before the next arm. Skips chains whose row fell past r1. */
 static inline void fft_capture_exp(uint32_t nch, uint32_t r0, uint32_t r1,
-                                   uint32_t seg, uint32_t row)
+                                   uint32_t seg, uint32_t blk, uint32_t row)
 {
+    (void)seg;
     for (uint32_t c = 0; c < nch; c++) {
-        uint32_t r = r0 + c * seg + row;
+        uint32_t r = r0 + fft_row_of(c, row, nch, blk);
         if (r < r1)
             sar_row_exp[r] = (uint8_t)(sar_reg_r(SAR_CHAIN[c].feed, K_FFT_SCALE_EXP) & 0xFu);
     }
@@ -474,9 +510,10 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
      * even row, chain 1 the odd one, both armed then both joined. NOT software-pipelined --
      * see rule (a) at SAR_DUALFFT_ADDR: an exponent must be read before its chain is re-armed. */
     const uint32_t seg = fft_seg(0u, SAR_GRID, nch);
+    const uint32_t blk = fft_blk(seg);
     for (uint32_t row = 0; row < seg; row++) {
         for (uint32_t c = 0; c < nch; c++) {
-            uint32_t r = c * seg + row;
+            uint32_t r = fft_row_of(c, row, nch, blk);
             if (r >= SAR_GRID) continue;                /* last chain runs short (see fft_seg) */
             uint32_t s = src + r * SAR_ROW_BYTES;
             /* detect mode halves the output row: uint16 magnitudes, not complex int32 */
@@ -486,7 +523,7 @@ static int fft_fabric_pass(uint32_t src, uint32_t dst, uint32_t spins, int win_e
         { int rc = fft_join(nch, budget);
           if (rc) return rc; }                          /* row stalled: 1=unloader, 2=feeder */
         /* SCALE_EXP is latched at the frame's OUTP_READY falling edge (before unloader DONE) */
-        fft_capture_exp(nch, 0u, SAR_GRID, seg, row);
+        fft_capture_exp(nch, 0u, SAR_GRID, seg, blk, row);
         if ((row & 0x7Fu) == 0u) SAR_PROG(4u, row, seg);
     }
 
@@ -540,9 +577,10 @@ static int fft2_pass1_rows(uint32_t src, uint32_t dst, uint32_t r0, uint32_t r1,
                            uint32_t budget, uint32_t nch)
 {
     const uint32_t seg = fft_seg(r0, r1, nch);
+    const uint32_t blk = fft_blk(seg);
     for (uint32_t row = 0; row < seg; row++) {
         for (uint32_t c = 0; c < nch; c++) {
-            uint32_t r = r0 + c * seg + row;
+            uint32_t r = r0 + fft_row_of(c, row, nch, blk);
             if (r >= r1) continue;                                  /* last chain runs short */
             uint32_t s = src + r * SAR_ROW_BYTES;
             uint32_t d = dst + r * SAR_ROW_BYTES_U16;               /* det: uint16 magnitudes */
@@ -550,7 +588,7 @@ static int fft2_pass1_rows(uint32_t src, uint32_t dst, uint32_t r0, uint32_t r1,
         }
         { int rc = fft_join(nch, budget);
           if (rc) return rc; }
-        fft_capture_exp(nch, r0, r1, seg, row);
+        fft_capture_exp(nch, r0, r1, seg, blk, row);
     }
     return 0;
 }
@@ -769,6 +807,7 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
                                  (int16_t *)(uintptr_t)SAR_COEF_WQ(0), Mp, cwrk_nw);
 
     const uint32_t seg = fft_seg(0u, SAR_GRID, nch);
+    const uint32_t blk = fft_blk(seg);
     for (uint32_t row = 0; row < seg; row++) {
         /* no explicit publish here: sar_cwrk_line() already published this bank when it computed it */
         /* E1: FIC_0 profile of ONE FFT-1 row GROUP. Measured this way it answered the
@@ -779,7 +818,7 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         if (row == 1u) ficmon_clear();
         RP_T0(tarm);                /* E3: time the whole arm block (unloader + feeder regs) */
         for (uint32_t c = 0; c < nch; c++) {
-            uint32_t r = c * seg + row;
+            uint32_t r = fft_row_of(c, row, nch, blk);
             if (r >= SAR_GRID) continue;                /* last chain runs short (see fft_seg) */
             /* Chain c takes row (row+c): DISJOINT 32 KiB destination rows, disjoint source rows,
              * src read-only. Legal as a ROW split only -- the FFT is a row transform and the
@@ -822,7 +861,7 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         /* Rule (a): every chain's exponent is read HERE, after the join and before the next arm.
          * The feeder holds SCALE_EXP only until its own next frame, so a software-pipelined
          * re-arm would stamp row j+2's exponent onto row j. */
-        fft_capture_exp(nch, 0u, SAR_GRID, seg, row);
+        fft_capture_exp(nch, 0u, SAR_GRID, seg, blk, row);
         /* Read EACH ACTIVE generator's STAT for THIS row and ABORT on err_fmt. err_fmt means a
          * NaN/Inf/denormal reached a datapath that has no path for one, so the row's weights are
          * garbage -- and it is STICKY, so a scene that trips it would otherwise produce a

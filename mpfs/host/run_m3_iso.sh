@@ -67,10 +67,15 @@ set {unsigned int}0xB0059130 = $OVLMODE"
   # SAR_RWRK_NW @0xB005912C: 0x52575202/03/04 ('RWR'|nw) = split the block-exponent renormalize
   # epilogue over 2/3/4 harts, anything else = single-hart.
   RWRKNW="${RWRKNW:-0}"
+  # SAR_FFTBLK @0xB0059140: consecutive rows a chain takes before handing over. 1 = interleave
+  # (FAST but silicon-WRONG, 2026-07-26), 4096 = contiguous halves (bit-exact). Must divide
+  # seg = 8192/nch; 0 or anything else falls back to halves.
+  FFTBLK="${FFTBLK:-0}"
   FFTSET="$FFTSET
 set {unsigned int}0xB0059138 = $CGENMODE
 set {unsigned int}0xB005913C = $DUALFFT
-set {unsigned int}0xB005912C = $RWRKNW"
+set {unsigned int}0xB005912C = $RWRKNW
+set {unsigned int}0xB0059140 = $FFTBLK"
   FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u cgen=0x%08x dualfft=0x%08x rwrk=0x%08x\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C, *(unsigned int*)0xB0059138, *(unsigned int*)0xB005913C, *(unsigned int*)0xB005912C'
 fi
 

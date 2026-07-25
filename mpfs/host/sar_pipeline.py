@@ -33,13 +33,21 @@ from accel import make_backend        # noqa: E402
 C = ref.C
 
 
-def prepare_tables(reader, meta, deci_pulse=1, deci_sample=1):
+def prepare_tables(reader, meta, deci_pulse=1, deci_sample=1, crop_sample=0):
     """CPU stage: read PVP geometry and build the tables the focuser needs.
 
     Returns a dict with:
       ax, ay, freq, sgn          -> focusing inputs
       KR, KC, tan_phi, window    -> resample grids + taper (consumed by the FPGA)
       geo, center_ecef, uiax, uiay -> geometry for geocoding (CPU)
+
+    crop_sample > 0 keeps only that many (post-decimation) range samples, centred.
+    Needed for scenes whose sample axis exceeds the fixed 8192 fabric grid -- the
+    pulse axis pads up to the grid, but the sample axis cannot: it must come down.
+    Cropping preserves range RESOLUTION and gives up swath; decimating would do the
+    reverse. `samp0` (a RAW sample offset) is returned so the caller reads exactly
+    the samples these tables describe -- freq is rebased to match, so a caller that
+    ignores samp0 gets geometry that silently disagrees with its data.
     """
     mu, nu = max(1, deci_pulse), max(1, deci_sample)
     n_vec, n_samp = reader.get_data_size_as_tuple()[0]
@@ -63,7 +71,12 @@ def prepare_tables(reader, meta, deci_pulse=1, deci_sample=1):
 
     m = len(range(0, n_vec, mu))
     n = len(range(0, n_samp, nu))
-    k = np.arange(n)
+    d0 = 0                                        # first kept sample, decimated index
+    if crop_sample and crop_sample < n:
+        d0 = (n - crop_sample) // 2               # centred
+        n = crop_sample
+    samp0 = d0 * nu                               # RAW sample index of the first kept sample
+    k = d0 + np.arange(n)                         # absolute decimated index -> freq stays correct
     freq = sc0[:, None] + k[None, :] * (scss[:, None] * nu)     # (m,n) Hz
 
     # resample grids + pixel geometry (mirrors form_image_pfa.pfa, on the CPU
@@ -89,7 +102,8 @@ def prepare_tables(reader, meta, deci_pulse=1, deci_sample=1):
     return {"ax": ax, "ay": ay, "freq": freq, "sgn": sgn,
             "KR": KR, "KC": KC, "tan_phi": tan_phi, "window": window,
             "geo": geo, "center_ecef": srp[0], "uiax": uiax, "uiay": uiay,
-            "dims": (m, n), "deci": (mu, nu), "n_vec": n_vec, "n_samp": n_samp}
+            "dims": (m, n), "deci": (mu, nu), "n_vec": n_vec, "n_samp": n_samp,
+            "samp0": samp0}
 
 
 def process_scene(cphd_path, out_dir, backend, deci_pulse=1, deci_sample=1):

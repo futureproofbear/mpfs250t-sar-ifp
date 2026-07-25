@@ -128,7 +128,7 @@ def _check_coeffs(signal, coeffs, ref_g2):
     return abs(np.vdot(a, b)) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-30)
 
 
-def serialize(cphd_path, out_dir, deci_pulse=1, deci_sample=1, grid=0):
+def serialize(cphd_path, out_dir, deci_pulse=1, deci_sample=1, grid=0, crop_sample=0):
     cphd_path, out_dir = Path(cphd_path), Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     L.assert_fits()
@@ -137,7 +137,7 @@ def serialize(cphd_path, out_dir, deci_pulse=1, deci_sample=1, grid=0):
     meta = reader.cphd_meta
     assert meta.Global.DomainType == "FX", "expects FX-domain CPHD"
 
-    tables = prepare_tables(reader, meta, deci_pulse, deci_sample)
+    tables = prepare_tables(reader, meta, deci_pulse, deci_sample, crop_sample)
     m, n = tables["dims"]
     mu, nu = tables["deci"]
     if max(m, n) > L.GRID_MAX:
@@ -151,9 +151,11 @@ def serialize(cphd_path, out_dir, deci_pulse=1, deci_sample=1, grid=0):
     print(f"  dims (M x N) = {m} x {n}  -> FFT grid {Mp} x {Np}"
           f"{'  (forced to fabric grid)' if grid else ''}")
 
+    s0 = tables["samp0"]                       # 0 unless --crop-sample narrowed the range axis
     signal = np.asarray(
-        reader.read_chip((0, tables["n_vec"], mu), (0, tables["n_samp"], nu), index=0),
+        reader.read_chip((0, tables["n_vec"], mu), (s0, s0 + n * nu, nu), index=0),
         dtype=np.complex64)
+    assert signal.shape == (m, n), f"read {signal.shape} != tables dims {(m, n)}"
     reader.close()
 
     # --- quantize the raw signal to 16-bit BFP I/Q (what the fabric consumes) --
@@ -277,8 +279,11 @@ def main():
     ap.add_argument("--grid", type=int, default=0,
                     help="force the padded FFT grid (e.g. 8192 for the on-silicon fabric); "
                          "0 = legacy per-scene next-pow2")
+    ap.add_argument("--crop-sample", type=int, default=0,
+                    help="keep only this many range samples, centred (e.g. 8192 for a scene "
+                         "wider than the fabric grid); 0 = keep all")
     a = ap.parse_args()
-    serialize(a.inp, a.out, a.deci_pulse, a.deci_sample, a.grid)
+    serialize(a.inp, a.out, a.deci_pulse, a.deci_sample, a.grid, a.crop_sample)
 
 
 if __name__ == "__main__":

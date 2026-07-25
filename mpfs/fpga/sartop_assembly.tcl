@@ -44,6 +44,14 @@ catch { sd_update_instance -sd_name $sd -instance_name {RSLICE_CIC} }
 ## FIC0MON: FIC_0_AXI4_S transaction monitor (new 7th CIC target @ 0x6000_6000, see
 ## sar_fic0s_mon.v / sar_fic0s_mon_core.tcl / axiic_ctrl_params.tcl TARGET6).
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_fic0s_mon}            -instance_name {FIC0MON}
+## COEFG: on-fabric azimuth resample coefficient generator (NEW 8th CIC target @ 0x6000_7000, see
+## sar_coeffgen.v / sar_coeffgen_core.tcl / axiic_ctrl_params.tcl TARGET7). Hand-written Verilog,
+## NOT SmartHLS. It has NO AXI4 initiator at all -- it consumes ZERO DIC initiator ports; its only
+## data-plane connection is the {m_idx,m_wq,m_valid,m_ready} stream straight into FEED (below).
+## It replaces 1499 us/row of CPU coefficient generation with ~147 us/row in fabric AND deletes
+## FEED's idx+wq DDR load passes (6144 of 8961 read beats/row). Runtime-gated at FEED reg 0x20
+## bit1, DEFAULT OFF -- this build is behaviour-neutral until the firmware sets it.
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_coeffgen}             -instance_name {COEFG}
 
 ## ---------------- clocks ----------------
 sd_create_scalar_port -sd_name $sd -port_name {REF_CLK_50MHz} -port_direction {IN}
@@ -53,7 +61,7 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"CLKREF:Y" "CCC:REF_CLK_0"} }
 sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT0_FABCLK_0" \
     "MSS:FIC_0_ACLK" "DIC:ACLK" "CIC:ACLK" "UNLD:clk" "FFT:CLK" "GBX:clk" \
     "CT:clk" "WIN:clk" "RES2:clk" "RES:clk" "FEED:clk" "RST:CLK" "ID_FIX:ACLK" \
-    "RSLICE_DIC:ACLK" "RSLICE_CIC:ACLK" "FIC0MON:aclk"}
+    "RSLICE_DIC:ACLK" "RSLICE_CIC:ACLK" "FIC0MON:aclk" "COEFG:clk"}
 catch { sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT1_FABCLK_0" "FFT:SLOWCLK"} }
 
 ## ---------------- reset (CORERESET_PF) ----------------
@@ -68,7 +76,7 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"RST:PLL_POWERDOWN_B"   "CCC:PL
 catch { sd_connect_pins -sd_name $sd -pin_names {"MSS:MSS_RESET_N_M2F"   "RST:EXT_RST_N"} }
 sd_connect_pins -sd_name $sd -pin_names {"RST:FABRIC_RESET_N" \
     "FFT:NGRST" "DIC:ARESETN" "CIC:ARESETN" "GBX:resetn" "ID_FIX:ARESETN" \
-    "RSLICE_DIC:ARESETN" "RSLICE_CIC:ARESETN" "FIC0MON:aresetn"}
+    "RSLICE_DIC:ARESETN" "RSLICE_CIC:ARESETN" "FIC0MON:aresetn" "COEFG:resetn"}
 ## UNLD (HLS kernel) uses an active-high synchronous reset -> invert FABRIC_RESET_N like the other kernels.
 foreach k {CT WIN RES2 RES FEED UNLD} {
     sd_invert_pins -sd_name $sd -pin_names "${k}:reset"
@@ -137,7 +145,7 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WREADY" "MSS:FIC_
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WSTRB" "MSS:FIC_0_AXI4_S_WSTRB"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WVALID" "MSS:FIC_0_AXI4_S_WVALID"} }
 
-## ---------------- control plane (AXIIC 3.0.130): FIC0 initiator -> CIC -> 7 targets ----------------
+## ---------------- control plane (AXIIC 3.0.130): FIC0 initiator -> CIC -> 8 targets ----------------
 ## RSLICE_CIC inline register slice (timing fix, see axi4_regslice.v header): rewire the
 ## former direct MSS:FIC_0_AXI4_INITIATOR<->CIC:AXI4minitiator0 connection through RSLICE_CIC.
 ## MSS:FIC_0_AXI4_INITIATOR -> RSLICE_CIC:S_AXI: interface-level bif connect is "not
@@ -205,6 +213,25 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_WLAST"   "FIC0MON
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BVALID"  "FIC0MON:mon_bvalid"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BREADY"  "FIC0MON:mon_bready"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"ID_FIX:M_AXI_BRESP"   "FIC0MON:mon_bresp"} }
+
+## target7 (NEW): sar_coeffgen, TYPE:1/AXI4-Lite (axiic_ctrl_params.tcl TARGET7, NUM_TARGETS:8)
+## -> control + table-load regs @ 0x60007000. Same "AXI4Lmtarget<n>" (with an L) pin naming as
+## target6 -- a Lite-typed target is a narrower CoreAXI4Interconnect bus interface (no ID/LEN/
+## BURST/WSTRB/xLAST), which matches sar_coeffgen.v's s_* port set with no dangling signals.
+## REPORTED, not bare-catch: a silently failed connect leaves a dangling interface and a netlist
+## that differs from the one this script claims to build (the lesson behind the RSLICE puts below).
+if {[catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4Lmtarget7" "COEFG:s_axi"} } err]} { puts "COEFG_CTRL_CONNECT_FAIL : $err" } else { puts "COEFG_CTRL_CONNECT_OK" }
+## COEFG -> FEED coefficient stream, plain pins (no bus interface on either side, exactly like
+## FFT:SCALE_EXP -> FEED:scale_exp_in). This is the ONLY data-plane connection the generator has:
+## no FIC, no AXI4 initiator, no DIC port, nothing added to the FIC_0 read path. FEED consumes it
+## only when its GATHER_CTRL (0x20) bit1 is set; bit1 is 0 out of reset, so an unconsumed stream
+## simply back-pressures and the feeder behaves exactly as it does today.
+foreach {a b} {
+    COEFG:m_idx   FEED:c_idx
+    COEFG:m_wq    FEED:c_wq
+    COEFG:m_valid FEED:c_valid
+    COEFG:m_ready FEED:c_ready
+} { if {[catch { sd_connect_pins -sd_name $sd -pin_names "$a $b" } err]} { puts "COEFG_STREAM_CONNECT_FAIL $a : $err" } else { puts "COEFG_STREAM_CONNECT_OK $a" } }
 
 ## ---------------- CoreFFT streaming path ----------------
 catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:out_var"       "GBX:s_axis_tdata"} }

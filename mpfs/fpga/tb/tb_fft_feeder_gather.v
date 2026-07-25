@@ -14,6 +14,33 @@
 //   5 nowin    : gather ON, window OFF (win_en gating inside gather mode)
 // Random R-channel gaps (mock slave) + AXI-Stream backpressure run throughout (f).
 //
+// ---- COEFFICIENT-SOURCE A/B (added with the sar_coeffgen fuse, reg 0x20 bit1) ---------------
+// Every gather-enabled case is run TWICE on identical inputs: once with coefficients loaded from
+// DDR (bit1=0, the shipping path) and once with the SAME idx/wq values pushed in on the
+// {c_idx,c_wq,c_valid,c_ready} stream (bit1=1). The run FAILS unless the two output streams are
+// beat-for-beat IDENTICAL -- that is the property the runtime fallback rests on, and it is the
+// one thing a coeffgen-only testbench cannot show.
+// In the stream run IDX_BASE/WQ_BASE are deliberately pointed at the SOURCE row instead of the
+// coefficient tables: if the feeder still touched the DDR coefficient path it would gather with
+// source samples as indices/weights and the compare would diverge immediately.
+// The stream is driven with ~20% valid bubbles, so the c_valid gating of g_issue is exercised
+// (a feeder that ignored c_valid would consume a stale entry and shift the whole row).
+// The stream run's DDR read-beat count is also asserted to be the SOURCE row only, because the
+// skipped idx/wq passes are a throughput property that no value compare can observe.
+//
+// A/B MUTATION COVERAGE -- measured by applying each to fft_feeder_v.v and re-running:
+//   * idx1 source mux forced to the DDR banks   -> FAIL 148 beats
+//   * wq1  source mux forced to the DDR banks   -> FAIL 148
+//   * g_issue ignores c_valid (stale entry)     -> FAIL 125 (and the drained-entry guard trips)
+//   * G_IDX/G_WQ passes NOT skipped in stream mode -> FAIL 5 (read-beat count 42 vs 18)
+//   * capture c_idx/c_wq unconditionally instead of at issue -> NOT observable, and provably so:
+//     stage 1 consumes c_idx_r only on the cycle after issue, which the issue-edge capture already
+//     fixes. Stated, not claimed as covered.
+//
+// NOTE ON SCOPE: this proves the FEEDER's consumption path. That the streamed VALUES equal the C
+// reference is proven separately by tb_sar_coeffgen.v + mpfs/host/check_coeffgen_fixed.py; no
+// board-free test wires the two RTL blocks together through the real interconnect.
+//
 // MUTATION CHECKS (confirmed to FAIL the TB -- see gen_gather_vectors.py header):
 //   * drop `signed` on the lerp difference (b-a)  -> negative source samples diverge (cases 0/1/4)
 //   * B = srcbuf[idx] instead of srcbuf[idx+1]    -> interior interpolation wrong
@@ -62,6 +89,9 @@ module tb_fft_feeder_gather;
 
     wire [63:0] m_axis_tdata; wire m_axis_tvalid; reg m_axis_tready;
 
+    // coefficient stream (TB-driven; sar_coeffgen's stream contract)
+    wire signed [31:0] c_idx; wire [15:0] c_wq; wire c_valid; wire c_ready;
+
     fft_feeder_v #(.AXI_ADDR_W(32), .AXI_DATA_W(64), .AXI_ID_W(4),
                    .MAX_BURST(MAX_BURST), .FIFO_AW(FIFO_AW), .TAB_AW(TAB_AW),
                    .G_BUF_AW(G_BUF_AW), .G_TAB_AW(G_TAB_AW), .G_SFIFO_AW(G_SFIFO_AW)) dut (
@@ -76,8 +106,37 @@ module tb_fft_feeder_gather;
         .m_rid(m_rid), .m_rdata(m_rdata), .m_rlast(m_rlast), .m_rvalid(m_rvalid),
         .m_rready(m_rready),
         .m_axis_tdata(m_axis_tdata), .m_axis_tvalid(m_axis_tvalid), .m_axis_tready(m_axis_tready),
+        .c_idx(c_idx), .c_wq(c_wq), .c_valid(c_valid), .c_ready(c_ready),
         .scale_exp_in(4'd0), .outp_ready_in(1'b0)
     );
+
+    // ================= coefficient stream driver (sar_coeffgen's contract) ==================
+    // Presents cs_n entries in qi order with ~20% valid bubbles. Held off entirely (c_valid low)
+    // when cs_en == 0, so the DDR-coefficient runs are bit-unchanged.
+    reg        cs_en;                       // set by the test before START
+    reg [15:0] cs_n;                        // entries to present == QN
+    reg [31:0] cidx_a [0:`QN-1];
+    reg [15:0] cwq_a  [0:`QN-1];
+    reg [31:0] cs_idx_r; reg [15:0] cs_wq_r; reg cs_valid_r; reg [15:0] cs_i;
+    reg        cs_gap;
+    always @(posedge clk) cs_gap <= (($random(seed) % 5) == 0);   // ~20% valid bubbles
+
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            cs_valid_r <= 1'b0; cs_idx_r <= 32'd0; cs_wq_r <= 16'd0; cs_i <= 16'd0;
+        end else begin
+            if (cs_valid_r & c_ready) cs_valid_r <= 1'b0;
+            if ((~cs_valid_r | c_ready) & cs_en & ~cs_gap & (cs_i < cs_n)) begin
+                cs_idx_r   <= cidx_a[cs_i];
+                cs_wq_r    <= cwq_a[cs_i];
+                cs_valid_r <= 1'b1;
+                cs_i       <= cs_i + 16'd1;
+            end
+        end
+    end
+    assign c_idx  = $signed(cs_idx_r);
+    assign c_wq   = cs_wq_r;
+    assign c_valid = cs_valid_r & cs_en;
 
     // ================= mock AXI4 read slave (random R gaps + one-shot stray injection) =======
     // s_cnt counts beats PRESENTED; advances only on a consumed beat (rvalid&rready), so an idle
@@ -177,6 +236,13 @@ module tb_fft_feeder_gather;
         m_axis_tready <= ($random(seed) % 8 != 0);   // ~12% backpressure
     end
 
+    // DDR read beats REQUESTED per run (sum of ARLEN+1 over accepted ARs). The stream run must
+    // ask for the SOURCE row only -- that deletion (idx+wq = 6144 of 8961 beats/row in production)
+    // is the whole throughput case for the fuse, and it is a property no value compare can see.
+    integer ar_beats;
+    always @(posedge clk)
+        if (resetn && m_arvalid && m_arready) ar_beats = ar_beats + (m_arlen + 1);
+
     // throughput measurement (gather/stream phase): count cycles where a sample could be produced
     integer gather_cycles, gather_samples;
     always @(posedge clk) begin
@@ -199,10 +265,12 @@ module tb_fft_feeder_gather;
     endtask
 
     // ================= test =================
-    integer cid, b, k, errors, total_errors;
-    reg [31:0] c_gath, c_win, c_hamr, c_src, c_idx, c_wq, c_s, c_qn, c_nb, c_inj, c_err;
+    integer cid, b, k, errors, total_errors, mode, nmode, ab_errors, ddr_beats;
+    reg [31:0] c_gath, c_win, c_hamr, c_src, c_idxb, c_wqb, c_s, c_qn, c_nb, c_inj, c_err;
     reg [31:0] st14;
-    reg [63:0] want;
+    reg [63:0] want, tmpw;
+    reg [63:0] got_ddr [0:`MAXOUT-1];     // DDR-coefficient reference run, for the A/B compare
+    integer    mb;
 
     initial begin
         $readmemh("ga_mem.hex", mem);
@@ -213,40 +281,86 @@ module tb_fft_feeder_gather;
 
         s_awvalid=0; s_wvalid=0; s_arvalid=0; s_awaddr=0; s_wdata=0; s_araddr=0;
         m_axis_tready=1; ngot=0; total_errors=0; do_inject=0;
-        gather_cycles=0; gather_samples=0;
+        gather_cycles=0; gather_samples=0; cs_en=0; cs_n=0;
 
         for (cid = 0; cid < `NCASES; cid = cid + 1) begin
             c_gath = cfg[cid*`CFGW+0]; c_win = cfg[cid*`CFGW+1]; c_hamr = cfg[cid*`CFGW+2];
-            c_src  = cfg[cid*`CFGW+3]; c_idx = cfg[cid*`CFGW+4]; c_wq   = cfg[cid*`CFGW+5];
+            c_src  = cfg[cid*`CFGW+3]; c_idxb= cfg[cid*`CFGW+4]; c_wqb  = cfg[cid*`CFGW+5];
             c_s    = cfg[cid*`CFGW+6]; c_qn  = cfg[cid*`CFGW+7]; c_nb   = cfg[cid*`CFGW+8];
             c_inj  = cfg[cid*`CFGW+9]; c_err = cfg[cid*`CFGW+10];
 
-            // fresh reset per case so the sticky err latches are per-case
-            resetn = 0; do_inject = 0;
+            // mode 0 = coefficients from DDR (shipping path). mode 1 = same values on the stream.
+            // Only gather-enabled cases have a coefficient source to switch.
+            nmode = c_gath[0] ? 2 : 1;
+            for (mode = 0; mode < nmode; mode = mode + 1) begin
+
+            // Extract this case's idx/wq entries STRAIGHT OUT OF THE DDR IMAGE the other mode
+            // reads, so the two runs are driven by literally the same numbers. Layout mirrors the
+            // feeder's bank fill: idx entry i -> beat i>>1 lane i&1 ; wq entry i -> beat i>>2 lane i&3.
+            if (mode == 1) begin
+                for (k = 0; k < c_qn; k = k + 1) begin
+                    mb   = (c_idxb >> 3) + (k >> 1);
+                    tmpw = mem[mb];
+                    cidx_a[k] = k[0] ? tmpw[63:32] : tmpw[31:0];
+                    mb   = (c_wqb >> 3) + (k >> 2);
+                    tmpw = mem[mb];
+                    case (k[1:0])
+                        0: cwq_a[k] = tmpw[15:0];
+                        1: cwq_a[k] = tmpw[31:16];
+                        2: cwq_a[k] = tmpw[47:32];
+                        default: cwq_a[k] = tmpw[63:48];
+                    endcase
+                end
+            end
+
+            // fresh reset per run so the sticky err latches and the stream index are per-run
+            resetn = 0; do_inject = 0; cs_en = 0;
             repeat (6) @(posedge clk);
             resetn = 1;
             repeat (4) @(posedge clk);
+
+            // POISON the DDR coefficient banks before a stream run. WITHOUT THIS THE A/B IS
+            // VACUOUS: reset does not clear LSRAM, and the stream run SKIPS the G_IDX/G_WQ load
+            // passes, so the banks still hold the DDR run's correct coefficients -- a feeder that
+            // ignored the stream entirely would still produce the right answer. MEASURED: with the
+            // idx1 source mux mutated to always read the banks, the A/B passed until this was
+            // added, and fails now.
+            if (mode == 1) begin
+                for (k = 0; k < (1 << (G_TAB_AW-1)); k = k + 1) begin
+                    dut.idxbuf0[k] = 32'hDEAD_BEEF;   // negative -> would zero-fill, not interpolate
+                    dut.idxbuf1[k] = 32'hDEAD_BEEF;
+                end
+                for (k = 0; k < (1 << (G_TAB_AW-2)); k = k + 1) begin
+                    dut.wqbuf0[k] = 16'h5A5A; dut.wqbuf1[k] = 16'h5A5A;
+                    dut.wqbuf2[k] = 16'h5A5A; dut.wqbuf3[k] = 16'h5A5A;
+                end
+            end
 
             // load the along-row taper (rewind pointer, stream the words)
             lite_w(12'h018, 32'h0002_0000);
             for (k = 0; k < `TAB_WORDS; k = k + 1) lite_w(12'h01c, tab[k]);
 
             // program the row
-            lite_w(12'h020, c_gath);                          // GATHER_CTRL
+            lite_w(12'h020, {30'd0, (mode == 1), c_gath[0]}); // GATHER_CTRL [1]=stream coeffs
             lite_w(12'h018, {15'd0, c_win[0], c_hamr[15:0]}); // WIN_CTRL (bit17=0, no rewind)
             lite_w(12'h00c, c_src);                           // ARG0 = src_base
             if (c_gath[0]) begin
-                lite_w(12'h024, c_idx);                       // IDX_BASE
-                lite_w(12'h028, c_wq);                        // WQ_BASE
-                lite_w(12'h02c, {c_qn[15:0], c_s[15:0]});     // GATHER_DIMS
+                // mode 1 points the DDR coefficient bases at the SOURCE row: if the feeder still
+                // used them the gather would run on source samples and diverge at once.
+                lite_w(12'h024, (mode == 1) ? c_src : c_idxb); // IDX_BASE
+                lite_w(12'h028, (mode == 1) ? c_src : c_wqb);  // WQ_BASE
+                lite_w(12'h02c, {c_qn[15:0], c_s[15:0]});      // GATHER_DIMS
             end else begin
                 lite_w(12'h010, c_nb);                        // ARG1 = nbeats (legacy path)
             end
 
-            ngot = 0;
+            ngot = 0; ar_beats = 0;
+            cs_n = c_qn[15:0];
+            cs_en = (mode == 1);                              // arm the coefficient stream
             do_inject = c_inj[0];                             // arm stray injection before START
             lite_w(12'h008, 32'd1);                           // START
             wait_busy_clear;
+            cs_en = 0;
 
             // check output beats
             errors = 0;
@@ -254,8 +368,8 @@ module tb_fft_feeder_gather;
                 want = exp[cid*`MAXOUT + b];
                 if (got[b] !== want) begin
                     if (errors < 4)
-                        $display("  case %0s beat %0d: got %016x want %016x",
-                                 names[cid], b, got[b], want);
+                        $display("  case %0s[%0s] beat %0d: got %016x want %016x",
+                                 names[cid], mode ? "stream" : "ddr", b, got[b], want);
                     errors = errors + 1;
                 end
             end
@@ -263,14 +377,45 @@ module tb_fft_feeder_gather;
             // check the sticky protocol-violation latches (reg 0x14 bit16 = err_extra)
             lite_r(12'h014, st14);
             if (st14[16] !== c_err[0]) begin
-                $display("  case %0s: err_extra=%b expected %b", names[cid], st14[16], c_err[0]);
+                $display("  case %0s[%0s]: err_extra=%b expected %b", names[cid],
+                         mode ? "stream" : "ddr", st14[16], c_err[0]);
                 errors = errors + 1;
             end
 
-            $display("[gather] case %0s: %0d/%0d beats %s%s", names[cid], `MAXOUT - errors,
-                     `MAXOUT, errors ? "FAIL" : "ok",
+            // A/B: the stream run must be beat-for-beat identical to the DDR run
+            ab_errors = 0;
+            if (mode == 0) begin
+                for (b = 0; b < `MAXOUT; b = b + 1) got_ddr[b] = got[b];
+                ddr_beats = ar_beats;
+            end else begin
+                // the stream run must fetch the SOURCE row and NOTHING else
+                if (ar_beats !== ((c_s + 1) >> 1)) begin
+                    $display("  case %0s A/B: stream run read %0d beats, expected %0d (source only, ddr run read %0d) -- idx/wq passes not skipped",
+                             names[cid], ar_beats, (c_s + 1) >> 1, ddr_beats);
+                    ab_errors = ab_errors + 1;
+                end
+                for (b = 0; b < `MAXOUT; b = b + 1)
+                    if (got[b] !== got_ddr[b]) begin
+                        if (ab_errors < 4)
+                            $display("  case %0s A/B beat %0d: stream %016x ddr %016x",
+                                     names[cid], b, got[b], got_ddr[b]);
+                        ab_errors = ab_errors + 1;
+                    end
+                // Guard against a vacuous A/B: the stream must actually have been drained.
+                if (cs_i !== c_qn[15:0]) begin
+                    $display("  case %0s A/B: feeder consumed %0d of %0d stream entries",
+                             names[cid], cs_i, c_qn);
+                    ab_errors = ab_errors + 1;
+                end
+            end
+
+            $display("[gather] case %0s[%0s]: %0d/%0d beats, %0d DDR reads %s%s%s", names[cid],
+                     mode ? "stream" : "ddr", `MAXOUT - errors, `MAXOUT, ar_beats,
+                     errors ? "FAIL" : "ok",
+                     (mode == 1) ? (ab_errors ? "  A/B FAIL" : "  A/B identical to ddr") : "",
                      c_inj[0] ? (st14[16] ? "  (err_extra latched)" : "  (ERR NOT LATCHED)") : "");
-            total_errors = total_errors + errors;
+            total_errors = total_errors + errors + ab_errors;
+            end
         end
 
         $display("\ngather/stream phase: %0d samples in %0d G_GATHER cycles",

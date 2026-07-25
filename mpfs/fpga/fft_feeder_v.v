@@ -55,6 +55,29 @@
 //
 //   +0x18 WIN_CTRL  [15:0]=hamr[row] Q15 signed, [16]=window enable, [17]=rewind tab pointer
 //   +0x1c WIN_TAB   [31:0]={hamc[2i+1], hamc[2i]}, written 4096x, pointer auto-increments
+//
+// ---------------------------------------------------------------------------------------
+// ON-FABRIC COEFFICIENTS (optional, runtime-enabled -- reg 0x20 bit1)
+//
+// WHY: silicon 2026-07-25 decomposes FFT-1 (11.46 s of a 32.97 s frame) as RPROF[6] azimuth
+// coefficient generation 4.170 s + [7] arm 0.011 s + [8] renormalize epilogue 2.933 s +
+// [9] residual fabric wait 4.344 s. sar_coeffgen.v generates the SAME coefficients in fabric at
+// ~147 us/row vs 1499 us/row single-hart on the CPU, and streaming them straight in here also
+// deletes the G_IDX + G_WQ load passes -- 6144 of this row's 8961 read beats (68.6%) -- and the
+// CPU's per-row coefficient-bank L2 flush along with them.
+//
+// THE DDR PATH IS KEPT AND IS THE DEFAULT. Bit1 selects the source at RUNTIME because a fabric
+// build costs hours: if the fused path misbehaves on silicon we must be able to A/B against the
+// DDR path in the SAME bitstream. IDX_BASE/WQ_BASE and the six idx/wq banks therefore stay.
+// Bit1 == 0 out of reset, so this build is behaviour-neutral until deliberately switched.
+//
+// VALUE-NEUTRALITY is the property the A/B rests on, and it is structural: the stream entry is
+// captured at ISSUE into c_idx_r/c_wq_r, i.e. exactly where the registered bank reads land, so
+// stage 1 sees the same numbers on the same cycle and every stage after it is untouched.
+// Proven in simulation by tb/tb_fft_feeder_gather.v's A/B cases (same row, both settings,
+// beat-for-beat compare).
+//
+//   +0x20 GATHER_CTRL [0]=gather enable, [1]=coefficients from STREAM (0 = from DDR, default)
 `timescale 1ns/1ps
 module fft_feeder_v #(
     parameter integer AXI_ADDR_W = 32,
@@ -107,6 +130,16 @@ module fft_feeder_v #(
     output wire [AXI_DATA_W-1:0]    m_axis_tdata,
     output wire                     m_axis_tvalid,
     input  wire                     m_axis_tready,
+
+    // ---- coefficient stream from sar_coeffgen (fused gather, reg 0x20 bit1) ----------------
+    // One {idx, wq} entry per output qi, strictly in qi order, QN entries per row -- byte-for-byte
+    // what the G_IDX/G_WQ DDR passes load today. c_ready is independent of c_valid (a slot is
+    // "wanted" purely from gstate/g_left/gen), so there is no valid<-ready dependency.
+    // When GATHER_CTRL[1] == 0 these are UNUSED and the feeder is bit-unchanged from today.
+    input  wire signed [31:0]       c_idx,
+    input  wire [15:0]              c_wq,
+    input  wire                     c_valid,
+    output wire                     c_ready,
 
     // ---- CoreFFT block-floating-point exponent capture (for the pipeline's global-block-
     // exponent renormalize; see sar_sequencer.c fft_fabric_pass). CoreFFT drives SCALE_EXP
@@ -167,6 +200,11 @@ module fft_feeder_v #(
     reg [31:0]           tab_wdata;
     // ---- gather control (all above 0x1c; wrapper addr decode widened to 6 bits, see top.v) ----
     reg                  gath_en;       // GATHER_CTRL[0]  @0x20
+    // GATHER_CTRL[1]: coefficient SOURCE select. 0 (reset default) = the DDR G_IDX/G_WQ load
+    // passes below, exactly as shipped; 1 = the {c_idx,c_wq} stream from sar_coeffgen. Runtime,
+    // NOT a rebuild: a fabric build takes hours, so both coefficient paths stay in the SAME
+    // bitstream and can be A/B'd on silicon. IDX_BASE/WQ_BASE keep their decode for that reason.
+    reg                  cstream_en;    // GATHER_CTRL[1]  @0x20
     reg [AXI_ADDR_W-1:0] idx_base;      // IDX_BASE        @0x24  DDR byte addr of this row's idx[]
     reg [AXI_ADDR_W-1:0] wq_base;       // WQ_BASE         @0x28  DDR byte addr of this row's wq[]
     reg [15:0]           src_len;       // GATHER_DIMS[15:0] @0x2c  S = source SAMPLE count
@@ -178,7 +216,8 @@ module fft_feeder_v #(
         if (!resetn) begin
             src_base <= 0; nbeats <= 0; s_bvalid <= 0; start_pulse <= 0;
             win_scale <= 16'sd0; win_en <= 1'b0; tab_wptr <= 0; tab_we <= 1'b0;
-            gath_en <= 1'b0; idx_base <= 0; wq_base <= 0; src_len <= 16'd0; q_n <= 16'd0;
+            gath_en <= 1'b0; cstream_en <= 1'b0;
+            idx_base <= 0; wq_base <= 0; src_len <= 16'd0; q_n <= 16'd0;
         end else begin
             start_pulse <= 0;
             tab_we      <= 1'b0;
@@ -198,7 +237,10 @@ module fft_feeder_v #(
                         tab_we    <= 1'b1;
                         tab_wptr  <= tab_wptr + 1'b1;
                     end
-                    12'h020: gath_en  <= s_wdata[0];        // GATHER_CTRL
+                    12'h020: begin                          // GATHER_CTRL
+                        gath_en    <= s_wdata[0];
+                        cstream_en <= s_wdata[1];
+                    end
                     12'h024: idx_base <= s_wdata[AXI_ADDR_W-1:0];
                     12'h028: wq_base  <= s_wdata[AXI_ADDR_W-1:0];
                     12'h02c: begin src_len <= s_wdata[15:0]; q_n <= s_wdata[31:16]; end
@@ -227,7 +269,7 @@ module fft_feeder_v #(
                                      err_extra | g_err_extra, 12'd0, scale_exp_latched};
                 12'h018: s_rdata <= {15'd0, win_en, win_scale};  // window ctrl readback
                 12'h01c: s_rdata <= {{(32-TAB_AW){1'b0}}, tab_wptr};  // taper fill level
-                12'h020: s_rdata <= {31'd0, gath_en};
+                12'h020: s_rdata <= {30'd0, cstream_en, gath_en};
                 12'h024: s_rdata <= idx_base;
                 12'h028: s_rdata <= wq_base;
                 12'h02c: s_rdata <= {q_n, src_len};
@@ -473,6 +515,7 @@ module fft_feeder_v #(
     // latched-at-start per-row parameters (a late AXI4-Lite write cannot split a row)
     reg [15:0]           gr_srclen, gr_qn;
     reg [AXI_ADDR_W-1:0] gr_srcbase, gr_idxbase, gr_wqbase;
+    reg                  gr_cstream;    // GATHER_CTRL[1] latched at START (same rule)
 
     // gather load master (own copy; the legacy feed master stays idle while gath_busy)
     reg [31:0]           g_beats_left;
@@ -518,13 +561,23 @@ module fft_feeder_v #(
     // output-index issue
     reg [G_TAB_AW-1:0] gi;
     reg [15:0]         g_left;
-    wire g_issue = (gstate == G_GATHER) && (g_left != 16'd0);
     wire gen;                                     // pipeline enable (gather stream FIFO room)
+    // g_want = an output slot is wanted this cycle. In DDR-coefficient mode that IS the issue
+    // (the banks are already loaded); in stream mode the issue additionally needs a coefficient.
+    // c_ready is derived from g_want, NOT from g_issue, so READY never depends on VALID.
+    wire g_want  = (gstate == G_GATHER) && (g_left != 16'd0);
+    wire g_issue = g_want && (!gr_cstream || c_valid);
+    assign c_ready = gen & g_want & gr_cstream;
 
     // ---- gather pipeline stage registers -------------------------------------------------
     reg               g0_v;
     reg               g0_sel0;                    // gi[0]   (idx bank + tap half)
     reg [1:0]         g0_sel;                     // gi[1:0] (wq bank)
+    // Stream coefficients captured AT ISSUE, so they are presented to stage 1 on exactly the same
+    // cycle the bank outputs (registered RAM reads addressed by gi) would be -- the two sources
+    // are latency-matched by construction, which is what makes the runtime select value-neutral.
+    reg signed [31:0] c_idx_r;
+    reg        [15:0] c_wq_r;
     reg               g1_v, g1_val, g1_idx0;
     reg [15:0]        g1_wq;
     reg signed [31:0] g1_cwp;                     // win_scale*tap  (window 1st multiply)
@@ -591,10 +644,14 @@ module fft_feeder_v #(
     always @(posedge clk) g_wtab_q <= wtab[gi[TAB_AW:1]];
 
     // ---- stage-1 combinational: pick idx/wq/tap, range-check, form source-bank addresses -----
-    wire signed [31:0] idx1 = g0_sel0 ? $signed(idxbuf1_q) : $signed(idxbuf0_q);
-    wire        [15:0] wq1  = (g0_sel==2'd0) ? wqbuf0_q :
-                              (g0_sel==2'd1) ? wqbuf1_q :
-                              (g0_sel==2'd2) ? wqbuf2_q : wqbuf3_q;
+    // Coefficient SOURCE mux (the only value-carrying difference between the two modes).
+    // Everything downstream -- g_inr1, ge_ra/go_ra, the lerp and the fused window -- is untouched.
+    wire signed [31:0] idx1_ddr = g0_sel0 ? $signed(idxbuf1_q) : $signed(idxbuf0_q);
+    wire        [15:0] wq1_ddr  = (g0_sel==2'd0) ? wqbuf0_q :
+                                  (g0_sel==2'd1) ? wqbuf1_q :
+                                  (g0_sel==2'd2) ? wqbuf2_q : wqbuf3_q;
+    wire signed [31:0] idx1 = gr_cstream ? c_idx_r : idx1_ddr;
+    wire        [15:0] wq1  = gr_cstream ? c_wq_r  : wq1_ddr;
     wire signed [15:0] tap1 = g0_sel0 ? g_wtab_q[31:16] : g_wtab_q[15:0];
     wire signed [31:0] g_sm1 = $signed({16'd0, gr_srclen}) - 32'sd1;   // S-1
     wire g_inr1 = (idx1 >= 0) && (idx1 < g_sm1);
@@ -623,7 +680,7 @@ module fft_feeder_v #(
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
             g0_v<=0; g1_v<=0; g2_v<=0; g3_v<=0; g4_v<=0; g5_v<=0;
-            g0_sel0<=0; g0_sel<=0;
+            g0_sel0<=0; g0_sel<=0; c_idx_r<=32'sd0; c_wq_r<=16'd0;
             g1_val<=0; g1_idx0<=0; g1_wq<=0; g1_cwp<=32'sd0;
             g2_val<=0; g2_wq<=0; g2_dhi<=17'sd0; g2_dlo<=17'sd0; g2_ahi<=0; g2_alo<=0; g2_cw<=0;
             g3_val<=0; g3_mh<=33'sd0; g3_ml<=33'sd0; g3_ahi<=0; g3_alo<=0; g3_cw<=0;
@@ -633,6 +690,7 @@ module fft_feeder_v #(
             g0_v    <= g_issue;
             g0_sel0 <= gi[0];
             g0_sel  <= gi[1:0];
+            if (g_issue) begin c_idx_r <= c_idx; c_wq_r <= c_wq; end
 
             g1_v    <= g0_v;
             g1_val  <= g_inr1;
@@ -671,7 +729,7 @@ module fft_feeder_v #(
     always @(posedge clk or negedge resetn) begin
         if (!resetn)                    begin gi <= 0; g_left <= 16'd0; end
         else if (gstate != G_GATHER)    begin gi <= 0; g_left <= gr_qn; end
-        else if (gen && g_left != 16'd0) begin gi <= gi + 1'b1; g_left <= g_left - 1'b1; end
+        else if (gen && g_issue)        begin gi <= gi + 1'b1; g_left <= g_left - 1'b1; end
     end
 
     // ---- pack two samples/beat -> gather stream FIFO ----------------------------------------
@@ -728,7 +786,7 @@ module fft_feeder_v #(
             g_beats_left <= 32'd0; g_next_addr <= 0; g_cur_len <= 32'd0; g_burst_rem <= 9'd0;
             g_wn <= 16'd0;
             g_err_extra <= 1'b0; g_err_rlast <= 1'b0; g_err_align <= 1'b0;
-            gr_srclen <= 16'd0; gr_qn <= 16'd0;
+            gr_srclen <= 16'd0; gr_qn <= 16'd0; gr_cstream <= 1'b0;
             gr_srcbase <= 0; gr_idxbase <= 0; gr_wqbase <= 0;
         end else begin
             // sticky: a stray/misrouted R beat during a load pass must not silently shift a bank
@@ -739,6 +797,7 @@ module fft_feeder_v #(
                   if (start_pulse && gath_en) begin
                       gr_srclen  <= src_len;   gr_qn      <= q_n;
                       gr_srcbase <= src_base;  gr_idxbase <= idx_base;  gr_wqbase <= wq_base;
+                      gr_cstream <= cstream_en;
                       gath_busy  <= 1'b1;
                       gpass      <= 2'd0;
                       g_next_addr  <= src_base;
@@ -755,7 +814,9 @@ module fft_feeder_v #(
                   case (grstate)
                     GA_ADDR: begin
                         if (g_beats_left == 32'd0) begin
-                            if (gpass == 2'd2) begin
+                            // gr_cstream: the SOURCE row is still loaded from DDR, but G_IDX/G_WQ
+                            // are skipped outright -- that is the 6144-of-8961 read-beat saving.
+                            if (gpass == 2'd2 || gr_cstream) begin
                                 grstate <= GA_IDLE;
                                 gstate  <= G_GATHER;
                             end else begin

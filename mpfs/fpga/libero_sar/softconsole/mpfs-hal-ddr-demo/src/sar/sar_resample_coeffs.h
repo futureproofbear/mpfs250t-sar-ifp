@@ -74,6 +74,14 @@ void sar_coeffs_pass2(const sar_geom_t *g, uint32_t j,
  * require it (see the bit-exactness note above); gate any multi-hart dispatch on this. */
 int sar_coeffs_ready(const sar_geom_t *g);
 
+/* The line-invariant reciprocals themselves, for pushing into the FABRIC coefficient generator
+ * (sar_coeffgen.v). Exposed rather than recomputed on the fabric side ON PURPOSE: 1/(tan_s[k+1]-
+ * tan_s[k]) rounded by a different expression moves wq by +-1 on a large fraction of outputs (see
+ * that module's header), which would break the bit-exactness the whole design rests on.
+ * *n receives the number of VALID entries (M-1). Returns NULL, *n = 0, until sar_coeffs_init()
+ * has run for this geometry. */
+const float *sar_coeffs_inv_tan(uint32_t *n);
+
 void sar_coeffs_pass1_range(const sar_geom_t *g, uint32_t i,
                             float *scratch, int32_t *idx, int16_t *wq,
                             uint32_t q0, uint32_t q1);

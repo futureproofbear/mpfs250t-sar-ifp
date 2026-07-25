@@ -225,13 +225,81 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
  * and streams to CoreFFT, so the ~13.5 s pass folds under the FFT feed. Runtime-gated by
  * SAR_GATHERMODE_ADDR so the default pipeline is unchanged. idx/wq are read from DDR per row (the
  * feeder's own read master), NOT loaded over AXI4-Lite. */
-#define K_FFT_GATHER_CTRL 0x20u              /* [0] = gather enable */
+#define K_FFT_GATHER_CTRL 0x20u              /* [0] = gather enable, [1] = coefficients from the fabric stream */
+#define K_FFT_GC_GATHER   0x1u
+#define K_FFT_GC_CSTREAM  0x2u               /* 0 = idx/wq from DDR (default), 1 = from sar_coeffgen */
 #define K_FFT_IDX_BASE    0x24u              /* DDR byte addr of this row's idx[] */
 #define K_FFT_WQ_BASE     0x28u              /* DDR byte addr of this row's wq[] */
 #define K_FFT_GATHER_DIMS 0x2cu              /* [15:0]=SRC_LEN (source samples), [31:16]=QN (outputs) */
 #define SAR_GATHERMODE_ADDR 0xB005911Cu      /* 0=standalone azimuth resample (default); 1=fused into FFT-1 */
 
+/* ---- ON-FABRIC azimuth coefficients (sar_coeffgen.v -> feeder stream) ---------------------
+ * Silicon 2026-07-25 decomposes FFT-1 (11.46 s of a 32.97 s frame) as RPROF[6] coefficient
+ * generation 4.170 s + [7] arm 0.011 s + [8] renormalize epilogue 2.933 s + [9] residual fabric
+ * wait 4.344 s = 99.95% of the stage. The fabric generator runs a row in ~147 us against 1499 us
+ * single-hart on the CPU, and streaming its output straight into the feeder ALSO deletes the
+ * idx+wq DDR load passes (6144 of 8961 read beats/row) and the per-row coefficient-bank L2 flush.
+ *
+ * FAIL-SAFE ENCODING, same discipline as SAR_CWRK_NW_ADDR: this word is uninitialised DDR on a
+ * cold boot, so accept ONLY the exact magic. Anything else -- 0, 1, 0xdeadbeef -- means OFF and
+ * the DDR coefficient path runs unchanged. A "non-zero = on" test would enable an unvalidated
+ * datapath on random DDR content. The fabric bit is likewise 0 out of reset, so a bitstream with
+ * the generator present but this knob unset behaves exactly as today. */
+#define SAR_CGENMODE_ADDR 0xB0059138u        /* free: 0x134 = SAR_CWRK_NW, 0x180 = RPROF */
+#define SAR_CGEN_ENABLE   0x43474E31u        /* 'CGN1' -- the ONLY accepted value */
+
 static uint8_t sar_row_exp[SAR_GRID];        /* per-row captured exponent (static, off-stack) */
+
+/* float32 -> its IEEE-754 bit pattern. The generator is a bit-exact binary32 emulator, so it is
+ * fed BITS, not a converted value: KR[j] and 1.0f/KR[j] must be the same float expressions the C
+ * uses (sar_coeffs_pass2_range's `r = 1.0f / kr`), or the weights diverge in the last place. */
+static inline uint32_t f32_bits(float f)
+{
+    union { float f; uint32_t u; } c;
+    c.f = f;
+    return c.u;
+}
+
+/* Push the row-invariant tables into the generator, ONCE per scene (M + (M-1) + Mp AXI4-Lite
+ * writes ~= 19.5k, ~2 ms -- free against the seconds saved, and deliberately not a DMA for the
+ * same reason the feeder's taper is not: a second fabric read mode would arbitrate for AR/R).
+ * VERIFIED, not assumed: the RTL exposes the three fill levels at 0x10/0x14/0x18, so read them
+ * back and compare against S / S-1 / QN. 19.5k unverified writes over a control bus is exactly
+ * the kind of silent partial failure that reads as an arithmetic bug on silicon.
+ * Returns 0 on success, or a bitmask of which table came up short (1=tan_s, 2=inv_tan, 4=KC). */
+static int cgen_load_tables(const sar_geom_t *g)
+{
+    uint32_t itn = 0u;
+    const float *itan = sar_coeffs_inv_tan(&itn);
+    const uint32_t S = g->M, QN = g->Mp;
+    int bad = 0;
+
+    if (itan == 0 || itn != (S - 1u)) return 2;      /* sar_coeffs_init() has not run for this geometry */
+
+    sar_reg_w(K_COEFFGEN, CGEN_DIMS, (QN << 16) | (S & 0xFFFFu));
+    sar_reg_w(K_COEFFGEN, CGEN_CTRL, CGEN_CTRL_REWIND_ALL);
+    for (uint32_t k = 0; k < S;  k++) sar_reg_w(K_COEFFGEN, CGEN_TANW,  f32_bits(g->tan_s[k]));
+    for (uint32_t k = 0; k < itn; k++) sar_reg_w(K_COEFFGEN, CGEN_ITANW, f32_bits(itan[k]));
+    for (uint32_t k = 0; k < QN; k++) sar_reg_w(K_COEFFGEN, CGEN_KCW,   f32_bits(g->KC[k]));
+
+    if (sar_reg_r(K_COEFFGEN, CGEN_TANW)  != S)         bad |= 1;
+    if (sar_reg_r(K_COEFFGEN, CGEN_ITANW) != (S - 1u))  bad |= 2;
+    if (sar_reg_r(K_COEFFGEN, CGEN_KCW)   != QN)        bad |= 4;
+    return bad;
+}
+
+/* Arm ONE row of coefficients. kr == 0 is the C's degenerate line (all {-1, 0}); the generator
+ * takes that branch off KR alone, so write RINV = 0.0f rather than 1.0f/0.0f -- an Inf would
+ * latch the sticky err_fmt and abort the pass on a line that is legitimately degenerate. */
+static inline void cgen_start_row(float kr)
+{
+    uint32_t krb = f32_bits(kr);
+    /* Zero test done on the BITS, matching the RTL's own `(r_kr & 0x7FFFFFFF) == 0` degenerate
+     * condition exactly (so -0.0f is caught too), rather than a float compare. */
+    sar_reg_w(K_COEFFGEN, CGEN_KR,   krb);
+    sar_reg_w(K_COEFFGEN, CGEN_RINV, (krb & 0x7FFFFFFFu) ? f32_bits(1.0f / kr) : 0u);
+    sar_reg_w(K_COEFFGEN, CGEN_CTRL, CGEN_CTRL_START);
+}
 
 /* Push the cross taper into the feeder's on-chip table (once per pass, ~4096 AXI4-Lite writes
  * ~= 1.3 ms -- free against the 6.0 s the window pass cost). Deliberately not a fabric DMA:
@@ -527,30 +595,58 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
     uint32_t cwrk_nw = *(volatile uint32_t *)(uintptr_t)SAR_CWRK_NW_ADDR;
     if (cwrk_nw < 2u || cwrk_nw > SAR_CWRK_MAXW) cwrk_nw = 1u;
 
+    /* ON-FABRIC coefficients (sar_coeffgen -> feeder stream). FAIL-SAFE: only the exact magic
+     * enables it; a cold-boot garbage word leaves the DDR path running. The table load is then
+     * VERIFIED against the generator's own fill-level registers before anything is armed -- if it
+     * came up short we fall back to the CPU path for the whole pass rather than stream garbage,
+     * and record which table failed in RPROF[11] for the host log. */
+    int cgen_en = (*(volatile uint32_t *)(uintptr_t)SAR_CGENMODE_ADDR == SAR_CGEN_ENABLE);
+    if (cgen_en) {
+        int bad = cgen_load_tables(g);
+        RPROF[11] = 0xC0EF0000ull | (uint64_t)(uint32_t)bad;
+        if (bad) cgen_en = 0;
+    }
+
     fft_win_load_taper();
     /* sar_cwrk_line() computes AND publishes, over the FULL Mp outputs. That also fixes a latent
      * bug: the old flush_coef_bank_to_ddr(b, M) published only M=5634 of the Mp=8192 entries
      * pass 2 writes, leaving [M,Mp) unpublished (harmless only because hamc[] is zero across the
      * FFT pad, so whatever the feeder gathered there was multiplied by zero). */
-    sar_cwrk_line(g, 2u, 0u, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
-                             (int16_t *)(uintptr_t)SAR_COEF_WQ(0), Mp, cwrk_nw);
+    if (!cgen_en)
+        sar_cwrk_line(g, 2u, 0u, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
+                                 (int16_t *)(uintptr_t)SAR_COEF_WQ(0), Mp, cwrk_nw);
 
     for (uint32_t row = 0; row < SAR_GRID; row++) {
         uint32_t d = dst + row * SAR_ROW_BYTES;
         /* no explicit publish here: sar_cwrk_line() already published this bank when it computed it */
+        /* E1: FIC_0 profile of ONE FFT-1 row. Never measured inside this stage before -- every
+         * prior snapshot covered the resample gather or H4BT. Decides the 2nd-CoreFFT-chain
+         * question: (READ_BUSY + R_DATAWAIT)/ELAPSED ~= 0.33 means the feeder holds the single
+         * SASD read slot only during its LOAD phase and is silent through CoreFFT's ~698 us, so a
+         * 2nd chain fits; ~0.9 means the slot is already saturated and a 2nd chain is a no-go.
+         * row 1, not 0 -- row 0 carries the taper-load transient. */
+        if (row == 1u) ficmon_clear();
+        RP_T0(tarm);                /* E3: time the whole arm block (unloader + feeder regs) */
         sar_reg_w(K_FFT_UNLOADER, K_UNL_DET_CTRL, 0u);     /* FFT-1 never fuses detect */
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, d);
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);
         sar_k_start(K_FFT_UNLOADER);
         /* Feeder in GATHER mode: source row, this row's idx/wq, dims (SRC_LEN=M, QN=Mp), window on.
          * One START sequences load(src,idx,wq) -> gather+window+stream. */
+        /* Fabric coefficients: start the GENERATOR FIRST so it runs concurrently with the feeder's
+         * source-row load -- it produces ~1 entry/cycle and its 32-deep output FIFO rate-matches
+         * the gather. IDX_BASE/WQ_BASE are still written even in stream mode so the DDR fallback
+         * stays armed and selectable by the control bit alone. */
+        if (cgen_en) cgen_start_row(g->KR[row]);
         sar_reg_w(K_FFT_FEEDER, K_FFT_IDX_BASE,    (uint32_t)SAR_COEF_IDX(b));
         sar_reg_w(K_FFT_FEEDER, K_FFT_WQ_BASE,     (uint32_t)SAR_COEF_WQ(b));
         sar_reg_w(K_FFT_FEEDER, K_FFT_GATHER_DIMS, (Mp << 16) | (M & 0xFFFFu));
-        sar_reg_w(K_FFT_FEEDER, K_FFT_GATHER_CTRL, 1u);
+        sar_reg_w(K_FFT_FEEDER, K_FFT_GATHER_CTRL,
+                  K_FFT_GC_GATHER | (cgen_en ? K_FFT_GC_CSTREAM : 0u));
         sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL,    (1u << 16) | (uint16_t)hamr[row]);
         sar_reg_w(K_FFT_FEEDER, HLS_ARG0,          src + row * Mp * 4u);   /* source row (Mp-wide, M valid) */
         sar_k_start(K_FFT_FEEDER);
+        RP_ACC(7, tarm);            /* E3: per-row arm cost (was inside the unattributed 26%) */
         /* INSTRUMENTATION 2026-07-25 -- is this 15.14 s stage COEFF-paced or FABRIC-paced?
          * Pass 1 taught the lesson the hard way: it overlaps CPU coefficients with the fabric, so
          * its cost is max(coeff, kernel). Coefficients merely LOOKED like 99.6% because they were
@@ -562,7 +658,10 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
          * [9] ~ 0  -> COEFF-paced: multi-hart should convert, as pass 1's coeff time did.
          * [9] large -> FABRIC-paced: the feeder/CoreFFT is the floor and multi-hart buys ~nothing;
          *              do NOT spend a build on it. Slots [6..11] are free in the fused config. */
-        if (row + 1u < SAR_GRID) {                        /* overlap: next row's coeffs under the feed */
+        /* cgen_en: the fabric generator IS this row's coefficients, so there is no next-row CPU
+         * work to overlap -- the whole sar_cwrk_line() call, its multi-hart dispatch and its
+         * per-bank L2 flush disappear, and RPROF[6] reads ~0. */
+        if (!cgen_en && row + 1u < SAR_GRID) {            /* overlap: next row's coeffs under the feed */
             RP_T0(t);
             sar_cwrk_line(g, 2u, row + 1u, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
                                            (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1), Mp, cwrk_nw);
@@ -572,9 +671,23 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         { RP_T0(t);
           while (n) { if (sar_k_idle(K_FFT_FEEDER) && sar_k_idle(K_FFT_UNLOADER)) break; n--; }
           RP_ACC(9, t); }
+        if (row == 1u) ficmon_snapshot(1u, 3u, Mp);   /* E1: slot 1, pass tag 3 = FFT-1 row */
         RPROF[10]++;
         if (n == 0u) return sar_k_idle(K_FFT_FEEDER) ? 1 : 2;
         sar_row_exp[row] = (uint8_t)(sar_reg_r(K_FFT_FEEDER, K_FFT_SCALE_EXP) & 0xFu);
+        /* Read the generator's STAT for THIS row and ABORT on err_fmt. err_fmt means a NaN/Inf/
+         * denormal reached a datapath that has no path for one, so the row's weights are garbage
+         * -- and it is STICKY, so a scene that trips it would otherwise produce a plausible,
+         * quietly wrong image for every remaining row. err_dims means the tables went short after
+         * the load check, which would silently emit a degenerate (all zero-fill) line. This costs
+         * one extra AXI4-Lite read per row on top of the SCALE_EXP read already done above. */
+        if (cgen_en) {
+            uint32_t st = sar_reg_r(K_COEFFGEN, CGEN_STAT);
+            if (st & (CGEN_STAT_ERR_FMT | CGEN_STAT_ERR_DIMS)) {
+                RPROF[11] = 0xC0EF0000ull | 0x8000ull | (uint64_t)st;
+                return 3;
+            }
+        }
         if ((row & 0x7Fu) == 0u) SAR_PROG(4u, row, SAR_GRID);
         b ^= 1;
     }
@@ -586,6 +699,11 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         if (sar_row_exp[row] > emax) emax = sar_row_exp[row];
     uint32_t headroom = *(volatile uint32_t *)(uintptr_t)SAR_FFT_HEADROOM_ADDR;
     if (headroom > 12u) headroom = 0u;
+    /* E3: this epilogue is a CPU read-modify-write over the whole 8192^2 frame between two
+     * whole-L2 flushes. It is ONE-SHOT, not per-row, and no amount of fabric parallelism touches
+     * it -- so it is a hard floor under this stage and the bulk of the ~2.96 s (26% of FFT-1)
+     * that RPROF[6]+[7]+[9] never accounted for. Slot [8] was free in the fused config. */
+    RP_T0(tepi);
     __asm volatile ("fence rw, rw");
     flush_l2_cache(1u);
     for (uint32_t row = 0; row < SAR_GRID; row++) {
@@ -602,6 +720,7 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
     }
     __asm volatile ("fence rw, rw");
     flush_l2_cache(1u);
+    RP_ACC(8, tepi);            /* E3: one-shot renormalize epilogue (incl. both whole-L2 flushes) */
     return 0;
 }
 
@@ -964,6 +1083,9 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
         flush_range_to_ddr(SAR_RPROF_ADDR, 128u);
         if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;
         if (r == 2) return SAR_SEQ_TIMEOUT_DMA;
+        /* r == 3: the fabric coefficient generator latched err_fmt/err_dims -- fail LOUD rather
+         * than finish a plausible wrong image. RPROF[11] carries the raw STAT (0xC0EF8xxx). */
+        if (r == 3) return SAR_SEQ_TIMEOUT_FFT1;
     } else {
         int r = fft_pass(BUF_SCRATCH, BUF_SIG, spins, 1, 0);  /* window FUSED into this pass */
         if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;          /* feeder stalled */

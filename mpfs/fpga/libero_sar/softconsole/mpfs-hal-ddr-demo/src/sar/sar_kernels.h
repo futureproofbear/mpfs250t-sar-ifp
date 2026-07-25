@@ -1,7 +1,7 @@
 /*
  * sar_kernels.h -- register map for the SAR fabric accelerator as actually built
  * in Libero (SAR_TOP). The control plane is the MSS FIC0 initiator -> AXIIC_CTRL
- * (1 master -> 6 slaves); each slave is a 4 KiB window at 0x6000_n000.
+ * (1 master -> 8 slaves); each slave is a 4 KiB window at 0x6000_n000.
  *
  * Five of the slaves are SmartHLS kernels; each exposes the SmartHLS control
  * register layout (see each kernel's generated accelerator_drivers driver):
@@ -24,6 +24,30 @@
 #define K_FFT_UNLOADER       (SAR_FIC0_CTRL_BASE + 0x5000u)  /* SLAVE5 (CoreFFT build: fft_unloader) */
 #define K_FFT                (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (HLS-FFT build: fft_kernel, replaces feeder+unloader chain) */
 #define K_FIC0MON            (SAR_FIC0_CTRL_BASE + 0x6000u)  /* SLAVE6: FIC_0 AXI monitor (sar_fic0s_mon.v, 2026-07-22 build) */
+#define K_COEFFGEN           (SAR_FIC0_CTRL_BASE + 0x7000u)  /* SLAVE7: on-fabric azimuth resample coefficient generator (sar_coeffgen.v) */
+
+/* On-fabric azimuth coefficient generator (sar_coeffgen.v). Hand-written Verilog; its output is
+ * a {idx,wq} STREAM straight into the FFT-1 feeder's gather engine (no DDR, no DIC port), enabled
+ * by K_FFT_GATHER_CTRL bit1. tan_s/inv_tan/KC are pushed ONCE PER SCENE against auto-incrementing
+ * write pointers; per row only KR + 1/KR + START are written.
+ * BIT-EXACTNESS: the datapath reproduces sar_coeffs_pass2_range()'s float32 values exactly
+ * (mpfs/host/check_coeffgen_fixed.py, 45,038 outputs, both source orders), so enabling it cannot
+ * move the pipeline CRC -- which is what makes a CRC-equality A/B the correct silicon acceptance
+ * test. */
+#define CGEN_CTRL            0x00u   /* W [0]=start row [1]=rewind tan [2]=rewind itan [3]=rewind kc; R [0]=busy */
+#define CGEN_KR              0x04u   /* RW float32 bits of KR[j]              (per row) */
+#define CGEN_RINV            0x08u   /* RW float32 bits of 1.0f/KR[j]         (per row, CPU-computed) */
+#define CGEN_DIMS            0x0cu   /* RW [13:0]=S (=M source samples), [29:16]=QN (=Mp outputs) */
+#define CGEN_TANW            0x10u   /* W tan_s[k] fp32 bits, ptr auto-increments; R = fill level */
+#define CGEN_ITANW           0x14u   /* W inv_tan[k] fp32 bits, ptr auto-increments; R = fill level */
+#define CGEN_KCW             0x18u   /* W KC[qi] fp32 bits, ptr auto-increments; R = fill level */
+#define CGEN_STAT            0x1cu   /* R [0]=busy [1]=err_fmt [2]=err_dims [3]=degenerate [29:16]=outputs emitted */
+#define CGEN_CTRL_START      0x1u
+#define CGEN_CTRL_REWIND_ALL 0xEu    /* rewind tan + itan + kc write pointers (bits 1,2,3) */
+#define CGEN_STAT_BUSY       0x1u
+#define CGEN_STAT_ERR_FMT    0x2u    /* NaN/Inf/denormal reached the datapath -- values are garbage */
+#define CGEN_STAT_ERR_DIMS   0x4u    /* tables not filled to S / S-1 / QN -- degenerate line emitted */
+#define CGEN_STAT_DEGEN      0x8u
 
 /* FIC_0 monitor register map (sar_fic0s_mon.v). 0x00 write-any = clear ALL. Reads are RO. */
 #define FICMON_STATUS        0x00u   /* write clears; read = sticky flags + ar/r counts + 0xA5 sig */

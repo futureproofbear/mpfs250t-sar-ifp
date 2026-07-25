@@ -171,6 +171,13 @@ int sar_coeffs_ready(const sar_geom_t *g)
     return (g->M >= 2u) && (s_inv_tan_n == g->M);
 }
 
+const float *sar_coeffs_inv_tan(uint32_t *n)
+{
+    /* sar_coeffs_init() fills [0, M-2], i.e. M-1 entries, and sets s_inv_tan_n = M. */
+    if (n) *n = (s_inv_tan_n >= 2u) ? (s_inv_tan_n - 1u) : 0u;
+    return (s_inv_tan_n >= 2u) ? s_inv_tan : (const float *)0;
+}
+
 void sar_coeffs_pass2_range(const sar_geom_t *g, uint32_t j,
                             float *scratch, int32_t *idx, int16_t *wq,
                             uint32_t q0, uint32_t q1)

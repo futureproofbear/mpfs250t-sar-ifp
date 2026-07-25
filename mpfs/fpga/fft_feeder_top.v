@@ -65,6 +65,14 @@ module fft_feeder_top #(parameter integer IDW = 4) (
     output wire        out_var_valid,
     input  wire        out_var_ready,
 
+    // ---- coefficient stream from COEFG (sar_coeffgen), plain pins like scale_exp_in ----
+    // Only consumed when GATHER_CTRL[1] (reg 0x20 bit1) is set; the DDR idx/wq path is the
+    // reset default, so leaving these unconnected reproduces today's behaviour exactly.
+    input  wire [31:0] c_idx,
+    input  wire [15:0] c_wq,
+    input  wire        c_valid,
+    output wire        c_ready,
+
     // ---- CoreFFT block-floating-point exponent capture (routed from FFT:SCALE_EXP and
     // FFT:OUTP_READY). Latched per frame, read back at control reg 0x14 for the pipeline's
     // global-block-exponent renormalize (sar_sequencer.c). ----
@@ -117,6 +125,8 @@ module fft_feeder_top #(parameter integer IDW = 4) (
         .m_rvalid(axi4initiator_r_valid), .m_rready(axi4initiator_r_ready),
         // stream out
         .m_axis_tdata(out_var), .m_axis_tvalid(out_var_valid), .m_axis_tready(out_var_ready),
+        // coefficient stream in (from sar_coeffgen)
+        .c_idx($signed(c_idx)), .c_wq(c_wq), .c_valid(c_valid), .c_ready(c_ready),
         // CoreFFT block-exponent capture
         .scale_exp_in(scale_exp_in), .outp_ready_in(outp_ready_in)
     );

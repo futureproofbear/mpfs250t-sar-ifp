@@ -34,12 +34,34 @@ static void cwrk_do_slice(const sar_geom_t *g, uint32_t pass, uint32_t line,
     cwrk_flush_slice(idx, wq, q0, q1);
 }
 
+/* Normalise the FPU rounding mode and report what it was.
+ *
+ * ROOT CAUSE of the 2026-07-25 +-1 LSB divergence (silicon-proven concurrency-dependent: the SAME
+ * binary gave crop CRC 0x319037b2 at CWRK_NW=1 and 0x4d64d464 at CWRK_NW=4). Nothing in the MPFS
+ * HAL startup writes fcsr/frm, so each hart's rounding mode is whatever reset left it -- and it is
+ * PER-HART state. The coefficient math uses the DYNAMIC rounding mode for every fmul/fadd/fsub and
+ * for fcvt.s.w (only the fcvt.w.s truncations carry an explicit ,rtz). Harts 2/3/4 were parked WFI
+ * stubs that had never executed a float instruction, so a differing frm on them went unnoticed
+ * until they started generating coefficients: it perturbs only values sitting near a rounding
+ * boundary, which is exactly a small, unbiased, +-1 LSB, boundary-only divergence that a
+ * single-rounding-mode host model can never reproduce.
+ *
+ * frm = 0 = RNE (round-to-nearest-even) is the C/IEEE default and what the host models assume, so
+ * normalising every participating hart to it makes the board agree with them AND with itself. */
+static inline uint32_t cwrk_fpu_normalise(void)
+{
+    uint32_t was = (uint32_t)read_csr(fcsr);
+    write_csr(fcsr, 0u);            /* frm = RNE, fflags cleared */
+    return was;
+}
+
 void sar_cwrk_init(void)
 {
     sar_cwrk_t *c = SAR_CWRK;
     c->seq = 0u;
     c->nw = 1u;
-    for (uint32_t w = 0; w < SAR_CWRK_MAXW; w++) { c->ack[w] = 0u; c->alive[w] = 0u; }
+    for (uint32_t w = 0; w < SAR_CWRK_MAXW; w++) { c->ack[w] = 0u; c->alive[w] = 0u; c->fcsr0[w] = 0xFFFFFFFFu; }
+    c->fcsr0[0] = cwrk_fpu_normalise();      /* hart1 (worker 0) -- the dispatcher itself */
     __asm volatile ("fence rw, rw");
     c->magic = SAR_CWRK_MAGIC;
     __asm volatile ("fence rw, rw");
@@ -52,6 +74,9 @@ void sar_coeff_worker_main(uint32_t w)
 
     /* Wait for hart1 to publish the block, then start in sync so seq==ack means "idle". */
     while (c->magic != SAR_CWRK_MAGIC) { __asm volatile ("nop"); }
+    /* Match hart1's rounding mode BEFORE computing anything -- see cwrk_fpu_normalise(). This is
+     * the fix for the +-1 LSB, CWRK_NW-dependent output divergence. */
+    c->fcsr0[w] = cwrk_fpu_normalise();
     c->ack[w] = c->seq;
     __asm volatile ("fence rw, rw");
 

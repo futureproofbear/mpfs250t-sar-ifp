@@ -49,6 +49,17 @@ typedef struct {
     volatile uint32_t seq;                   /* dispatcher bumps to release a job */
     volatile uint32_t ack[SAR_CWRK_MAXW];    /* worker w writes seq when its slice is published */
     volatile uint32_t alive[SAR_CWRK_MAXW];  /* worker w heartbeat (jobs completed) */
+    volatile uint32_t fcsr0[SAR_CWRK_MAXW];  /* each hart's FCSR AS FOUND, before we normalise it.
+                                              * DIAGNOSTIC for the 2026-07-25 +-1 LSB divergence:
+                                              * nothing in the MPFS HAL startup initialises fcsr/frm,
+                                              * and the float ops here use the DYNAMIC rounding mode
+                                              * (only the fcvt.w.s truncations are rm-encoded, ,rtz).
+                                              * Harts 2/3/4 were WFI stubs that never ran float code,
+                                              * so a differing frm would round their coefficients
+                                              * differently -- exactly a +-1 LSB, unbiased, boundary-
+                                              * only divergence that appears ONLY with nw>1 and that a
+                                              * single-rounding-mode host model cannot reproduce.
+                                              * If these read back non-identical, that was the cause. */
     volatile uint32_t nw;                    /* workers in this job (1 = single-hart) */
     volatile uint32_t pass;                  /* 1 = pass1 (range), 2 = pass2 (azimuth) */
     volatile uint32_t line;                  /* pulse i (pass 1) or range bin j (pass 2) */

@@ -7,9 +7,12 @@ context: |
   Data plane: complex range lines move DDR -> fabric kernels -> DDR via FIC_0 (non-coherent).
   Toolchain: Libero SoC 2025.2 (headless tcl), SmartHLS 2025.2, QuestaSim, OpenOCD+gdb over
   FlashPro6/J33. RTL is Verilog; builds are gated on TIMING MET (setup + hold).
-  Key hard-won facts live in docs/fpga/*.md (SILICON_ISO_TEST_RUNBOOK, SMARTDEBUG_RUNBOOK,
-  LIBERO_HEADLESS_PLAYBOOK) and in the agent memory. The shipping FFT runs on the MSS CPU
-  (corr 0.9923); CoreFFT-on-fabric is the in-progress acceleration path.
+  Key hard-won facts live in docs/ARCHITECTURE.md (design reference), docs/SAR_GUIDE.md
+  (algorithm + optimization history), docs/fpga/DEV_GUIDE.md (fabric dev/debug gotchas), and in
+  the agent memory. The shipping FFT runs on the fabric CoreFFT chain (fft_feeder -> gearbox ->
+  CoreFFT -> fft_unloader, SAR_FFTMODE=1), phase-exact and corr 0.9999 vs the CPU FFT; the MSS
+  CPU FFT (sar_cpu_fft, mode 0) is the legacy fallback. Current pipeline baseline: 37.72 s
+  (100 MHz), image corr 0.9923 vs golden.
 
 rules:
   proposal:

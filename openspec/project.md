@@ -19,7 +19,7 @@ so the system is bare-metal C on the MSS + fabric kernels + host-offload over a 
 - **Verify TIMING MET (setup + hold) before trusting any silicon result.** Libero will program a
   timing-failing bitstream silently. Gated build template: `mpfs/fpga/build_full_prog_ffv.tcl`.
 - **JTAG hygiene is non-negotiable** — never `taskkill /F` openocd/gdb (wedges the FlashPro6).
-  See `docs/fpga/SILICON_ISO_TEST_RUNBOOK.md` §1.
+  See `docs/USER_GUIDE.md` §3.3.
 - Prefer headless/scripted flows; before destructive ops check recoverability and work on copies.
 - RTL is Verilog; every RTL change is proven in QuestaSim before a fabric rebuild, then on silicon.
 - No PowerShell (blocked) — use cmd / git-bash.
@@ -32,4 +32,4 @@ so the system is bare-metal C on the MSS + fabric kernels + host-offload over a 
 ## Status
 The CoreFFT-on-fabric pipeline is the shipping product — complete and proven on silicon
 (`fft_mode=1` confirmed at runtime, 37.72 s per frame (2026-07-24, 100 MHz, azimuth-gather + detect + corner-turn/FFT-2 overlap), corr 0.9923 vs golden). The CPU FFT remains
-only as the mode-0 fallback. See `openspec/specs/fabric-range-fft/` and `docs/SAR_DESIGN.md`.
+only as the mode-0 fallback. See `openspec/specs/fabric-range-fft/` and `docs/ARCHITECTURE.md`.

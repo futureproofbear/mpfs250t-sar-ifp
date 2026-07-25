@@ -20,6 +20,7 @@
 #include "sar_kernels.h"
 #include "ddr_sar_layout.h"
 #include "sar_resample_coeffs.h"
+#include "sar_coeff_workers.h"    /* spread coefficient generation over the idle U54 harts */
 #include "sar_accel_driver.h"     /* sar_job_t, sar_job_load (M, N from the host job) */
 #include "sar_fft.h"              /* sar_cpu_fft -- CPU FFT (HLS K_FFT butterfly broken on silicon) */
 
@@ -110,7 +111,24 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
  *     regw+flush large -> ARM-BOUND. Then bigger payloads per arm is the right fix.
  *
  * Layout: [0..3] pass1 regw/flush/coeff/wait, [4] lines, [5] pass1 total,
- *         [6..9] pass2 same,                  [10] lines, [11] pass2 total.  All MTIME us. */
+ *         [6..9] pass2 same,                  [10] lines, [11] pass2 total.  All MTIME us.
+ *
+ * 2026-07-25 -- IPC INSTRUMENTATION.
+ * [2] = coefficient generation AND its DDR publish. Splitting the flush into [1] was ATTEMPTED and
+ * did not survive the multi-hart change: the publish moved inside sar_cwrk_line() (as
+ * cwrk_flush_slice, since each hart must publish its own slice), so it is timed under [2] again
+ * and **[1] reads 0** -- confirmed on silicon 2026-07-25. RPROF[14]/[15] likewise include the
+ * FLUSH64 walk. To get the split back, time cwrk_flush_slice() separately inside the worker module.
+ *
+ * [14]/[15] = minstret/mcycle accumulated over sar_coeffs_pass1() ONLY. These decide WHY the
+ * coefficient loop costs ~62.8 cycles/output for a ~20-instruction body:
+ *     IPC = [14]/[15] ~= 1     -> arithmetic/issue-bound. Fewer ops (algorithmic rewrite) helps.
+ *     IPC = [14]/[15] << 1     -> STALL-bound (the cache-miss model: ~0.16 misses/output on the
+ *                                 KR read + idx/wq write-allocate, no HW prefetcher). Then fewer
+ *                                 ops do NOT help and the lever is parallelism (more harts) or
+ *                                 fewer BYTES, not fewer instructions.
+ * instructions/output = [14] / (([4]-2) * Np)   (the -2 is the prologue lines computed outside
+ * the loop; [4] counts kernel lines, which equals coeff lines to within that offset). */
 #define SAR_RPROF_ADDR         0xB0059180u
 #define SAR_RPROF_PROBE_ADDR   0xB0059120u   /* 0 = off; else kernel-only probe iterations */
 #define RPROF ((volatile uint64_t *)(uintptr_t)SAR_RPROF_ADDR)
@@ -494,18 +512,32 @@ pub:
 static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint32_t dst,
                             uint32_t spins)
 {
+    (void)f32;                    /* scratch is unused on the closed-form pass-2 path */
     uint32_t budget = spins ? spins : SAR_DEFAULT_SPINS;
     const int16_t *hamr = (const int16_t *)(uintptr_t)SAR_HAMR_ADDR;
     const uint32_t Mp = g->Mp, M = g->M;
     int b = 0;
 
+    /* Measured 2026-07-25: this stage is COEFF-PACED -- 1499 us/row of sar_coeffs_pass2 against
+     * RPROF[9] = 0.53 us/row of residual fabric wait, i.e. the feeder/CoreFFT chain is already
+     * idle by the time coefficients are ready. So route coefficient generation through the
+     * multi-hart dispatcher (proven bit-exact, silicon-validated on pass 1). nw<=1 falls back to
+     * the original single-hart path. Same fail-safe validation as resample_2pass: the knob is
+     * uninitialised DDR on a cold boot, so only an exact 2..MAXW enables it. */
+    uint32_t cwrk_nw = *(volatile uint32_t *)(uintptr_t)SAR_CWRK_NW_ADDR;
+    if (cwrk_nw < 2u || cwrk_nw > SAR_CWRK_MAXW) cwrk_nw = 1u;
+
     fft_win_load_taper();
-    sar_coeffs_pass2(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
-                                (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
+    /* sar_cwrk_line() computes AND publishes, over the FULL Mp outputs. That also fixes a latent
+     * bug: the old flush_coef_bank_to_ddr(b, M) published only M=5634 of the Mp=8192 entries
+     * pass 2 writes, leaving [M,Mp) unpublished (harmless only because hamc[] is zero across the
+     * FFT pad, so whatever the feeder gathered there was multiplied by zero). */
+    sar_cwrk_line(g, 2u, 0u, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
+                             (int16_t *)(uintptr_t)SAR_COEF_WQ(0), Mp, cwrk_nw);
 
     for (uint32_t row = 0; row < SAR_GRID; row++) {
         uint32_t d = dst + row * SAR_ROW_BYTES;
-        flush_coef_bank_to_ddr(b, M);                     /* publish this row's coeffs L2->DDR */
+        /* no explicit publish here: sar_cwrk_line() already published this bank when it computed it */
         sar_reg_w(K_FFT_UNLOADER, K_UNL_DET_CTRL, 0u);     /* FFT-1 never fuses detect */
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG0, d);
         sar_reg_w(K_FFT_UNLOADER, HLS_ARG1, SAR_ROW_BEATS);
@@ -519,11 +551,28 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         sar_reg_w(K_FFT_FEEDER, K_FFT_WIN_CTRL,    (1u << 16) | (uint16_t)hamr[row]);
         sar_reg_w(K_FFT_FEEDER, HLS_ARG0,          src + row * Mp * 4u);   /* source row (Mp-wide, M valid) */
         sar_k_start(K_FFT_FEEDER);
-        if (row + 1u < SAR_GRID)                          /* overlap: next row's coeffs under the feed */
-            sar_coeffs_pass2(g, row + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
-                                               (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
+        /* INSTRUMENTATION 2026-07-25 -- is this 15.14 s stage COEFF-paced or FABRIC-paced?
+         * Pass 1 taught the lesson the hard way: it overlaps CPU coefficients with the fabric, so
+         * its cost is max(coeff, kernel). Coefficients merely LOOKED like 99.6% because they were
+         * marginally the longer of the two and hid a ~4.75 s kernel. Making them 2.95x faster
+         * bought 2%. Measure the same split here BEFORE wiring in the multi-hart dispatcher.
+         *   [6] = azimuth coefficient generation (sar_coeffs_pass2), overlapped with the feeder
+         *   [9] = residual feeder/unloader wait AFTER coeff gen returned
+         *   [7] = per-row coeff-bank publish;  [10] = rows
+         * [9] ~ 0  -> COEFF-paced: multi-hart should convert, as pass 1's coeff time did.
+         * [9] large -> FABRIC-paced: the feeder/CoreFFT is the floor and multi-hart buys ~nothing;
+         *              do NOT spend a build on it. Slots [6..11] are free in the fused config. */
+        if (row + 1u < SAR_GRID) {                        /* overlap: next row's coeffs under the feed */
+            RP_T0(t);
+            sar_cwrk_line(g, 2u, row + 1u, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
+                                           (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1), Mp, cwrk_nw);
+            RP_ACC(6, t);
+        }
         uint32_t n = budget;
-        while (n) { if (sar_k_idle(K_FFT_FEEDER) && sar_k_idle(K_FFT_UNLOADER)) break; n--; }
+        { RP_T0(t);
+          while (n) { if (sar_k_idle(K_FFT_FEEDER) && sar_k_idle(K_FFT_UNLOADER)) break; n--; }
+          RP_ACC(9, t); }
+        RPROF[10]++;
         if (n == 0u) return sar_k_idle(K_FFT_FEEDER) ? 1 : 2;
         sar_row_exp[row] = (uint8_t)(sar_reg_r(K_FFT_FEEDER, K_FFT_SCALE_EXP) & 0xFu);
         if ((row & 0x7Fu) == 0u) SAR_PROG(4u, row, SAR_GRID);
@@ -605,10 +654,20 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
      * sar_resample_coeffs.c): 1/(tan_s[k+1]-tan_s[k]) does not depend on the line, so pass 2
      * needs only a single 1/KR[j] per line instead of M-1 divides. */
     sar_coeffs_init(g);
+    /* Coefficient generation is the pacing item (RPROF[2]/RPROF[5] = 99.57% on silicon) and its
+     * loop is stall- not issue-bound, so spread each line across the otherwise-idle U54 harts.
+     * JTAG-tunable at SAR_CWRK_NW_ADDR and read ONCE here so the whole run is one configuration:
+     * 0/1 = the original single-hart path, up to SAR_CWRK_MAXW = all four harts. */
+    /* FAIL-SAFE: this word is uninitialised DDR on a cold boot, so accept ONLY an exact, valid
+     * request (2..MAXW). Anything else -- 0, 1, or garbage like 0xDEADBEEF -- means OFF. Clamping
+     * out-of-range UP to MAXW would silently enable multi-hart on random DDR content. */
+    uint32_t cwrk_nw = *(volatile uint32_t *)(uintptr_t)SAR_CWRK_NW_ADDR;
+    if (cwrk_nw < 2u || cwrk_nw > SAR_CWRK_MAXW) cwrk_nw = 1u;
+    sar_cwrk_init();
     /* PASS 1 (range) */
     sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
                                 (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
-    for (int k = 0; k < 14; k++) RPROF[k] = 0;          /* profile accumulators */
+    for (int k = 0; k < 16; k++) RPROF[k] = 0;          /* profile accumulators ([14]/[15] = IPC) */
     /* KERNEL-ONLY PROBE. The main loop overlaps coefficient generation with the kernel, so
      * `wait` only proves the kernel finished FIRST -- it does not reveal how long the kernel
      * actually takes. Re-arm line 0 (coeffs already computed and flushed above) with nothing
@@ -634,32 +693,70 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         RPROF[12] = readmtime() - t0;
         RPROF[13] = PROBE;
     }
-    for (uint32_t i = 0; i < g->M; i++) {
+    /* PASS 1 (range) -- TWO LANES on the shared FIC_0: RES gathers even lines, RES2 the odd
+     * lines, started together so their DDR-read latencies OVERLAP. The gather is read-latency-
+     * bound (v2 monitor: 40% r_datawait, ~25% bus-active), so a 2nd lane fits with headroom, and
+     * FIC_1 is ruled out -- the throttle is the shared DDR controller, not an AXI-channel conflict.
+     * 4 coeff banks: the in-flight pair uses bank-set {2*bs, 2*bs+1}; the next pair's coeff-gen is
+     * double-buffered into the OTHER set under the running gather (same overlap the 1-lane loop
+     * had, now covering two lines). Line 0's coeffs are already in bank 0 (prologue above);
+     * complete the first pair by computing line 1 into bank 1. Outputs land at BUF_SCRATCH +
+     * invord[i]*Np*4 -- invord is a permutation, so the two lanes write disjoint rows. */
+    if (g->M > 1u)
+        sar_coeffs_pass1(g, 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(1),
+                                     (int16_t *)(uintptr_t)SAR_COEF_WQ(1));
+    flush_coef_bank_to_ddr(0, Np);
+    if (g->M > 1u) flush_coef_bank_to_ddr(1, Np);
+    int bs = 0;                                    /* bank-set: current pair uses {2*bs, 2*bs+1} */
+    for (uint32_t i = 0; i < g->M; i += 2u) {
         SAR_PROG(1u, i, g->M);
+        uint32_t ba = 2u * (uint32_t)bs, bb = ba + 1u;
+        int two = (i + 1u < g->M);
         { RP_T0(t);
-          sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);          /* in  (N-wide) */
-          sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
-          sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
-          sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+          sar_reg_w(K_RESAMPLE,  HLS_ARG0, BUF_SIG + i * g->N * 4u);           /* lane A in */
+          sar_reg_w(K_RESAMPLE,  HLS_ARG1, (uint32_t)SAR_COEF_IDX(ba));
+          sar_reg_w(K_RESAMPLE,  HLS_ARG2, (uint32_t)SAR_COEF_WQ(ba));
+          sar_reg_w(K_RESAMPLE,  HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+          if (two) {
+              sar_reg_w(K_RESAMPLE2, HLS_ARG0, BUF_SIG + (i + 1u) * g->N * 4u); /* lane B in */
+              sar_reg_w(K_RESAMPLE2, HLS_ARG1, (uint32_t)SAR_COEF_IDX(bb));
+              sar_reg_w(K_RESAMPLE2, HLS_ARG2, (uint32_t)SAR_COEF_WQ(bb));
+              sar_reg_w(K_RESAMPLE2, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i + 1u] * Np * 4u);
+          }
           RP_ACC(0, t); }
-        /* FIC0 non-coherent: the idx/wq coeffs just computed by the MSS (bank b) live in
-         * L2, not DDR. Publish just that bank before the kernel reads it via FIC0, else
-         * it gathers with stale coeffs. */
-        { RP_T0(t); flush_coef_bank_to_ddr(b, Np); RP_ACC(1, t); }
-        if (i == 0u) ficmon_clear();             /* capture FIC_0 behaviour of range gather line 0 */
+        if (i == 0u) ficmon_clear();               /* aggregate FIC_0 of BOTH lanes, line pair 0 */
         sar_k_start(K_RESAMPLE);
-        if (i + 1u < g->M) {
-            RP_T0(t);
-            sar_coeffs_pass1(g, i + 1u, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
-                                             (int16_t *)(uintptr_t)SAR_COEF_WQ(b ^ 1));
-            RP_ACC(2, t);
+        if (two) sar_k_start(K_RESAMPLE2);
+        /* overlap: compute the NEXT pair's coeffs (lines i+2, i+3) into the OTHER bank-set and
+         * publish L2 -> DDR (FIC0 non-coherent), while both lanes gather the current pair. */
+        if (i + 2u < g->M) {
+            uint32_t na = 2u * (uint32_t)(bs ^ 1);
+            /* sar_cwrk_line() publishes every slice itself, so no separate bank flush here.
+             * With cwrk_nw <= 1 it degrades to exactly the old single-hart compute+flush. */
+            { RP_T0(t);
+              uint64_t r0 = read_csr(minstret), c0 = read_csr(mcycle);
+              sar_cwrk_line(g, 1u, i + 2u, (int32_t *)(uintptr_t)SAR_COEF_IDX(na),
+                                           (int16_t *)(uintptr_t)SAR_COEF_WQ(na), Np, cwrk_nw);
+              RPROF[14] += read_csr(minstret) - r0;
+              RPROF[15] += read_csr(mcycle)   - c0;
+              RP_ACC(2, t); }
+            if (i + 3u < g->M) {
+                { RP_T0(t);
+                  uint64_t r1 = read_csr(minstret), c1 = read_csr(mcycle);
+                  sar_cwrk_line(g, 1u, i + 3u, (int32_t *)(uintptr_t)SAR_COEF_IDX(na + 1u),
+                                               (int16_t *)(uintptr_t)SAR_COEF_WQ(na + 1u), Np, cwrk_nw);
+                  RPROF[14] += read_csr(minstret) - r1;
+                  RPROF[15] += read_csr(mcycle)   - c1;
+                  RP_ACC(2, t); }
+            }
         }
         { RP_T0(t);
           if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
+          if (two && !sar_k_wait(K_RESAMPLE2, spins)) return 0;
           RP_ACC(3, t); }
-        if (i == 0u) ficmon_snapshot(0u, 1u, Np / 2u);   /* Np samples, 2/beat */
-        RPROF[4]++;
-        b ^= 1;
+        if (i == 0u) ficmon_snapshot(0u, 1u, Np / 2u);   /* 2-lane aggregate, pair 0 */
+        RPROF[4] += two ? 2u : 1u;
+        bs ^= 1;
     }
     RPROF[5] = readmtime() - sar_resample_ts[0];
     /* zero padded pulse rows (M..Mp-1) for clean FFT zero-padding (CPU clear; a
@@ -728,7 +825,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     }
     RPROF[11] = readmtime() - sar_resample_ts[2];
     __asm volatile ("fence rw, rw");
-    flush_range_to_ddr(SAR_RPROF_ADDR, 112u);     /* publish so a JTAG physical read sees it */
+    flush_range_to_ddr(SAR_RPROF_ADDR, 128u);     /* publish so a JTAG physical read sees it (16 x u64) */
     sar_resample_ts[3] = readmtime();          /* azimuth gather done */
     return 1;
 }
@@ -860,6 +957,11 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     float *f32g = (float *)(uintptr_t)SAR_COEF_LINE_F32;
     if (gather_fused) {
         int r = fft1_gather_pass(&g, f32g, BUF_SIG, BUF_SCRATCH, spins);  /* gather from SIG -> SCRATCH */
+        /* Re-publish RPROF: resample_2pass()'s flush already ran (it is called earlier), so
+         * FFT-1's counters [6]/[7]/[9]/[10] would otherwise sit in L2 and a JTAG physical read
+         * would return stale DDR. */
+        __asm volatile ("fence rw, rw");
+        flush_range_to_ddr(SAR_RPROF_ADDR, 128u);
         if (r == 1) return SAR_SEQ_TIMEOUT_FFT1;
         if (r == 2) return SAR_SEQ_TIMEOUT_DMA;
     } else {
@@ -907,17 +1009,16 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     if (det_fused) {
         /* nothing to do: the unloader produced OUT during step 5, and the uint16 renormalize
          * inside fft_fabric_pass already applied the global block exponent. */
-    } else if (*(volatile uint32_t *)(uintptr_t)SAR_DETECTMODE_ADDR != 2u) {
-        /* Read the ACTUAL FFT-2 output buffer (f2_dst): SIG in the non-fused path, SCRATCH when
+    } else {
+        /* CPU detect (correct sqrt, corr 0.97 on silicon -- the non-fused SHIPPING path).
+         * NOTE (2026-07-24): DETMODE==2 (standalone HLS fabric detect, K_DETECT) was REMOVED --
+         * its DIC/CIC slot 2 is now the 2nd resample lane (RES2). That HLS detect was unfixable
+         * (mis-synthesized the signed narrowing -> ~50% saturation) and test-only, so no loss.
+         * Read the ACTUAL FFT-2 output buffer (f2_dst): SIG in the non-fused path, SCRATCH when
          * the gather fusion flipped the buffers. */
         flush_l2_cache(1u);                                  /* read fabric-written FFT-2 out from DDR */
         cpu_detect(f2_dst, BUF_OUT, SAR_GRID * SAR_GRID);
         flush_l2_cache(1u);                                  /* push OUT to DDR for JTAG readback */
-    } else {
-        sar_reg_w(K_DETECT, HLS_ARG0, f2_dst);
-        sar_reg_w(K_DETECT, HLS_ARG1, BUF_OUT);
-        sar_k_start(K_DETECT);
-        if (!sar_k_wait(K_DETECT, spins)) return SAR_SEQ_TIMEOUT_DETECT;
     }
     sar_stage_ts[6] = readmtime();
 

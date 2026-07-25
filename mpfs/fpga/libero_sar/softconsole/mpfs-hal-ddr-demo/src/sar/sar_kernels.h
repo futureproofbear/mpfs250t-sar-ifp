@@ -18,7 +18,7 @@
 #define SAR_FIC0_CTRL_BASE   0x60000000u
 #define K_CORNER_TURN        (SAR_FIC0_CTRL_BASE + 0x0000u)  /* AXIIC_CTRL SLAVE0 */
 #define K_WINDOW             (SAR_FIC0_CTRL_BASE + 0x1000u)  /* SLAVE1 */
-#define K_DETECT             (SAR_FIC0_CTRL_BASE + 0x2000u)  /* SLAVE2 */
+#define K_RESAMPLE2          (SAR_FIC0_CTRL_BASE + 0x2000u)  /* SLAVE2: 2nd resample lane (was DET; DET fused into FFT-2 unloader) */
 #define K_RESAMPLE           (SAR_FIC0_CTRL_BASE + 0x3000u)  /* SLAVE3 */
 #define K_FFT_FEEDER         (SAR_FIC0_CTRL_BASE + 0x4000u)  /* SLAVE4 (CoreFFT build: fft_feeder) */
 #define K_FFT_UNLOADER       (SAR_FIC0_CTRL_BASE + 0x5000u)  /* SLAVE5 (CoreFFT build: fft_unloader) */

@@ -14,7 +14,10 @@ sd_instantiate_component -sd_name $sd -component_name {COREFFT_C0}   -instance_n
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_unloader_top}          -instance_name {UNLD}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corner_turn_top}          -instance_name {CT}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {window_top}               -instance_name {WIN}
-sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {detect_top}               -instance_name {DET}
+## DET slot repurposed 2026-07-24: a 2nd resample_top (RES2) = lane 2 of the parallel range gather
+## (priority 3a). detect_top is fused into the FFT-2 unloader in the shipping path; the only firmware
+## user of the standalone K_DETECT was the known-broken DETMODE==2 HLS-detect test, now removed.
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {resample_top}             -instance_name {RES2}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {resample_top}             -instance_name {RES}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_feeder_top}           -instance_name {FEED}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corefft_stream64_adapter} -instance_name {GBX}
@@ -49,7 +52,7 @@ catch { sd_connect_pins -sd_name $sd -pin_names {"REF_CLK_50MHz" "CLKREF:A"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CLKREF:Y" "CCC:REF_CLK_0"} }
 sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT0_FABCLK_0" \
     "MSS:FIC_0_ACLK" "DIC:ACLK" "CIC:ACLK" "UNLD:clk" "FFT:CLK" "GBX:clk" \
-    "CT:clk" "WIN:clk" "DET:clk" "RES:clk" "FEED:clk" "RST:CLK" "ID_FIX:ACLK" \
+    "CT:clk" "WIN:clk" "RES2:clk" "RES:clk" "FEED:clk" "RST:CLK" "ID_FIX:ACLK" \
     "RSLICE_DIC:ACLK" "RSLICE_CIC:ACLK" "FIC0MON:aclk"}
 catch { sd_connect_pins -sd_name $sd -pin_names {"CCC:OUT1_FABCLK_0" "FFT:SLOWCLK"} }
 
@@ -67,7 +70,7 @@ sd_connect_pins -sd_name $sd -pin_names {"RST:FABRIC_RESET_N" \
     "FFT:NGRST" "DIC:ARESETN" "CIC:ARESETN" "GBX:resetn" "ID_FIX:ARESETN" \
     "RSLICE_DIC:ARESETN" "RSLICE_CIC:ARESETN" "FIC0MON:aresetn"}
 ## UNLD (HLS kernel) uses an active-high synchronous reset -> invert FABRIC_RESET_N like the other kernels.
-foreach k {CT WIN DET RES FEED UNLD} {
+foreach k {CT WIN RES2 RES FEED UNLD} {
     sd_invert_pins -sd_name $sd -pin_names "${k}:reset"
     sd_connect_pins -sd_name $sd -pin_names "RST:FABRIC_RESET_N ${k}:reset"
 }
@@ -75,7 +78,7 @@ foreach k {CT WIN DET RES FEED UNLD} {
 ## ---------------- data plane (AXIIC 3.0.130): 6 initiators -> DIC -> ID_FIX -> MSS FIC0 ----------------
 catch { sd_connect_pins -sd_name $sd -pin_names {"CT:axi4initiator"        "DIC:AXI4minitiator0"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"WIN:axi4initiator"       "DIC:AXI4minitiator1"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"DET:axi4initiator"       "DIC:AXI4minitiator2"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"RES2:axi4initiator"      "DIC:AXI4minitiator2"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"RES:axi4initiator"       "DIC:AXI4minitiator3"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"FEED:axi4initiator"      "DIC:AXI4minitiator4"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"UNLD:axi4initiator"      "DIC:AXI4minitiator5"} }
@@ -165,7 +168,7 @@ foreach {b} {
 if {[catch { sd_connect_pins -sd_name $sd -pin_names {"RSLICE_CIC:M_AXI" "CIC:AXI4minitiator0"} } err]} { puts "RSLICE_CIC_MAXI_CONNECT_FAIL : $err" } else { puts "RSLICE_CIC_MAXI_CONNECT_OK" }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget0" "CT:axi4target"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget1" "WIN:axi4target"} }
-catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget2" "DET:axi4target"} }
+catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget2" "RES2:axi4target"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget3" "RES:axi4target"} }
 catch { sd_connect_pins -sd_name $sd -pin_names {"CIC:AXI4mtarget4" "FEED:axi4target"} }
 ## target5 now a standard AXI4 target (was AXI4Lmtarget5 for the DMA) -> fft_unloader control regs @ 0x60005000

@@ -35,6 +35,23 @@ a violated rule wedges the FlashPro6 and forces a physical recovery. Full detail
    raw SCRATCH dump) BEFORE the coherent evict-flush, so data survives even if the flush hangs.
 4. Report per row: feeder busy, unloader busy, SCRATCH samples, correlation vs golden, PASS/FAIL.
 
+## A/B runs: CRC-FIRST, dump only on mismatch (DEFAULT — do not skip)
+A 1024x1024 crop is 2 MiB and the JTAG link is ~84 kbit/s (~111 s/MB), LATENCY-bound (~390 us per
+word-scan through the FlashPro6 USB-HID; identical at 2 and 6 MHz, no OpenOCD batching knob). So a
+dump is ~230 s and two of them are ~7.5 min of a ~12 min A/B — more than the scene loads (81 s each)
+and the pipeline runs (~37.5 s each) combined.
+
+`EROI` crops and CRCs **on-board**; the `dump binary memory` is a SEPARATE, optional host step.
+So for "did change X alter the output?":
+1. Run `EROI` per arm WITHOUT the dump args, require `verdict 0`.
+2. Read the u32 at **`0xB005E220`** (ROI record `0xB005E200` + 0x20 = board-computed crop CRC).
+3. CRCs equal -> outputs identical, correctness gate PASSED, no dump. CRCs differ -> only then dump
+   both (`+ 0x98000000 2097152 <file>`) and diff/render to see HOW they differ.
+
+Takes the A/B cycle ~12 min -> ~4.5 min. Validated 2026-07-25: the board's ROI CRC matched the host
+`zlib.crc32` of the dumped bytes exactly (`0x2d4786ef`) on both arms, so the CRC faithfully stands in
+for the pixels. Full write-up: `docs/USER_GUIDE.md` §7.3a.
+
 ## Hard rules (NEVER violate)
 - NEVER `taskkill /F` openocd/gdb — wedges the FlashPro6 DM. Clean stop = gdb's `monitor resume`
   + `monitor shutdown`, or telnet `shutdown` to openocd 4444 (note: run_corefft_iso.sh's openocd

@@ -56,4 +56,29 @@ void sar_coeffs_pass1(const sar_geom_t *g, uint32_t i,
 void sar_coeffs_pass2(const sar_geom_t *g, uint32_t j,
                       float *scratch, int32_t *idx, int16_t *wq);
 
+/* ---- OUTPUT-RANGE variants: compute only outputs [q0, q1) of the same line ------------------
+ * For splitting one line's coefficient work across harts. Each worker writes a DISJOINT,
+ * contiguous slice of idx[]/wq[], so no locking is needed -- but each worker must publish its
+ * OWN slice (FIC_0 is non-coherent; see flush_coef_bank_range_to_ddr in the sequencer).
+ *
+ * BIT-EXACTNESS: these produce byte-identical idx/wq to the full-line calls above. Pass 1 is
+ * trivially so (every output is an independent closed form). Pass 2 carries a moving bracket
+ * `k` and so LOOKS order-dependent, but the scan's k at query q is a pure function of q --
+ *     k = clamp( max{ j : SRC(j) <= q }, 0, S-2 )
+ * because the while-loop advances until SRC(k+1) > q, never retreats, and KC is non-decreasing.
+ * A cold-starting worker therefore binary-searches that same k and matches exactly.
+ * PROVEN board-free over real staged geometry, ascending AND descending source (kr<0), for
+ * 2/3/4/5/8-way splits: mpfs/host/check_coeff_split.py (320 checks, 0 mismatches).
+ * Re-run that gate if this code or the emit()/quantisation contract ever changes. */
+/* True once sar_coeffs_init() has built the reciprocals for THIS geometry. The *_range workers
+ * require it (see the bit-exactness note above); gate any multi-hart dispatch on this. */
+int sar_coeffs_ready(const sar_geom_t *g);
+
+void sar_coeffs_pass1_range(const sar_geom_t *g, uint32_t i,
+                            float *scratch, int32_t *idx, int16_t *wq,
+                            uint32_t q0, uint32_t q1);
+void sar_coeffs_pass2_range(const sar_geom_t *g, uint32_t j,
+                            float *scratch, int32_t *idx, int16_t *wq,
+                            uint32_t q0, uint32_t q1);
+
 #endif /* SAR_RESAMPLE_COEFFS_H_ */

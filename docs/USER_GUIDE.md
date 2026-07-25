@@ -319,6 +319,33 @@ python mpfs/host/render_crop.py jtag_full/crop.bin 1024 1024 jtag_full/crop.png
 **Success marker (eyeball):** coherent SAR speckle and recognizable scene structure (field
 boundaries, roads, etc.) in the PNG — not flat noise, not an all-zero/all-saturated image.
 
+### 7.3a A/B runs: CRC-FIRST, dump only on mismatch
+
+For an A/B (does change X alter the output?) do **not** dump both crops. `EROI` runs entirely
+on-board and writes its own CRC32 of the cropped region into the ROI record; the 2 MiB
+`dump binary memory` is a *separate*, optional host-side step. So compare the board's CRCs first
+and pull pixels only when they disagree.
+
+```bash
+# per run: crop on-board, then read just the record (a handful of words -- instant over JTAG)
+bash mpfs/host/run_m3_iso.sh 0x45524F49 0x0E001200 0x0E001200 20000 0xB005E200
+#   ROI record @0xB005E200: +0 magic(0xE3C0FF50) +4 verdict ... +0x20 crc
+#   -> read the u32 at 0xB005E220 = the board-computed crop CRC
+```
+Require `verdict 0` on both runs, then compare the two `0xB005E220` values:
+- **equal** → outputs are identical; no dump needed, the A/B correctness gate has PASSED.
+- **differ** → now dump both crops (`+ 0x98000000 2097152 <file>`) and diff/render them to find out
+  how they differ. The transfer is only worth paying for once there is something to look at.
+
+**Why this matters:** the JTAG link is ~84 kbit/s (~111 s/MB) and *latency*-bound — ~390 µs per
+word-scan through the FlashPro6 USB-HID, identical at 2 MHz and 6 MHz, with no OpenOCD batching
+knob. A 1024×1024 uint16 crop is 2 MiB ≈ **230 s**, so two dumps are ~7.5 min of a ~12 min A/B
+cycle — more than the scene loads (81 s each) and the pipeline itself (~37.5 s each) combined.
+CRC-first takes the cycle to roughly 4.5 min.
+
+Validated 2026-07-25: the board-computed ROI CRC matched the host `zlib.crc32` of the dumped bytes
+exactly (`0x2d4786ef`), on both arms of an A/B — so the CRC is a faithful stand-in for the pixels.
+
 ### 7.4 Value-level correctness, not correlation
 Correlation is scale-, phase-, and orientation-invariant, which has hidden real bugs on this project
 before (a sign-extension defect in `detect` passed a correlation check while corrupting half the

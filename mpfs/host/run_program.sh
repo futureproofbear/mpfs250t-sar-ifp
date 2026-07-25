@@ -14,6 +14,11 @@ JAVA="$SC/eclipse/jre/bin/java.exe"
 [ -x "$JAVA" ] || JAVA="java"
 
 cmd /c "taskkill /F /IM openocd.exe" >/dev/null 2>&1
+## $BM1 is a gitignored scratch workdir, so it is ABSENT on a fresh clone. Without this mkdir the
+## cp silently fails, the `cd` below does not happen, and the programmer runs from the repo root
+## against a non-existent app.elf -- it exits with a usage dump, having never touched the board,
+## and drops a stray bootmode1/ at the repo root. Cost a board session on 2026-07-25.
+mkdir -p "$BM1"
 cp "$NEWELF" "$BM1/app.elf" && echo "copied new app.elf ($(stat -c%s "$BM1/app.elf") bytes)"
 cd "$BM1"
 "$JAVA" -jar "$SC/extras/mpfs/mpfsBootmodeProgrammer.jar" --bootmode 1 --die MPFS250T_ES --package FCVG484 app.elf 2>&1 | tr -d '\r' | grep -aiE 'bootmode|program|success|error|fail|envm|complete|PASS|exception' | tail -30

@@ -93,22 +93,29 @@ void sar_interp_coeffs(const float *query, uint32_t Q,
  * Handles a DESCENDING grid (dx < 0) without a separate case: t still increases as q moves
  * away from x0, floor(t) is already the NATURAL index, and frac is already the weight toward
  * index+1 -- so no ascending-view conversion is needed (unlike the generic path above). */
-static void sar_uniform_coeffs(const float *query, uint32_t Q,
-                               float x0, float dx, uint32_t S,
-                               int32_t *idx, int16_t *wq)
+static void sar_uniform_coeffs_range(const float *query, uint32_t q0, uint32_t q1,
+                                     float x0, float dx, uint32_t S,
+                                     int32_t *idx, int16_t *wq)
 {
     if (S < 2u || dx == 0.0f) {
-        for (uint32_t i = 0; i < Q; i++) { idx[i] = -1; wq[i] = 0; }
+        for (uint32_t i = q0; i < q1; i++) { idx[i] = -1; wq[i] = 0; }
         return;
     }
     const float inv  = 1.0f / dx;                 /* the ONLY divide in the whole line */
     const float tmax = (float)(S - 1u);
-    for (uint32_t qi = 0; qi < Q; qi++) {
+    for (uint32_t qi = q0; qi < q1; qi++) {
         float t = (query[qi] - x0) * inv;
         if (!(t >= 0.0f) || t >= tmax) { idx[qi] = -1; wq[qi] = 0; continue; }
         int32_t k = (int32_t)t;                   /* t >= 0, so truncation == floor */
         emit(k, t - (float)k, idx, wq, qi);
     }
+}
+
+static void sar_uniform_coeffs(const float *query, uint32_t Q,
+                               float x0, float dx, uint32_t S,
+                               int32_t *idx, int16_t *wq)
+{
+    sar_uniform_coeffs_range(query, 0u, Q, x0, dx, S, idx, wq);
 }
 
 void sar_coeffs_pass1(const sar_geom_t *g, uint32_t i,
@@ -121,6 +128,17 @@ void sar_coeffs_pass1(const sar_geom_t *g, uint32_t i,
     float x0 = a * g->f0[i];
     float dx = a * g->df[i];
     sar_uniform_coeffs(g->KR, g->Np, x0, dx, g->N, idx, wq);
+}
+
+void sar_coeffs_pass1_range(const sar_geom_t *g, uint32_t i,
+                            float *scratch, int32_t *idx, int16_t *wq,
+                            uint32_t q0, uint32_t q1)
+{
+    (void)scratch;
+    float a  = 2.0f * g->pr[i] / SAR_C_LIGHT;
+    float x0 = a * g->f0[i];
+    float dx = a * g->df[i];
+    sar_uniform_coeffs_range(g->KR, q0, q1, x0, dx, g->N, idx, wq);
 }
 
 void sar_coeffs_pass2(const sar_geom_t *g, uint32_t j,
@@ -143,6 +161,33 @@ void sar_coeffs_pass2(const sar_geom_t *g, uint32_t j,
         }
         return;
     }
+    /* Initialised + non-degenerate: the whole line is just the full output range. Sharing one
+     * body keeps the full-line and per-hart paths from ever drifting apart. */
+    sar_coeffs_pass2_range(g, j, scratch, idx, wq, 0u, g->Mp);
+}
+
+int sar_coeffs_ready(const sar_geom_t *g)
+{
+    return (g->M >= 2u) && (s_inv_tan_n == g->M);
+}
+
+void sar_coeffs_pass2_range(const sar_geom_t *g, uint32_t j,
+                            float *scratch, int32_t *idx, int16_t *wq,
+                            uint32_t q0, uint32_t q1)
+{
+    (void)scratch;                          /* never materialised on this path */
+    const uint32_t S = g->M;
+    const float kr = g->KR[j];
+
+    /* A range worker REQUIRES the line-invariant reciprocals: bit-exactness depends on using the
+     * SAME s_inv_tan[] expression the full-line scan uses (recomputing 1/(SRC(k+1)-SRC(k)) here
+     * would round differently and silently break the value gate). Callers must gate on
+     * sar_coeffs_ready(); if they did not, fill correctly-typed zero-fill rather than emit
+     * values from a different float expression. */
+    if (S < 2u || kr == 0.0f || s_inv_tan_n != S) {
+        for (uint32_t i = q0; i < q1; i++) { idx[i] = -1; wq[i] = 0; }
+        return;
+    }
 
     const float r = 1.0f / kr;              /* the ONLY divide in the whole line */
     const int asc = (kr >= 0.0f);           /* tan_s ascends; kr<0 flips the source order */
@@ -157,10 +202,25 @@ void sar_coeffs_pass2(const sar_geom_t *g, uint32_t j,
     #define INVSPAN(kk) (s_inv_tan[(asc) ? (kk) : (S - 2u - (kk))] * rr)
 
     const float xlo = SRC(0u), xhi = SRC(S - 1u);
+    /* COLD START. The sequential scan's bracket at query q is a pure function of q:
+     *     k = clamp( max{ n : SRC(n) <= q }, 0, S-2 )
+     * (the while-loop advances until SRC(k+1) > q, never retreats, and KC is non-decreasing).
+     * So a worker beginning mid-line binary-searches that same k and matches the full-line scan
+     * bit-for-bit -- proven over real geometry, both source orders, by
+     * mpfs/host/check_coeff_split.py. For q0 == 0 this returns 0, i.e. the original behaviour. */
     uint32_t k = 0u;
-    float x0 = SRC(0u);
-    float inv = INVSPAN(0u);
-    for (uint32_t qi = 0; qi < g->Mp; qi++) {
+    if (q0 > 0u && q0 < g->Mp) {
+        uint32_t lo = 0u, hi = S - 2u;
+        const float target = g->KC[q0];
+        while (lo < hi) {
+            uint32_t mid = lo + ((hi - lo + 1u) >> 1);
+            if (SRC(mid) <= target) lo = mid; else hi = mid - 1u;
+        }
+        k = lo;
+    }
+    float x0 = SRC(k);
+    float inv = INVSPAN(k);
+    for (uint32_t qi = q0; qi < q1; qi++) {
         float q = g->KC[qi];
         if (q < xlo || q >= xhi) { idx[qi] = -1; wq[qi] = 0; continue; }
         while (k + 2u < S && SRC(k + 1u) <= q) {

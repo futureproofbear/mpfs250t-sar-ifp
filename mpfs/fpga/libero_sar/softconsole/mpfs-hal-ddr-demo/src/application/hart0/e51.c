@@ -24,6 +24,16 @@ void e51(void)
      * interrupt; U54_1 active-polls MIP.MSIP (no WFI) so it stays debuggable. */
     raise_soft_interrupt(1u);
 
+    /* Wake U54_2..4 as coefficient-generation workers. They were parked WFI stubs; coefficient
+     * generation is the pipeline's pacing item (99.57% of the range gather) and its loop is
+     * cache-miss-stall bound, so idle harts are the lever -- see sar/sar_coeff_workers.h.
+     * They park in a spin loop and stay idle unless hart1 dispatches, which it only does when
+     * the runtime knob at SAR_CWRK_NW_ADDR is > 1. Waking them is therefore behaviour-neutral
+     * until that knob is set. */
+    raise_soft_interrupt(2u);
+    raise_soft_interrupt(3u);
+    raise_soft_interrupt(4u);
+
     /* E51 idles. Debug + compute happen on U54_1. */
     for (;;) {
         ;

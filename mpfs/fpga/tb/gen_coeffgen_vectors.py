@@ -45,7 +45,7 @@ sys.path.insert(0, str(ROOT / "mpfs" / "host"))
 from coeffgen_model import Flags, coeffgen_row, fadd, fmul, rinv_of    # noqa: E402
 
 STAGE = ROOT / "mpfs" / "host" / "jtag_stage_small"
-CFGW = 8
+CFGW = 12   # +mode, x0, inv, tmax for the PASS-1 (range) cases
 
 
 def bits(x):
@@ -108,6 +108,36 @@ def main():
         ("degen_kr0", bits(np.float32(0.0)), KC_real[:1024],  1024,  0,      1),
     ]
 
+    C_LIGHT = np.float32(299792458.0)
+
+    def p1_row(KRq, qn, x0, inv, tmax):
+        """PASS-1 reference: t = (KR[q]-x0)*inv ; idx = (int32)t ; wq = q15(t - (float)idx).
+        Mirrors sar_coeffs_pass1_range() + emit(); gated bit-exact by check_coeffgen1_fixed.py."""
+        idx = [-1]*qn; wq = [0]*qn
+        for q in range(qn):
+            kr = np.uint32(KRq[q]).view(np.float32)
+            t  = np.float32((kr - x0) * inv)
+            if not (t >= np.float32(0.0)) or not (t < tmax):
+                continue
+            k = int(np.int32(t))
+            w = np.float32(t - np.float32(np.float32(k)))
+            wi = int(np.int32(np.float32(w*np.float32(32768.0) + np.float32(0.5))))
+            idx[q], wq[q] = k, max(0, min(32767, wi))
+        return idx, wq
+
+    # PASS-1 cases use REAL per-pulse geometry, so the scalars are the ones silicon will see.
+    f0_r = np.fromfile(STAGE / "f0.bin", np.float32)
+    df_r = np.fromfile(STAGE / "df.bin", np.float32)
+    pr_r = np.fromfile(STAGE / "pr.bin", np.float32)
+    NREAL = int(np.fromfile(STAGE / "tans.bin", np.float32).size)
+
+    def p1_scalars(i):
+        a  = np.float32(np.float32(2.0) * pr_r[i] / C_LIGHT)
+        x0 = np.float32(a * f0_r[i])
+        dx = np.float32(a * df_r[i])
+        inv = np.float32(np.float32(1.0) / dx)
+        return x0, inv
+
     tab, exp, cfg = [], [], []
     report = []
     for name, kr_b, kc, qn, stut, degen in CASES:
@@ -122,10 +152,65 @@ def main():
         for i in range(qn):
             exp.append(((idx[i] & 0xFFFFFFFF) << 16) | (wq[i] & 0xFFFF))
         rinv_b = rinv_of(kr_b) if (kr_b & 0x7FFFFFFF) else 0
-        cfg += [S, qn, kr_b, rinv_b, tab_off, exp_off, stut, degen]
+        cfg += [S, qn, kr_b, rinv_b, tab_off, exp_off, stut, degen, 0, 0, 0, 0]
         nin = sum(1 for v in idx if v >= 0)
         nmid = sum(1 for i in range(qn) if idx[i] >= 0 and 64 < wq[i] < 32704)
         report.append((name, qn, nin, nmid, min(wq), max(wq)))
+
+    # ---- PASS-1 (range) cases ---------------------------------------------------------------
+    # Same machinery: the KR query grid goes in the kcmem slot (pass 1 reuses that table), and the
+    # tan/itan words are still written but never read in this mode. Rows are chosen at the ENDS of
+    # the aperture as well as the middle, because dx -- and therefore inv -- is most extreme there.
+    P1_ROWS = [0, NREAL // 2, NREAL - 1]
+    KR_full = [int(v) for v in KR_r.view(np.uint32)]
+    for ri, row in enumerate(P1_ROWS):
+        x0, inv = p1_scalars(row)
+        tmax = np.float32(NREAL - 1)
+        qn = 4096
+        name = f"p1_row{ri}"
+        tab_off = len(tab)
+        tab.extend(TAN); tab.extend(ITAN); tab.extend(KR_full[:qn])
+        exp_off = len(exp)
+        idx, wq = p1_row(KR_full[:qn], qn, x0, inv, tmax)
+        for i in range(qn):
+            exp.append(((idx[i] & 0xFFFFFFFF) << 16) | (wq[i] & 0xFFFF))
+        cfg += [S, qn, 0, 0, tab_off, exp_off, 0, 0,
+                1, bits(x0), bits(inv), bits(tmax)]
+        CASES.append((name, 0, KR_full[:qn], qn, 0, 0))
+        nin = sum(1 for v in idx if v >= 0)
+        nmid = sum(1 for i in range(qn) if idx[i] >= 0 and 64 < wq[i] < 32704)
+        report.append((name, qn, nin, nmid, min(wq), max(wq)))
+
+    # DENSE pass-1: query grid spanning t in [0, N-1), so ~every output is in-range and the
+    # idx/wq datapath is actually exercised -- the real-KR cases only land ~N of QN in range.
+    x0d, invd = p1_scalars(NREAL // 2)
+    dxd = np.float32(np.float32(1.0) / invd)
+    tmaxd = np.float32(NREAL - 1)
+    qn = 4096
+    grid = [bits(np.float32(x0d + np.float32(dxd * np.float32(t))))
+            for t in np.linspace(0.0, float(NREAL - 1), qn, endpoint=False).astype(np.float32)]
+    tab_off = len(tab); tab.extend(TAN); tab.extend(ITAN); tab.extend(grid)
+    exp_off = len(exp)
+    idx, wq = p1_row(grid, qn, x0d, invd, tmaxd)
+    for i in range(qn):
+        exp.append(((idx[i] & 0xFFFFFFFF) << 16) | (wq[i] & 0xFFFF))
+    cfg += [S, qn, 0, 0, tab_off, exp_off, 0, 0, 1, bits(x0d), bits(invd), bits(tmaxd)]
+    CASES.append(("p1_dense", 0, grid, qn, 0, 0))
+    report.append(("p1_dense", qn, sum(1 for v in idx if v >= 0),
+                   sum(1 for i in range(qn) if idx[i] >= 0 and 64 < wq[i] < 32704),
+                   min(wq), max(wq)))
+
+    # A pass-1 case that is entirely OUT of range (tmax = 0 <=> N < 2), which is how the C's
+    # degenerate path presents. Every output must be idx=-1 / wq=0.
+    x0, inv = p1_scalars(0)
+    qn = 1024
+    tab_off = len(tab); tab.extend(TAN); tab.extend(ITAN); tab.extend(KR_full[:qn])
+    exp_off = len(exp)
+    for i in range(qn):
+        exp.append(((0xFFFFFFFF) << 16) | 0)
+    cfg += [S, qn, 0, 0, tab_off, exp_off, 0, 0, 1, bits(x0), bits(inv), bits(np.float32(0.0))]
+    CASES.append(("p1_degen", 0, KR_full[:qn], qn, 0, 0))
+    report.append(("p1_degen", qn, 0, 0, 0, 0))
 
     # ---- fp32 primitive vectors ------------------------------------------------------------
     # The geometry cases cannot reach every corner of the rounding logic (see the header: the
@@ -181,8 +266,13 @@ def main():
         print(f"{name:12s} {qn:5d} {nin:9d} {nmid:15d} {wmin:7d} {wmax:7d}")
     # A payload-free TB proves nothing (see tb_sar_axi_idconv.v). Refuse to emit vectors that
     # would let the TB pass on handshakes alone.
-    live = [r for r in report if r[0] != "degen_kr0"]
-    assert all(r[2] > 500 for r in live), "a value case has too few in-range outputs"
+    live = [r for r in report if r[0] not in ("degen_kr0", "p1_degen")]
+    for r in live:
+        # Real-KR pass-1 rows only intersect the pulse's own extent (~N of QN), so they are held
+        # to a lower but still non-hollow bar; everything else must be densely in-range.
+        floor = 200 if r[0].startswith("p1_row") else 500
+        assert r[2] > floor, f"{r[0]}: too few in-range outputs ({r[2]} <= {floor})"
+        assert r[3] > floor // 2, f"{r[0]}: too few non-trivial weights ({r[3]})"
     assert all(r[3] > 200 for r in live), "a value case has too few non-saturated weights"
     print(f"\nwrote -> {HERE}")
 

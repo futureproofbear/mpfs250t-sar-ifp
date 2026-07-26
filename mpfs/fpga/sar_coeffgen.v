@@ -717,19 +717,19 @@ module sar_coeffgen #(
 
     /* PASS-1 carries its own idx (computed at c5, delayed to the push point) and its own
      * out-of-range flag; pass 2 uses the FSM bracket counter and the issue-time flag. */
-    reg [13:0] p1_idxd [0:EMIT_LAT-8];
+    reg [13:0] p1_idxd [0:EMIT_LAT-7];   // [0] valid c7, push at c13 -> tap EMIT_LAT-7
     integer    m;
     always @(posedge clk or negedge resetn) begin
-        if (!resetn) for (m = 0; m <= EMIT_LAT-8; m = m + 1) p1_idxd[m] <= 14'd0;
+        if (!resetn) for (m = 0; m <= EMIT_LAT-7; m = m + 1) p1_idxd[m] <= 14'd0;
         else begin
             p1_idxd[0] <= p1_idx_c6;
-            for (m = 1; m <= EMIT_LAT-8; m = m + 1) p1_idxd[m] <= p1_idxd[m-1];
+            for (m = 1; m <= EMIT_LAT-7; m = m + 1) p1_idxd[m] <= p1_idxd[m-1];
         end
     end
 
     wire        res_v   = vld_d[EMIT_LAT-1];
     wire        res_oor = p1_mode ? p1oor_d[EMIT_LAT-6] : oor_d[EMIT_LAT-1];
-    wire [13:0] res_idx = p1_mode ? p1_idxd[EMIT_LAT-8] : kx_d[EMIT_LAT-1];
+    wire [13:0] res_idx = p1_mode ? p1_idxd[EMIT_LAT-7] : kx_d[EMIT_LAT-1];
     wire [15:0] res_wq  = res_oor ? 16'd0 : fq15(half_y);
 
     wire        of_push = res_v | deg_push;
@@ -786,8 +786,13 @@ module sar_coeffgen #(
                       emitted <= 0;
                       ec      <= 4'd0;
                       if (!dims_ok) err_dims <= 1'b1;
-                      // C: S<2 || kr==0 || tables not initialised -> idx=-1, wq=0 for the line
-                      if (!dims_ok || ((r_kr & 32'h7FFF_FFFF) == 32'd0)) begin
+                      /* C: S<2 || kr==0 || tables not initialised -> idx=-1, wq=0 for the line.
+                       * PASS 1 IS EXEMPT FROM THE kr TEST: it never reads kr (the KR grid is the
+                       * query table and x0/inv are the row scalars), so kr is legitimately 0 and
+                       * keying degeneracy off it would zero every pass-1 row. Pass-1 degeneracy --
+                       * dx == 0 or N < 2 -- arrives as tmax <= 0, which the range test at c5 turns
+                       * into idx=-1/wq=0 for every output anyway, so no separate path is needed. */
+                      if (!dims_ok || (!p1_mode && ((r_kr & 32'h7FFF_FFFF) == 32'd0))) begin
                           degen <= 1'b1; cst <= C_DEGEN;
                       end else begin
                           degen <= 1'b0; cst <= p1_mode ? C_PRIME : C_EDGE;

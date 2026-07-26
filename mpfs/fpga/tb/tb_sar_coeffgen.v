@@ -57,6 +57,7 @@ module tb_sar_coeffgen;
     reg [31:0] tabm [0:`TAB_WORDS-1];
     reg [47:0] expm [0:`EXP_WORDS-1];
     reg [31:0] cfg  [0:`NCASES*`CFGW-1];
+    reg [31:0] p1mode, p1x0, p1inv, p1tmax;   // PASS-1 (range) mode + row scalars
     reg [8*12:1] names [0:`NCASES-1];
 
     // ---- DUT ----
@@ -202,6 +203,10 @@ module tb_sar_coeffgen;
             exp_off   = cfg[c*`CFGW + 5];
             stutter   = cfg[c*`CFGW + 6];
             degen_exp = cfg[c*`CFGW + 7];
+            p1mode    = cfg[c*`CFGW + 8];    // 1 = PASS-1 (range): affine, no bracket search
+            p1x0      = cfg[c*`CFGW + 9];
+            p1inv     = cfg[c*`CFGW + 10];
+            p1tmax    = cfg[c*`CFGW + 11];
 
             // ---- one-time-per-scene table load (rewind, then push tan_s / inv_tan / KC) ----
             lite_w(12'h000, 32'h0000_000E);                       // rewind all three pointers
@@ -213,6 +218,12 @@ module tb_sar_coeffgen;
             lite_w(12'h00c, ((QN & 32'h3FFF) << 16) | (S & 32'h3FFF));  // 14-bit fields: QN can be 8192
             lite_w(12'h004, kr_b);
             lite_w(12'h008, rinv_b);
+            // PASS-1 scalars. Written for EVERY case -- pass-2 cases set mode 0 and the generator
+            // ignores x0/inv/tmax, so this also proves they cannot leak into the pass-2 datapath.
+            lite_w(12'h020, p1mode);
+            lite_w(12'h024, p1x0);
+            lite_w(12'h028, p1inv);
+            lite_w(12'h02c, p1tmax);
 
             exp_base = exp_off; ngot = 0; ncase_bad = 0; run_cycles = 0;
             collect = 1;

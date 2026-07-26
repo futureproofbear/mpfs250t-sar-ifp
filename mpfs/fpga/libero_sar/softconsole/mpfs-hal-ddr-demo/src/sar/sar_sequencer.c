@@ -276,20 +276,16 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
  * Two chains need ~15% of the single SASD read slot. CoreFFT itself is 69,790 cycles/row
  * (8192 load + 13x4106 compute + 8192 unload + ~25) = 698 us at 100 MHz, and that is the floor
  * the second chain halves. */
-/* !! DO NOT ENABLE -- SILICON 2026-07-26 !!
- * The second chain CORRUPTS PERSISTENT DDR STATE, and the damage SURVIVES ELOD: after any dual
- * run, SINGLE-chain runs also produce wrong output, with a DIFFERENT CRC each time, until the
- * board is POWER CYCLED. Proven by: power cycle -> fresh ELOD -> single chain -> 0x319037b2
- * (reference, 32.23 s) after a sequence of dual runs had left single chain at 0x0593e49a.
+/* SECOND CoreFFT CHAIN. Silicon 2026-07-26: 31.11 s -> 24.84 s with the renormalize epilogue
+ * on, output CRC 0x319037b2 UNCHANGED (three consecutive clean runs, blk = 64).
  *
- * Dual runs are non-deterministically wrong at EVERY row-block size tried (blk = 1, 64, 256,
- * 4096): some pass, some fail, failures differ run to run. Earlier passes at blk 64/4096 were
- * luck on not-yet-damaged state, NOT evidence that a block split fixes anything -- commit
- * b0030da's claim to that effect is RETRACTED.
- *
- * ELOD restores SIG + the geometry role segments, so the damaged region is OUTSIDE that set --
- * the coefficient banks or another scratch area a second unloader is writing past. Find the
- * out-of-bounds write before re-enabling. */
+ * !! ONE ELOD PER PIPELINE RUN !!  The internal corner-turn transposes SCRATCH -> SIG (see
+ * resample_2pass below), so a run OVERWRITES ITS OWN INPUT. A second PIPE without reloading the
+ * scene reads the previous run's intermediate data and produces a wrong, run-dependent CRC.
+ * That is NOT corruption and NOT a dual-chain fault -- single chain does exactly the same. An
+ * earlier revision of this comment blamed the second chain for "poisoning DDR past ELOD"; that
+ * was wrong, and it sent a whole debugging session chasing AXI id mis-delivery and marginal
+ * timing. Reload, then run. */
 #define SAR_DUALFFT_ADDR   0xB005913Cu       /* free: 0x134 = SAR_CWRK_NW, 0x138 = SAR_CGENMODE */
 #define SAR_DUALFFT_ENABLE 0x44464632u       /* 'DFF2' -- the ONLY accepted value */
 

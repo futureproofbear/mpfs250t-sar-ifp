@@ -1357,7 +1357,17 @@ lappend AXIIC_C0_PARAMS "TARGET0_CLOCK_DOMAIN_CROSSING:false"
 lappend AXIIC_C0_PARAMS "TARGET0_DATA_WIDTH:64"
 lappend AXIIC_C0_PARAMS "TARGET0_DWC_CHAN_RS:false"
 lappend AXIIC_C0_PARAMS "TARGET0_DWC_DATA_FIFO_DEPTH:16"
-lappend AXIIC_C0_PARAMS "TARGET0_END_ADDR:0xbfffffff"
+## WIDENED 2026-07-26: 0xbfffffff -> 0xffffffff so the fabric can reach the NON-CACHED DDR
+## window at 0xC000_0000 (the WORK buffer). TARGET0 is the ONLY target (NUM_TARGETS:1) and it is
+## the path to FIC_0, so an address outside its range never reaches the MSS -- that is exactly why
+## a corner-turn re-targeted to 0xC000_0000 hung and RESAMPLE timed out (PIPE result=2).
+## The MSS side was already correct: hw_ddr_segs.h SEG1_2 = 0x80007FB0 ("Non-Cached access at
+## 0x00_c000_0000", enabled) translates 0xC000_0000 to physical DRAM offset 1792 MB, while the
+## cached window maps 0x8000_0000 -> physical 0 for 768 MB. Disjoint by construction, which is what
+## the silicon scribble/CRC test measured.
+## Widening is safe: with a single target there is no decode ambiguity, and this interconnect is
+## the fabric->DDR path only -- the 0x6000_xxxx control plane is the separate CIC.
+lappend AXIIC_C0_PARAMS "TARGET0_END_ADDR:0xffffffff"
 lappend AXIIC_C0_PARAMS "TARGET0_END_ADDR_UPPER:0x0"
 lappend AXIIC_C0_PARAMS "TARGET0_READ_INTERLEAVE:false"
 lappend AXIIC_C0_PARAMS "TARGET0_START_ADDR:0x80000000"

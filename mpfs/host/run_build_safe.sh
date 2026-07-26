@@ -68,5 +68,33 @@ if [ "$ok" -ne 1 ]; then
     echo ">>> ==================================================================="
     exit 1
 fi
+
+## ---- ARCHIVE THE BITSTREAM -------------------------------------------------------------------
+## A fresh-project build DELETES mpfs/fpga/libero_ffv/ wholesale, export/ included, and the .job is
+## gitignored (it is 11.6 MB against a 6.9 MB repo history, so committing every build would bury
+## the repo in incompressible binaries). Consequence, learned the hard way on 2026-07-26: a build
+## whose bitstream turned out to be BAD on silicon had already destroyed the known-good one, and
+## recovering a working board cost a full ~50-minute rebuild.
+##
+## So: keep the last few OUTSIDE the project tree, keyed by the commit they were built from. The
+## firmware ELF goes with it -- a bitstream alone is not a restore point, the pair is.
+ARCHDIR="$FPGA/bitstreams"
+SHA="$(git -C "$SAR_ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+DIRTY=""; git -C "$SAR_ROOT" diff --quiet 2>/dev/null || DIRTY="-dirty"
+SNAP="$ARCHDIR/$(date +%Y%m%d-%H%M%S)_${SHA}${DIRTY}"
+mkdir -p "$SNAP"
+cp "$JOB" "$SNAP/" 2>/dev/null
+ELF_SRC="$SAR_ROOT/mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MHz-eNVM-Scratchpad-Release/mpfs-hal-ddr-demo.elf"
+[ -f "$ELF_SRC" ] && cp "$ELF_SRC" "$SNAP/"
+{
+  echo "commit   : $SHA$DIRTY"
+  echo "built    : $(date -Iseconds)"
+  echo "VERIFIED : NO   <- set to the CRC + config once silicon confirms it"
+  tr -d '\r' < "$BUILD_LOG" | grep -aiE "SETUP nviol|VIOLRPT|TIMING_MET" | tail -4
+} > "$SNAP/manifest.txt"
+echo ">>> archived bitstream + ELF -> $SNAP"
+
+## Keep the newest 4 snapshots (~66 MB); older ones are reproducible from their commit.
+ls -1dt "$ARCHDIR"/*/ 2>/dev/null | tail -n +5 | while read -r old; do rm -rf "$old"; done
 echo ">>> run_build_safe OK -- bitstream exported: $JOB"
 echo ">>> To program (board on):  cd mpfs/fpga && \"$LIB\" SCRIPT:program_ffv.tcl"

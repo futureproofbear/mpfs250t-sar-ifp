@@ -25,6 +25,15 @@ x/8xw 0x98000000
 # discards m_arid and ties m_rid to 0), so the DIC routes by PHYSICAL PORT and an id-based
 # check can only ever read back a constant. Do not re-add one without first extending the bus
 # interface definition itself.
+# ---- coeffgen wedge check (2026-07-26) ----
+# CGEN_CTRL/STATUS @+0x00 bit0 = busy.  start_pulse is honoured ONLY in C_IDLE
+# (sar_coeffgen.v:662), and C_DRAIN exits only once the feeder has drained every queued
+# entry.  So busy==1 with the pipeline idle == the generator is WEDGED and every later
+# row/run silently reuses stale coefficients.  STAT @+0x1c also carries emitted[29:16].
+printf "\n=== coeffgen state (busy=1 while idle => WEDGED) ===\n"
+printf "COEFG   ctrl=0x%08x busy=%u   stat=0x%08x emitted=%u\n", *(unsigned int*)0x60007000, (*(unsigned int*)0x60007000)&1, *(unsigned int*)0x6000701c, (*(unsigned int*)0x6000701c >> 16) & 0x3fff
+printf "COEFG_B ctrl=0x%08x busy=%u   stat=0x%08x emitted=%u\n", *(unsigned int*)0x60008000, (*(unsigned int*)0x60008000)&1, *(unsigned int*)0x6000801c, (*(unsigned int*)0x6000801c >> 16) & 0x3fff
+
 monitor resume
 monitor shutdown
 quit

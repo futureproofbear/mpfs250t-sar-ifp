@@ -18,7 +18,9 @@
 // a correlation check. See fft_unloader_v.v and tb/tb_fft_unloader_det.v, whose mutation test
 // (strip the `signed` qualifiers -> 2035/2048 mismatches) reproduces that exact failure.
 `timescale 1ns/1ps
-module fft_unloader_top #(parameter integer IDW = 4) (
+module fft_unloader_top #(parameter integer IDW = 4,
+  /* distinct AXI master_id per instance -- see fft_feeder_v.v. 0 keeps the legacy behaviour. */
+  parameter integer MID = 0) (
     input  wire        clk,
     input  wire        reset,                 // active-HIGH (SmartHLS convention)
 
@@ -99,7 +101,7 @@ module fft_unloader_top #(parameter integer IDW = 4) (
     assign axi4target_rlast   = 1'b1;          // single-beat
     assign axi4target_rdata   = {li_rdata, li_rdata};   // consumer takes the correct half
 
-    fft_unloader_v #(.AXI_ADDR_W(32), .AXI_DATA_W(64), .AXI_ID_W(IDW)) u_unl (
+    fft_unloader_v #(.AXI_ADDR_W(32), .AXI_DATA_W(64), .AXI_ID_W(IDW), .AXI_MASTER_ID(MID)) u_unl (
         .clk(clk), .resetn(resetn),
         // control (AXI4-Lite view): map addr to {6'd0, 6-bit byte offset}
         .s_awaddr({6'd0, axi4target_awaddr}), .s_awvalid(axi4target_awvalid), .s_awready(li_awready),

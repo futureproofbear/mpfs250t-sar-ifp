@@ -47,6 +47,18 @@ sd_instantiate_component -sd_name $sd -component_name {COREFFT_C0}   -instance_n
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corefft_stream64_adapter} -instance_name {GBX_B}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_feeder_top}           -instance_name {FEED_B}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_unloader_top}         -instance_name {UNLD_B}
+
+## DISTINCT AXI master_id PER DDR MASTER (2026-07-26).
+## Every fabric master previously drove ARID/AWID = 0 and none checked the returned id, so read
+## data or a write response delivered to the WRONG master was undetectable -- and a feeder whose
+## beat count desyncs finishes EARLY, giving a faster-and-wrong run whose bad counters persist in
+## fabric registers until a power cycle. Distinct ids make that both detectable (sticky bit in each
+## kernel's STATUS @0x14) and rejectable. Keep 0 UNUSED so an unconfigured instance stands out.
+## sar_axi_idconv.v stashes master_id[7:0] keyed by master_number[2:0], so per-master ids are safe.
+catch { sd_configure_core_instance -sd_name $sd -instance_name {FEED}   -params {"MID:1"} }
+catch { sd_configure_core_instance -sd_name $sd -instance_name {UNLD}   -params {"MID:2"} }
+catch { sd_configure_core_instance -sd_name $sd -instance_name {FEED_B} -params {"MID:3"} }
+catch { sd_configure_core_instance -sd_name $sd -instance_name {UNLD_B} -params {"MID:4"} }
 ## RSLICE_DIC/RSLICE_CIC: ONE axi4_regslice HDL+ core, TWO instances (timing fix -- see
 ## axi4_regslice_core.tcl / axi4_regslice.v headers). RSLICE_DIC sits on the existing
 ## DIC:AXI4mtarget0<->ID_FIX:S_AXI link (11-bit ID/32-bit addr, matches ID_FIX:S_AXI exactly).

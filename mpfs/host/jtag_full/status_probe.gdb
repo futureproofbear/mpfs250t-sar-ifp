@@ -19,6 +19,12 @@ echo === SIG @0x88000000 [0..7] (cached view, = azimuth-FFT out post-run) ===\n
 x/8xw 0x88000000
 echo === SCRATCH @0x98000000 [0..7] (cached view) ===\n
 x/8xw 0x98000000
+
+# NOTE: an AXI master-id mis-delivery probe lived here and was REMOVED (874fefa). The HDL+
+# initiator bus interface on the feeder/unloader carries NO id at all (fft_feeder_top.v:122
+# discards m_arid and ties m_rid to 0), so the DIC routes by PHYSICAL PORT and an id-based
+# check can only ever read back a constant. Do not re-add one without first extending the bus
+# interface definition itself.
 monitor resume
 monitor shutdown
 quit

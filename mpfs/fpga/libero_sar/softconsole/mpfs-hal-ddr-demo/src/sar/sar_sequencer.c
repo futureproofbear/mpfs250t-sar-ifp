@@ -338,17 +338,36 @@ static inline uint32_t fft_seg(uint32_t r0, uint32_t r1, uint32_t nch)
 }
 
 /* BLOCK SIZE: how many consecutive rows a chain takes before handing over. One knob spans the
- * whole space -- blk == 1 is the old interleave, blk == seg is the contiguous halves. Silicon
- * 2026-07-26 measured the two ends: interleave 27.51 s but WRONG, halves 28.28 s and bit-exact.
- * The 0.78 s is DRAM locality -- under SASD the interconnect alternates between the chains, and at
- * blk == seg every alternation is 128 MiB away, so it pays a precharge+activate. A coarse blk
- * should keep each chain in its own pages (correct) while amortising the seek over blk rows.
- * Must DIVIDE seg so the mapping tiles the frame exactly; anything else falls back to seg. */
+ * whole space -- blk == 1 is a full interleave, blk == seg is contiguous halves.
+ *
+ * THIS IS A PERFORMANCE KNOB ONLY. An earlier revision of this comment claimed the interleave was
+ * WRONG on silicon and that a contiguous split fixed it. That was false: those runs were re-using
+ * consumed input (a PIPE run overwrites SIG -- see the SAR_DUALFFT note), and the block size never
+ * affected correctness at all. Every value tiles the frame exactly, so all of them are correct.
+ *
+ * What it DOES affect is DRAM locality. The DIC is single-outstanding, so it alternates between
+ * the chains; at blk == seg every alternation is 128 MiB away and pays a precharge+activate, while
+ * a coarse-but-small blk keeps each chain in its own pages and amortises the seek over blk rows.
+ *
+ * MEASURED (valid runs only -- ELOD immediately before each, no epilogue):
+ *     blk = 64     27.83 s      <- default
+ *     blk = 4096   28.28 s
+ * blk = 1 and 256 have never been validly measured; their apparent failures were the reload
+ * artifact above, so re-sweep before assuming 64 is optimal.
+ *
+ * Must DIVIDE seg so the mapping tiles the frame exactly; anything else falls back to the default.
+ */
 #define SAR_FFTBLK_ADDR 0xB0059140u        /* free: 0x13C = SAR_DUALFFT is the last one used */
+#define SAR_FFTBLK_DEF  64u                /* silicon-measured best; 0/garbage/non-divisor -> this */
 static inline uint32_t fft_blk(uint32_t seg)
 {
     uint32_t v = *(volatile uint32_t *)(uintptr_t)SAR_FFTBLK_ADDR;
-    if (v == 0u || v > seg || (seg % v) != 0u) return seg;   /* cold-boot garbage -> halves */
+    if (v == 0u || v > seg || (seg % v) != 0u) {
+        /* Cold-boot DDR is uninitialised, so an unset knob must land on the validated value, not
+         * on whatever happens to be in the word. seg itself is the fallback only if the default
+         * does not divide it (nch > 1 always gives seg = 4096, which 64 divides). */
+        return ((seg % SAR_FFTBLK_DEF) == 0u) ? SAR_FFTBLK_DEF : seg;
+    }
     return v;
 }
 

@@ -636,6 +636,28 @@ Writing an internal descriptor then reading it back **immediately** vs **after a
 The board only halts for JTAG in **boot mode 0** (WFI) unless the app cooperates; otherwise use the
 firmware mailbox to trigger tests and read results from DDR.
 
+#### 3.8a NEVER EDIT A SCRIPT THAT IS CURRENTLY RUNNING
+
+Bash reads a script INCREMENTALLY, by byte offset, not into memory. Editing the file mid-run
+shifts everything after the current offset and the shell resumes in the middle of a token. The
+failure looks nothing like an edit:
+
+```
+run_build_safe.sh: line 52: syntax error near unexpected token `)'
+run_build_safe.sh: line 52: `ev/null || echo "$BUILD_TCL")" >"$BUILD_LOG" 2>&1'
+```
+
+(`ev/null` is the tail of a `cygpath ... 2>/dev/null` line.) `bash -n` on the file afterwards
+reports it is perfectly valid, because it is -- the running shell saw a version that never
+existed on disk.
+
+Cost on 2026-07-26: a ~50-minute fabric build died at the synth step because `run_build_safe.sh`
+was edited (to add bitstream archiving) while that same script was building.
+
+**Rule: before editing any `run_*.sh`, check nothing is running it.** A long build is exactly when
+it is tempting to "just improve the wrapper while we wait" -- that is the moment it is unsafe.
+If a change is urgent, copy the script to a new name and edit the copy.
+
 #### 3.9a Board-session discipline — READ BEFORE WRITING A NEW `.gdb`
 
 Board time is the scarcest resource in this project and the most common way to burn it is writing a

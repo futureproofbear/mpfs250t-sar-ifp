@@ -108,6 +108,37 @@ def decode_record(w):
     # smaller than one burst is intra-burst throttling, not an inter-burst arbitration stall.
     big_gap = max_gap > max(200, 2 * avg_burst)
     print("  VERDICT:", end=" ")
+    # ---- E4: the CORNER-TURN verdict (pass tag 4) ------------------------------------------
+    # This is the measurement that decides whether replacing the SmartHLS corner_turn with
+    # hand-written Verilog is worth doing, and it is designed to be able to KILL the idea.
+    if (w[0] & 0xF) == 4:
+        el = elapsed if elapsed else 1
+        ta = w[16] if len(w) > 16 else busy          # TOTAL_ACTIVE (any handshake)
+        rdw = w[18] if len(w) > 18 else 0            # R_DATAWAIT
+        wbeats = w[12] if len(w) > 12 else 0         # W_COUNT (the only BEAT counter here)
+        act = 100.0 * ta / el
+        idle = 100.0 * max(0, el - ta - rdw) / el
+        secs = el / FCLK_HZ
+        mbps = (wbeats * 8 * 2) / secs / 1e6 if secs else 0.0   # x2: a transpose reads what it writes
+        print()
+        print("  ===== CORNER-TURN VERDICT (E4) =====")
+        print(f"  port active   {act:5.1f}%   DDR read throttle {100.0*rdw/el:5.1f}%   genuine idle {idle:5.1f}%")
+        print(f"  moved         {wbeats*8/1048576:.1f} MiB written in {secs:.2f} s -> ~{mbps:.0f} MB/s both ways")
+        print(f"  FIC_0 ceiling  800 MB/s (64 bit x 100 MHz), so headroom is ~{800/mbps:.1f}x" if mbps else "")
+        if act < 40.0:
+            print("  -> KERNEL-BOUND. The port is idle most of the time: the HLS kernel is not")
+            print("     issuing. A hand-written corner-turn that keeps bursts back-to-back MUST be")
+            print("     faster -- that is a guarantee, not an estimate. REWRITE IS JUSTIFIED.")
+        elif rdw > ta:
+            print("  -> DDR-THROTTLED. The kernel asks but DDR does not deliver; the transpose's")
+            print("     scattered access is thrashing DRAM pages. A rewrite only helps if it")
+            print("     changes the ACCESS PATTERN (bigger tiles), not merely the issue rate.")
+        else:
+            print("  -> PORT-BOUND. The bus is already saturated. A hand-written kernel buys")
+            print("     NOTHING here. DROP THE REWRITE and spend the effort elsewhere.")
+        print("  ====================================")
+        print()
+
     if util > 0.85:
         print("read bus NEAR-SATURATED -- reads are not the stall; the schedule roughly holds.")
     elif short_frac > 0.5:

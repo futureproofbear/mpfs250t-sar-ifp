@@ -1119,12 +1119,28 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     sar_resample_ts[1] = readmtime();          /* range gather + pad-zero + publish done */
 
     /* transpose SCRATCH(Mp x Np) -> SIG(Np x Mp) */
+    /* E4: FIC_0 profile of THE WHOLE INTERNAL CORNER-TURN. This is the measurement that decides
+     * whether replacing the SmartHLS corner_turn with hand-written Verilog is worth doing, and it
+     * can KILL the idea as cheaply as it can justify it:
+     *   TOTAL_ACTIVE/ELAPSED LOW  -> the port is idle, the kernel is not issuing, so ANY kernel
+     *                               that issues back-to-back must be faster. Rewrite is justified.
+     *   TOTAL_ACTIVE/ELAPSED HIGH -> the port/DDR is already saturated and a rewrite buys NOTHING.
+     * R_DATAWAIT separates the two failure modes: it counts cycles with a read outstanding but
+     * RVALID low, i.e. DDR throttling US, versus us simply failing to ask.
+     * Sanity anchor for the arithmetic: this stage moves 512 MB (256 read + 256 written) and is
+     * measured at ~5.4 s, i.e. ~82.6 MB/s, against a FIC_0 ceiling of 64 bit x 100 MHz = 800 MB/s.
+     * NOTE the counters are CYCLE counts, not beat counts -- misreading them as beats is how the
+     * earlier "one outstanding transaction" story was built. W_COUNT is the only beat counter. */
+    ficmon_clear();
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
     sar_reg_w(K_CORNER_TURN, HLS_ARG1, sar_ctdst());
     sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
     sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     sar_k_start(K_CORNER_TURN);
     if (!sar_k_wait(K_CORNER_TURN, spins)) return 0;
+    /* slot 0, pass tag 4 = internal corner-turn. beats = the WRITE side (Np*Mp*4 B / 8 B per beat),
+     * so W_COUNT/r[10] is a direct did-it-move-what-we-think check. */
+    ficmon_snapshot(0u, 4u, (Np * Mp) / 2u);
     sar_resample_ts[2] = readmtime();          /* internal corner-turn done */
 
     /* FUSED azimuth gather (SAR_GATHERMODE=1): stop here. SIG now holds the corner-turned,

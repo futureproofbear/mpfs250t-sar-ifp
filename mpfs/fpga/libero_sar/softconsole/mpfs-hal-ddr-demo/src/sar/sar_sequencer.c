@@ -97,7 +97,18 @@ static inline int sar_workbuf_en(void)
      * To revive: the buffer must live INSIDE 0x8000_0000..0xBFFF_FFFF, and that region is already
      * full (SIG+SCRATCH+OUT+code = 768 MB exactly), so it needs the DIC target window widened AND
      * a cached-region reshuffle -- not just a knob. */
-    return (*(volatile uint32_t *)(uintptr_t)SAR_WORKBUF_ADDR == SAR_WORKBUF_ENABLE);
+    /* DEAD -- DO NOT RE-ENABLE WITHOUT READING THIS.
+     * The fabric and the CPU DISAGREE about what 0xC000_0000 means. hw_ddr_segs.h SEG1_2 maps the
+     * CPU's non-cached window there onto physical DRAM offset 1792 MB, disjoint from the cached
+     * region -- but that translation belongs to MSS masters and is NOT applied to FIC_0 traffic.
+     * Proven on silicon 2026-07-26, third and final attempt: with the DIC window widened so the
+     * address is reachable, a run COMPLETED (24.65 s, no timeout) but produced 0xc9fa44cf, and
+     * SIG's CRC moved 0x89fa12dc -> 0x191733a0 even though BOTH corner-turns had been re-targeted
+     * away from SIG. The fabric's WORK writes aliased straight back into the cached region.
+     * A third frame buffer must therefore live INSIDE 0x8000_0000..0xBFFF_FFFF, where fabric and
+     * CPU agree -- and that region is exactly full (SIG+SCRATCH+OUT+code = 768 MB). So this needs
+     * a DDR re-layout, not an address. */
+    return 0 && (*(volatile uint32_t *)(uintptr_t)SAR_WORKBUF_ADDR == SAR_WORKBUF_ENABLE);
 }
 /* The buffer the corner-turns write and the next stage reads: WORK when enabled, else SIG. */
 static inline uint32_t sar_ctdst(void) { return sar_workbuf_en() ? BUF_WORK : BUF_SIG; }

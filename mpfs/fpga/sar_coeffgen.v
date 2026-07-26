@@ -239,7 +239,10 @@ module sar_coeffgen #(
 );
     // Issue -> output-FIFO write. Derived, not guessed:
     //   sub(3) -> mul(2) -> sub(3) -> add(3) = 11 cycles, result valid in cycle 11.
-    localparam integer EMIT_LAT = 11;
+    localparam integer EMIT_LAT = 13;   // 11 for the pass-2 chain + 2 for pass-1's trunc/i2f.
+                                        // Uniform across modes on purpose -- see the emit-pipeline
+                                        // note below; a mode-dependent depth would let a mode or
+                                        // kr-sign change corrupt the tail of a row.
 
     // ============================ float32 helpers (combinational) ============================
     // Ordered key for float32 compare: sign-magnitude -> monotone unsigned. Both zeros collapse to
@@ -250,6 +253,42 @@ module sar_coeffgen #(
         begin
             z    = (v[30:0] == 31'd0) ? 32'd0 : v;
             fkey = z[31] ? ~z : (z | 32'h8000_0000);
+        end
+    endfunction
+
+    // ---- PASS-1 helpers -------------------------------------------------------------------
+    // t is known to be in [0, tmax) with tmax <= 8191 (the caller rejects out-of-range BEFORE
+    // these are used), so both are small, exact, and need no rounding.
+
+    // floor(t) for a non-negative float32 < 2^13.  Truncation toward zero == floor for t >= 0,
+    // which is exactly what the C's (int32_t)t does.
+    function [13:0] f2i_floor;
+        input [31:0] v;
+        reg   [8:0]  e;          // unbiased exponent
+        reg   [23:0] m;          // 1.mantissa
+        begin
+            e = {1'b0, v[30:23]} - 9'd127;
+            m = {1'b1, v[22:0]};
+            if (v[30:23] < 8'd127) f2i_floor = 14'd0;               // |t| < 1
+            else                   f2i_floor = m >> (6'd23 - e[5:0]);
+        end
+    endfunction
+
+    // Exact int->float32 for a 14-bit unsigned. Values <= 8192 need at most 13 significand bits,
+    // so the result is always exactly representable and there is nothing to round.
+    function [31:0] i2f_small;
+        input [13:0] u;
+        reg   [3:0]  p;          // index of the most significant set bit
+        reg   [23:0] mm;
+        integer      i;
+        begin
+            p = 4'd0;
+            for (i = 0; i < 14; i = i + 1) if (u[i]) p = i[3:0];
+            if (u == 14'd0) i2f_small = 32'd0;
+            else begin
+                mm        = {10'd0, u} << (5'd23 - p);              // align MSB to bit23
+                i2f_small = {1'b0, (8'd127 + {4'd0, p}), mm[22:0]};
+            end
         end
     endfunction
 
@@ -291,6 +330,16 @@ module sar_coeffgen #(
     endfunction
 
     // ============================ AXI4-Lite control registers ============================
+    /* PASS-1 (range) MODE. 0 = pass-2 azimuth (default, existing behaviour), 1 = pass-1 range.
+     * Pass 1 inverts kr = 2*pr/C*(f0 + j*df) onto the uniform KR grid. kr is AFFINE in j, so it is
+     * CLOSED FORM -- no bracket, no search, no tan/itan tables:
+     *     t = (KR[q] - p1_x0) * p1_inv ;  idx = (int32)t ;  wq = q15(t - (float)idx)
+     * KR lives in kcmem (which pass 2 uses for KC): the two passes never run concurrently -- the
+     * resample finishes before FFT-1 starts -- so the firmware reloads the tables between them,
+     * ~24k AXI4-Lite writes ~= 8 ms/frame against 5.8 s saved. Hence ZERO new LSRAM. */
+    reg        p1_mode;
+    reg [31:0] p1_x0, p1_inv, p1_tmax;
+
     reg [31:0]        r_kr, r_rinv;
     reg [TAN_AW:0]    dim_s;            // S == M source samples
     reg [KC_AW:0]     dim_qn;           // QN == Mp outputs
@@ -353,6 +402,10 @@ module sar_coeffgen #(
                         kc_wptr  <= kc_wptr + 1'b1;
                         if (fbad(s_wdata)) err_fmt <= 1'b1;
                     end
+                    12'h020: p1_mode <= s_wdata[0];
+                    12'h024: begin p1_x0   <= s_wdata; if (fbad(s_wdata)) err_fmt <= 1'b1; end
+                    12'h028: begin p1_inv  <= s_wdata; if (fbad(s_wdata)) err_fmt <= 1'b1; end
+                    12'h02c: begin p1_tmax <= s_wdata; if (fbad(s_wdata)) err_fmt <= 1'b1; end
                     default: ;
                 endcase
                 s_bvalid <= 1'b1;
@@ -377,6 +430,10 @@ module sar_coeffgen #(
                 12'h018: s_rdata <= {{(31-KC_AW){1'b0}}, kc_wptr};
                 12'h01c: s_rdata <= {{(15-KC_AW){1'b0}}, emitted,
                                      12'd0, degen, err_dims, err_fmt, busy};
+                12'h020: s_rdata <= {31'd0, p1_mode};
+                12'h024: s_rdata <= p1_x0;
+                12'h028: s_rdata <= p1_inv;
+                12'h02c: s_rdata <= p1_tmax;
                 default: s_rdata <= 32'd0;
             endcase
         end else if (s_rvalid & s_rready) begin
@@ -391,6 +448,7 @@ module sar_coeffgen #(
     (* syn_ramstyle = "lsram" *) reg [31:0] tanmem  [0:(1<<TAN_AW)-1];
     (* syn_ramstyle = "lsram" *) reg [31:0] itanmem [0:(1<<TAN_AW)-1];
     (* syn_ramstyle = "lsram" *) reg [31:0] kcmem   [0:(1<<KC_AW)-1];
+
     reg [31:0] tan_q, itan_q, kc_q;
     wire [TAN_AW-1:0] tan_raddr, itan_raddr;
     wire [KC_AW-1:0]  kc_raddr;
@@ -530,8 +588,13 @@ module sar_coeffgen #(
 
     wire [31:0] q_now       = qf_head;
     // C: if (q < xlo || q >= xhi) { idx=-1; wq=0; continue; }   -- checked BEFORE any advance
-    wire        q_oor       = (fkey(q_now) < fkey(j_xlo)) | ~(fkey(q_now) < fkey(j_xhi));
-    wire        adv_allowed = ((k_cur + 2'd2) < j_s);
+    // Pass 1 cannot decide out-of-range at issue: it depends on t, known only at c5. p1_oor_c5
+    // raises it there instead, so the issue-time flag is forced low.
+    wire        q_oor       = p1_mode ? 1'b0
+                                      : ((fkey(q_now) < fkey(j_xlo)) | ~(fkey(q_now) < fkey(j_xhi)));
+    // No moving bracket in pass 1 -- the KR grid is uniform, so t is closed form and nothing
+    // advances. With adv_allowed low, do_adv and adv_wait are both dead and do_emit == cons_ok.
+    wire        adv_allowed = p1_mode ? 1'b0 : ((k_cur + 2'd2) < j_s);
     wire        adv_hit     = ~(fkey(q_now) < fkey(sf_head[31:0]));   // SRC(k+1) <= q
     wire        cons_ok     = (cst == C_RUN) && of_room && !qf_empty && (qi < j_qn);
     wire        do_adv      = cons_ok && !q_oor && adv_allowed && !sf_empty && adv_hit;
@@ -549,7 +612,10 @@ module sar_coeffgen #(
         end else if (cst == C_IDLE) begin
             k_cur <= 0; qi <= 0; sf_r <= 0; qf_r <= 0;
         end else if (cst == C_PRIME) begin
-            if (!sf_empty) begin                       // load the k=0 bracket
+            if (p1_mode) begin                         // pass 1: row scalars, no bracket
+                x0_cur  <= p1_x0;
+                inv_cur <= p1_inv;
+            end else if (!sf_empty) begin              // load the k=0 bracket
                 x0_cur  <= sf_head[31:0];
                 inv_cur <= sf_head[63:32];
                 sf_r    <= sf_r + 1'b1;
@@ -582,16 +648,51 @@ module sar_coeffgen #(
     // orders -- a mode-dependent depth would let a kr sign change corrupt the tail of a row.
     wire [31:0] d_y, frac_y, one_y, half_y;
     reg  [31:0] inv_d0, inv_d1, inv_d2;
-    reg  [31:0] frac_d0, frac_d1, frac_d2;
+    reg  [31:0] frac_d0, frac_d1, frac_d2, frac_d3, frac_d4;
     reg  [EMIT_LAT-1:0] asc_d, vld_d, oor_d;
     reg  [TAN_AW:0]     kx_d [0:EMIT_LAT-1];
     wire [31:0] pd_inv = inv_d2;                       // inv aligned to d_y at c3
-    wire [31:0] pw_w   = asc_d[7] ? frac_d2 : one_y;   // asc_d[7] / frac_d2 are the c8 taps
+
+    /* ---- PASS-1 lane: t -> (floor(t), t - float(floor(t))) --------------------------------
+     * frac_y IS t in pass-1 mode: u_sub_qx/u_mul_fr already compute (q - x0)*inv, and with the
+     * KR table in kcmem and x0/inv the row scalars that is exactly t. So pass 1 reuses the whole
+     * front of the pipe and only adds floor + int->float here.
+     *   c5  t valid            -> p1_idx (floor), p1_t held
+     *   c6  p1_fidx = i2f(idx) -> both registered
+     *   c7  BOTH MODES feed u_sub_one, so the latency is mode-independent (pass 2 gains the two
+     *       frac_d3/frac_d4 stages for exactly this reason -- see the EMIT_LAT note).
+     * Out-of-range cannot be decided at issue in pass 1 the way pass 2 does it from xlo/xhi: it
+     * depends on t, which is not known until c5. p1_oor is therefore raised HERE and carried in
+     * its own short delay line to the push point. */
+    reg  [13:0] p1_idx_c6;
+    reg  [31:0] p1_t_c6, p1_t_c7, p1_fidx_c7;
+    reg  [EMIT_LAT-6:0] p1oor_d;
+    wire        p1_t_neg = frac_y[31] & (|frac_y[30:0]);            // t < 0 (-0.0 is not negative)
+    wire        p1_oor_c5 = p1_mode & (p1_t_neg | ~(fkey(frac_y) < fkey(p1_tmax)));
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            p1_idx_c6 <= 14'd0; p1_t_c6 <= 32'd0; p1_t_c7 <= 32'd0;
+            p1_fidx_c7 <= 32'd0; p1oor_d <= 0;
+        end else begin
+            p1_idx_c6  <= f2i_floor(frac_y);
+            p1_t_c6    <= frac_y;
+            p1_t_c7    <= p1_t_c6;
+            p1_fidx_c7 <= i2f_small(p1_idx_c6);
+            p1oor_d    <= {p1oor_d[EMIT_LAT-7:0], p1_oor_c5};
+        end
+    end
+
+    // Shared subtractor: pass 2 computes 1.0 - frac, pass 1 computes t - float(floor(t)).
+    wire [31:0] sub_a = p1_mode ? p1_t_c7    : 32'h3F800000;
+    wire [31:0] sub_b = p1_mode ? (p1_fidx_c7 ^ 32'h8000_0000) : (frac_d1 ^ 32'h8000_0000);
+    // c10 taps. Pass 1's weight is the subtract result itself -- there is no ascending/descending
+    // source order to undo, because the KR grid is uniform and always ascending.
+    wire [31:0] pw_w   = p1_mode ? one_y : (asc_d[9] ? frac_d4 : one_y);
     wire [31:0] pw_s   = fscale15(pw_w);
 
     sar_fp32_add u_sub_qx  (.clk(clk), .a(q_now),        .b(x0_cur ^ 32'h8000_0000), .y(d_y));
     sar_fp32_mul u_mul_fr  (.clk(clk), .a(d_y),          .b(pd_inv),                 .y(frac_y));
-    sar_fp32_add u_sub_one (.clk(clk), .a(32'h3F800000), .b(frac_y ^ 32'h8000_0000), .y(one_y));
+    sar_fp32_add u_sub_one (.clk(clk), .a(sub_a),        .b(sub_b),                  .y(one_y));
     sar_fp32_add u_add_half(.clk(clk), .a(pw_s),         .b(32'h3F000000),           .y(half_y));
 
     integer n;
@@ -599,11 +700,13 @@ module sar_coeffgen #(
         if (!resetn) begin
             inv_d0 <= 32'd0; inv_d1 <= 32'd0; inv_d2 <= 32'd0;
             frac_d0 <= 32'd0; frac_d1 <= 32'd0; frac_d2 <= 32'd0;
+            frac_d3 <= 32'd0; frac_d4 <= 32'd0;
             asc_d <= 0; vld_d <= 0; oor_d <= 0;
             for (n = 0; n < EMIT_LAT; n = n + 1) kx_d[n] <= 0;
         end else begin
             inv_d0  <= inv_cur; inv_d1  <= inv_d0;  inv_d2  <= inv_d1;
             frac_d0 <= frac_y;  frac_d1 <= frac_d0; frac_d2 <= frac_d1;
+            frac_d3 <= frac_d2; frac_d4 <= frac_d3;
             asc_d <= {asc_d[EMIT_LAT-2:0], j_asc};
             vld_d <= {vld_d[EMIT_LAT-2:0], do_emit};
             oor_d <= {oor_d[EMIT_LAT-2:0], q_oor};
@@ -612,13 +715,26 @@ module sar_coeffgen #(
         end
     end
 
+    /* PASS-1 carries its own idx (computed at c5, delayed to the push point) and its own
+     * out-of-range flag; pass 2 uses the FSM bracket counter and the issue-time flag. */
+    reg [13:0] p1_idxd [0:EMIT_LAT-8];
+    integer    m;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) for (m = 0; m <= EMIT_LAT-8; m = m + 1) p1_idxd[m] <= 14'd0;
+        else begin
+            p1_idxd[0] <= p1_idx_c6;
+            for (m = 1; m <= EMIT_LAT-8; m = m + 1) p1_idxd[m] <= p1_idxd[m-1];
+        end
+    end
+
     wire        res_v   = vld_d[EMIT_LAT-1];
-    wire        res_oor = oor_d[EMIT_LAT-1];
+    wire        res_oor = p1_mode ? p1oor_d[EMIT_LAT-6] : oor_d[EMIT_LAT-1];
+    wire [13:0] res_idx = p1_mode ? p1_idxd[EMIT_LAT-8] : kx_d[EMIT_LAT-1];
     wire [15:0] res_wq  = res_oor ? 16'd0 : fq15(half_y);
 
     wire        of_push = res_v | deg_push;
     wire [OFW-1:0] of_wdat = deg_push ? {1'b1, {(TAN_AW+1){1'b0}}, 16'd0}
-                                      : {res_oor, kx_d[EMIT_LAT-1], res_wq};
+                                      : {res_oor, res_idx, res_wq};
     always @(posedge clk) if (of_push) of[of_w[OF_AW-1:0]] <= of_wdat;
     always @(posedge clk or negedge resetn) begin
         if (!resetn)            of_w <= 0;
@@ -674,7 +790,7 @@ module sar_coeffgen #(
                       if (!dims_ok || ((r_kr & 32'h7FFF_FFFF) == 32'd0)) begin
                           degen <= 1'b1; cst <= C_DEGEN;
                       end else begin
-                          degen <= 1'b0; cst <= C_EDGE;
+                          degen <= 1'b0; cst <= p1_mode ? C_PRIME : C_EDGE;
                       end
                   end
               end
@@ -685,7 +801,7 @@ module sar_coeffgen #(
                   if (ec == 4'd3) j_xlo <= src_y;
                   if (ec == 4'd7) begin j_xhi <= src_y; cst <= C_PRIME; end
               end
-              C_PRIME: if (!sf_empty) cst <= C_RUN;
+              C_PRIME: if (p1_mode || !sf_empty) cst <= C_RUN;
               C_RUN:   if ((qi >= j_qn) && pipe_empty) cst <= C_DRAIN;
               C_DEGEN: if (qi >= j_qn) cst <= C_DRAIN;
               C_DRAIN: if ((of_w == of_r) && !sreg_v) begin busy <= 1'b0; cst <= C_IDLE; end

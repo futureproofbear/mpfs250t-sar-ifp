@@ -71,11 +71,15 @@ set {unsigned int}0xB0059130 = $OVLMODE"
   # (FAST but silicon-WRONG, 2026-07-26), 4096 = contiguous halves (bit-exact). Must divide
   # seg = 8192/nch; 0 or anything else falls back to halves.
   FFTBLK="${FFTBLK:-0}"
+  # SAR_WORKBUF @0xB0059144: 0x574B4231 ('WKB1') routes the corner-turns through the non-cached
+  # WORK buffer instead of SIG, so SIG stays READ-ONLY and a scene can be re-run from one ELOD.
+  WORKBUF="${WORKBUF:-0}"
   FFTSET="$FFTSET
 set {unsigned int}0xB0059138 = $CGENMODE
 set {unsigned int}0xB005913C = $DUALFFT
 set {unsigned int}0xB005912C = $RWRKNW
-set {unsigned int}0xB0059140 = $FFTBLK"
+set {unsigned int}0xB0059140 = $FFTBLK
+set {unsigned int}0xB0059144 = $WORKBUF"
   FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u cgen=0x%08x dualfft=0x%08x rwrk=0x%08x\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C, *(unsigned int*)0xB0059138, *(unsigned int*)0xB005913C, *(unsigned int*)0xB005912C'
 fi
 

@@ -32,6 +32,27 @@ extern "C" {
 #define SAR_SIG_ADDR        (0x88000000ULL)
 #define SAR_SCRATCH_ADDR    (0x98000000ULL)
 #define SAR_OUT_ADDR        (0xA8000000ULL)
+/* WORK buffer -- the third full frame, in the NON-CACHED DDR window.
+ * The cached region (0x8000_0000 + 768M per the linker) ends exactly at 0xB000_0000 and is full:
+ * SIG + SCRATCH + OUT + code leave nothing. ddr_non_cached_32bit is a SEPARATE 256 MB segment at
+ * 0xC000_0000 -- 768M + 256M = exactly the 1 GiB the controller splits, i.e. disjoint, not an
+ * alias. VERIFIED ON SILICON 2026-07-26: scribbled 256 words across the whole
+ * 0xC000_0000..0xD000_0000 window, then re-CRC'd SIG THROUGH THE FIRMWARE (so L2 was flushed and
+ * a cached read could not mask it) -- sig_crc stayed 0x89fa12dc. A pure JTAG read-back CANNOT
+ * settle this: a cached write sits in L2 and mimics disjointness either way.
+ *
+ * WHY IT EXISTS. Without it the pipeline ping-pongs SIG<->SCRATCH, so the corner-turns overwrite
+ * SIG -- the pipeline's own input -- and a second PIPE without re-running ELOD silently processes
+ * the previous run's intermediate data. That cost a whole debugging session (see the SAR_DUALFFT
+ * note in sar_sequencer.c). With WORK in the rotation SIG is READ-ONLY after load.
+ *
+ * NON-CACHED IS THE RIGHT CHOICE, not a compromise: only the fabric ever touches this buffer, and
+ * the fabric reaches DDR over the non-coherent FIC anyway, so it needs NO L2 flush at all.
+ * Exactly SAR_FRAME_BYTES (256 MB) -- no headroom for a fourth buffer at this grid size. The
+ * linker maps only 1 GiB of the Icicle's 2 GiB, so more is likely reachable via the DDR segment
+ * registers if it is ever needed. */
+#define SAR_WORK_ADDR       (0xC0000000ULL)
+
 #define SAR_TABLES_BASE     (0xB0000000ULL)
 #define SAR_KR_ADDR         (SAR_TABLES_BASE + 0x000000ULL)
 #define SAR_KC_ADDR         (SAR_TABLES_BASE + 0x010000ULL)

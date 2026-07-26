@@ -65,6 +65,31 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
 #define BUF_SIG      ((uint32_t)SAR_SIG_ADDR)
 #define BUF_SCRATCH  ((uint32_t)SAR_SCRATCH_ADDR)
 #define BUF_OUT      ((uint32_t)SAR_OUT_ADDR)
+#define BUF_WORK     ((uint32_t)SAR_WORK_ADDR)
+
+/* PRESERVE SIG. The pipeline used to ping-pong SIG<->SCRATCH:
+ *     SIG->SCRATCH (gather), SCRATCH->SIG (CT#1), SIG->SCRATCH (FFT-1),
+ *     SCRATCH->SIG (CT#2), SIG->OUT (FFT-2)
+ * so both corner-turns wrote SIG -- the pipeline's OWN INPUT. A second PIPE without re-running
+ * ELOD therefore processed the previous run's intermediate data and returned a wrong,
+ * run-dependent CRC. That is not corruption and not a dual-chain fault, but it burned a whole
+ * session before it was understood (see the SAR_DUALFFT note below).
+ *
+ * With WORK (0xC000_0000, non-cached, silicon-verified disjoint -- see ddr_sar_layout.h) the
+ * rotation becomes SIG->SCRATCH->WORK->SCRATCH->WORK->OUT and SIG IS READ-ONLY AFTER LOAD, so a
+ * scene can be re-run indefinitely from one ELOD. Every buffer keeps its role and size; only the
+ * two corner-turn destinations and the two reads that follow them move.
+ *
+ * Knob-gated so the change is A/B-able in ONE binary: only the exact magic switches it, and a
+ * cold-boot DDR word means the ORIGINAL ping-pong. Same discipline as every other knob here. */
+#define SAR_WORKBUF_ADDR   0xB0059144u
+#define SAR_WORKBUF_ENABLE 0x574B4231u        /* 'WKB1' -- the ONLY accepted value */
+static inline int sar_workbuf_en(void)
+{
+    return (*(volatile uint32_t *)(uintptr_t)SAR_WORKBUF_ADDR == SAR_WORKBUF_ENABLE);
+}
+/* The buffer the corner-turns write and the next stage reads: WORK when enabled, else SIG. */
+static inline uint32_t sar_ctdst(void) { return sar_workbuf_en() ? BUF_WORK : BUF_SIG; }
 
 /* ---- FFT pass (HLS fft_kernel) --------------------------------------------
  * The CoreFFT streaming chain (fft_feeder -> gearbox -> CoreFFT -> fft_unloader) is
@@ -612,7 +637,7 @@ static int fft2_pass1_rows(uint32_t src, uint32_t dst, uint32_t r0, uint32_t r1,
 static void ct2_strip_arm(uint32_t cb, uint32_t S)
 {
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
-    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, sar_ctdst());
     sar_reg_w(K_CORNER_TURN, HLS_ARG2, cb);
     sar_reg_w(K_CORNER_TURN, HLS_ARG3, S);
     sar_k_start(K_CORNER_TURN);
@@ -638,13 +663,13 @@ static int fft2_ct_overlap(uint32_t spins)
 
     for (uint32_t s = 1u; s < K; s++) {
         ct2_strip_arm(s * S, S);                                    /* producer: strip s (no wait) */
-        int r = fft2_pass1_rows(BUF_SIG, BUF_OUT, (s - 1u) * S, s * S, budget, nch); /* consumer: strip s-1 */
+        int r = fft2_pass1_rows(sar_ctdst(), BUF_OUT, (s - 1u) * S, s * S, budget, nch); /* consumer: strip s-1 */
         if (r) { (void)sar_k_wait(K_CORNER_TURN, budget);
                  return (r == 1) ? SAR_SEQ_TIMEOUT_FFT2 : SAR_SEQ_TIMEOUT_DMA; }
         if (!sar_k_wait(K_CORNER_TURN, budget)) return SAR_SEQ_TIMEOUT_CORNER;   /* join strip s */
         SAR_PROG(4u, s, K);
     }
-    { int r = fft2_pass1_rows(BUF_SIG, BUF_OUT, (K - 1u) * S, K * S, budget, nch); /* epilogue: last strip */
+    { int r = fft2_pass1_rows(sar_ctdst(), BUF_OUT, (K - 1u) * S, K * S, budget, nch); /* epilogue: last strip */
       if (r) return (r == 1) ? SAR_SEQ_TIMEOUT_FFT2 : SAR_SEQ_TIMEOUT_DMA; }
 
     /* global PASS-2 renorm over OUT (det), identical to fft_fabric_pass PASS 2 (det branch) */
@@ -686,7 +711,7 @@ int fft_h4_bench(uint32_t spins)
 
     /* 1) corner-turn ALONE: SCRATCH -> SIG */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
-    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, sar_ctdst());
     sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
     sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     t0 = readmtime();
@@ -697,19 +722,19 @@ int fft_h4_bench(uint32_t spins)
 
     /* 2) FFT pass ALONE: SIG -> OUT (det), decoupled src/dst (no in-place stall) */
     t0 = readmtime();
-    (void)fft_fabric_pass(BUF_SIG, BUF_OUT, spins, 0, 1);
+    (void)fft_fabric_pass(sar_ctdst(), BUF_OUT, spins, 0, 1);
     t1 = readmtime();
     rec[2] = (uint32_t)(t1 - t0);                 /* t_fft (us) */
 
     /* 3) CONCURRENT: arm CT free-running, run the FFT pass while it writes SIG, then join CT. */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
-    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, sar_ctdst());
     sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
     sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     ficmon_clear();
     t0 = readmtime();
     sar_k_start(K_CORNER_TURN);                   /* CT free-runs on FIC_0 ... */
-    (void)fft_fabric_pass(BUF_SIG, BUF_OUT, spins, 0, 1);  /* ... while the FFT hammers FIC_0 too */
+    (void)fft_fabric_pass(sar_ctdst(), BUF_OUT, spins, 0, 1);  /* ... while the FFT hammers FIC_0 too */
     if (!sar_k_wait(K_CORNER_TURN, spins)) rec[15] = 0xDEAD0002u;   /* join CT (should be long done) */
     t1 = readmtime();
     ficmon_snapshot(1u, 9u, SAR_ROW_BEATS);       /* concurrent-run bus behaviour -> slot 1 (0xB0059290); slot 0 keeps range gather */
@@ -1073,7 +1098,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
 
     /* transpose SCRATCH(Mp x Np) -> SIG(Np x Mp) */
     sar_reg_w(K_CORNER_TURN, HLS_ARG0, BUF_SCRATCH);
-    sar_reg_w(K_CORNER_TURN, HLS_ARG1, BUF_SIG);
+    sar_reg_w(K_CORNER_TURN, HLS_ARG1, sar_ctdst());
     sar_reg_w(K_CORNER_TURN, HLS_ARG2, 0u);       /* c_base  */
     sar_reg_w(K_CORNER_TURN, HLS_ARG3, 0u);       /* c_count=0 => full frame */
     sar_k_start(K_CORNER_TURN);
@@ -1095,7 +1120,7 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     for (uint32_t j = 0; j < Np; j++) {
         SAR_PROG(2u, j, Np);
         { RP_T0(t);
-          sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG     + j * Mp * 4u); /* in  (Mp-wide, M valid) */
+          sar_reg_w(K_RESAMPLE, HLS_ARG0, sar_ctdst() + j * Mp * 4u); /* in: what CT#1 wrote */
           sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
           sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
           sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + j * Mp * 4u); /* out (Mp-wide) */
@@ -1249,7 +1274,7 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
     const int gather_fused = (*(volatile uint32_t *)(uintptr_t)SAR_GATHERMODE_ADDR == 1u);
     float *f32g = (float *)(uintptr_t)SAR_COEF_LINE_F32;
     if (gather_fused) {
-        int r = fft1_gather_pass(&g, f32g, BUF_SIG, BUF_SCRATCH, spins);  /* gather from SIG -> SCRATCH */
+        int r = fft1_gather_pass(&g, f32g, sar_ctdst(), BUF_SCRATCH, spins);  /* gather from SIG -> SCRATCH */
         /* Re-publish RPROF: resample_2pass()'s flush already ran (it is called earlier), so
          * FFT-1's counters [6]/[7]/[9]/[10] would otherwise sit in L2 and a JTAG physical read
          * would return stale DDR. */

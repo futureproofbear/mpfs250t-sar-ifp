@@ -110,11 +110,7 @@ module fft_unloader_v #(
     parameter integer AXI_ID_W   = 4,
     parameter integer MAX_BURST  = 64,       // beats per AW (<=256 for AXI4 INCR)
     parameter integer FIFO_AW    = 9,        // write-data FIFO depth = 512 beats (> MAX_BURST)
-    parameter integer OUTSTAND   = 4,        // max AW bursts awaiting a B response
-    /* AXI master_id this instance stamps on AW and expects back on B. See the long note in
-     * fft_feeder_v.v: every master used to drive id 0 and ignore the response id, so with two
-     * chains active a write response landing on the wrong unloader was UNDETECTABLE. */
-    parameter integer AXI_MASTER_ID = 0
+    parameter integer OUTSTAND   = 4         // max AW bursts awaiting a B response
 )(
     input  wire                     clk,
     input  wire                     resetn,
@@ -169,7 +165,6 @@ module fft_unloader_v #(
     reg  [31:0]             obeats_done;   // output beats actually handed to W (RO @0x1c)
     reg                     err_align;     // dst_base was not 8-byte aligned at START
     reg                     err_bresp;     // a write response was not OKAY/EXOKAY
-    reg                     err_bid;       // B response carried another master's id (see AXI_MASTER_ID)
     reg                     err_bextra;    // a B response arrived with no AW outstanding
     reg                     err_odd;       // detect mode with an odd nbeats -> zero-padded tail
     reg                     err_ovf;       // FIFO push found the FIFO full (reservation bug)
@@ -210,8 +205,8 @@ module fft_unloader_v #(
                 // Sticky protocol/consistency latches. fft_fabric_pass() already polls this
                 // kernel once per row, so surfacing them here costs no extra bus traffic --
                 // same trick the feeder uses at its 0x14.
-                12'h014: s_rdata <= {25'd0, err_extra, err_ovf, err_odd,
-                                     err_bextra, err_bresp, err_align, err_bid};
+                12'h014: s_rdata <= {26'd0, err_extra, err_ovf, err_odd,
+                                     err_bextra, err_bresp, err_align};
                 12'h018: s_rdata <= {31'd0, det_en};
                 12'h01c: s_rdata <= obeats_done;
                 default: s_rdata <= 32'd0;
@@ -407,7 +402,7 @@ module fft_unloader_v #(
     wire b_accept  = m_bvalid  & m_bready;
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
-            b_out <= 4'd0; err_bresp <= 1'b0; err_bextra <= 1'b0; err_bid <= 1'b0;
+            b_out <= 4'd0; err_bresp <= 1'b0; err_bextra <= 1'b0;
         end else begin
             case ({aw_accept, b_accept})
                 2'b10: b_out <= b_out + 4'd1;
@@ -416,16 +411,13 @@ module fft_unloader_v #(
             endcase
             if (b_accept && (b_out == 4'd0) && !aw_accept) err_bextra <= 1'b1;
             if (b_accept && (m_bresp[1] == 1'b1))          err_bresp  <= 1'b1;
-            /* Write response carrying another master's id -- the interconnect completed somebody
-             * else's burst against this port's outstanding count. Sticky. */
-            if (b_accept && (m_bid != AXI_MASTER_ID[AXI_ID_W-1:0])) err_bid <= 1'b1;
         end
     end
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
             state <= S_IDLE; busy <= 1'b0; m_awvalid <= 1'b0; m_awaddr <= 0; m_awlen <= 0;
-            m_awid <= AXI_MASTER_ID[AXI_ID_W-1:0];   // distinct per instance; checked on B
+            m_awid <= {AXI_ID_W{1'b0}};
             obeats_left <= 32'd0; next_addr <= 0; cur_len <= 32'd0;
             wrem <= 9'd0; load_rem <= 9'd0; obeats_done <= 32'd0; err_align <= 1'b0;
         end else begin

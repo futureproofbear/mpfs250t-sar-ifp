@@ -10,9 +10,7 @@
 // axi4target addr width must be re-verified against the CIC target4 during the rebuild.
 // The read master's AXI ID must match the DIC initiator port (DIC 8-bit -> ID_FIX -> 4-bit FIC).
 `timescale 1ns/1ps
-module fft_feeder_top #(parameter integer IDW = 4,
-  /* distinct AXI master_id per instance -- see fft_feeder_v.v. 0 keeps the legacy behaviour. */
-  parameter integer MID = 0) (
+module fft_feeder_top #(parameter integer IDW = 4) (
     input  wire        clk,
     input  wire        reset,                 // active-HIGH (SmartHLS convention)
 
@@ -110,7 +108,7 @@ module fft_feeder_top #(parameter integer IDW = 4,
     always @(posedge clk) if (axi4target_arvalid && axi4target_arready) araddr2_r <= axi4target_araddr[2];
     assign axi4target_rdata = {li_rdata, li_rdata};   // consumer takes the correct half
 
-    fft_feeder_v #(.AXI_ADDR_W(32), .AXI_DATA_W(64), .AXI_ID_W(IDW), .AXI_MASTER_ID(MID)) u_feeder (
+    fft_feeder_v #(.AXI_ADDR_W(32), .AXI_DATA_W(64), .AXI_ID_W(IDW)) u_feeder (
         .clk(clk), .resetn(resetn),
         // control (AXI4-Lite view): map addr to {7'd0, 5-bit byte offset}
         .s_awaddr({6'd0, axi4target_awaddr}), .s_awvalid(axi4target_awvalid), .s_awready(li_awready),

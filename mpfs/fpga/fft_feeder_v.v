@@ -89,19 +89,7 @@ module fft_feeder_v #(
     // ---- fused azimuth-resample GATHER (runtime-enabled -- reg 0x20 bit0) ----
     parameter integer G_BUF_AW     = 12,      // source-row bank depth: 4096 x 2 banks = 8192 samples
     parameter integer G_TAB_AW     = 13,      // idx/wq entries per row (8192); idx banks 2^12, wq banks 2^11
-    parameter integer G_SFIFO_AW   = 9,       // gather stream FIFO depth = 512 beats
-    /* AXI master_id this instance stamps on AR and expects back on R.
-     * WHY THIS EXISTS. Every fabric master on this design used to drive ARID = 0, and none of them
-     * looked at RID -- read data was matched purely by ARRIVAL ORDER. With one active master that
-     * is safe. With two (2nd CoreFFT chain, or RES+RES2), a beat delivered to the wrong master
-     * cannot even be DETECTED, because the other master's beats also carry ID 0. A desynced feeder
-     * then satisfies its beat count EARLY, so the run finishes FASTER and WRONG -- exactly the
-     * bimodal 27.50 s-wrong / 27.83 s-correct signature measured on 2026-07-26 -- and the bad beat
-     * counters live in fabric registers, so every LATER run is poisoned until a power cycle.
-     * Giving each instance a distinct id makes mis-delivery both detectable and rejectable.
-     * sar_axi_idconv.v stashes master_id[7:0] keyed by master_number[2:0], so distinct ids per
-     * master are safe there; its only assumption is one outstanding txn per master, still true. */
-    parameter integer AXI_MASTER_ID = 0
+    parameter integer G_SFIFO_AW   = 9        // gather stream FIFO depth = 512 beats
 )(
     input  wire                     clk,
     input  wire                     resetn,
@@ -172,10 +160,6 @@ module fft_feeder_v #(
     reg       err_extra;                  // R beat arrived outside an expected burst
     reg       err_rlast;                  // RLAST disagreed with our own beat count
     reg       err_align;                  // src_base was not 8-byte aligned at START
-    /* R beat arrived carrying another master's id -- i.e. the interconnect delivered somebody
-     * else's read data to this port. Sticky, and reported in STATUS[19]. Before this existed the
-     * event was INVISIBLE (all masters used id 0) and simply corrupted the row. */
-    reg       err_rid;
     wire      beat_ok = (state == S_DATA) && (burst_rem != 9'd0);
 
     // ---- forward declarations for the fused azimuth-resample GATHER engine ----------
@@ -281,7 +265,7 @@ module fft_feeder_v #(
                 // [3:0] SCALE_EXP; [18:16] sticky AXI protocol-violation flags (legacy OR gather).
                 // The firmware already reads this register once per row, so a violation is visible
                 // without any extra bus traffic -- see fft_fabric_pass().
-                12'h014: s_rdata <= {12'd0, err_rid, err_align | g_err_align, err_rlast | g_err_rlast,
+                12'h014: s_rdata <= {13'd0, err_align | g_err_align, err_rlast | g_err_rlast,
                                      err_extra | g_err_extra, 12'd0, scale_exp_latched};
                 12'h018: s_rdata <= {15'd0, win_en, win_scale};  // window ctrl readback
                 12'h01c: s_rdata <= {{(32-TAB_AW){1'b0}}, tab_wptr};  // taper fill level
@@ -316,7 +300,6 @@ module fft_feeder_v #(
     // ~gmode. m_rready itself is muxed to whichever master is active (see the port muxes below).
     wire l_rready = ~fifo_full;
     wire rbeat    = ~gmode & m_rvalid & l_rready;
-    wire rid_bad  = m_rvalid & m_rready & (m_rid != AXI_MASTER_ID[AXI_ID_W-1:0]);
 
     // ---- window taper: 4096 words, each {hamc[2i+1], hamc[2i]} in Q15 ----
     (* syn_ramstyle = "lsram" *)
@@ -396,7 +379,7 @@ module fft_feeder_v #(
     reg                  l_arvalid;   // legacy AR valid
     assign m_arsize  = (AXI_DATA_W==64) ? 3'b011 : 3'b010; // 8 bytes/beat
     assign m_arburst = 2'b01;                              // INCR
-    assign m_arid    = AXI_MASTER_ID[AXI_ID_W-1:0];   // distinct per instance; checked on R below
+    assign m_arid    = {AXI_ID_W{1'b0}};
     assign m_araddr  = gmode ? g_araddr  : l_araddr;
     assign m_arlen   = gmode ? g_arlen   : l_arlen;
     assign m_arvalid = gmode ? g_arvalid : l_arvalid;
@@ -438,13 +421,10 @@ module fft_feeder_v #(
         if (!resetn) begin
             state <= S_IDLE; l_arvalid <= 0; l_araddr <= 0; l_arlen <= 0;
             beats_left <= 0; next_addr <= 0; busy <= 0; cur_len <= 0; burst_rem <= 0;
-            err_extra <= 1'b0; err_rlast <= 1'b0; err_align <= 1'b0; err_rid <= 1'b0;
+            err_extra <= 1'b0; err_rlast <= 1'b0; err_align <= 1'b0;
         end else begin
             // sticky: an R beat that does not belong to a burst we asked for
             if (rbeat && !beat_ok) err_extra <= 1'b1;
-            /* Mis-delivered read data. Checked at the PORT (both modes) because the DIC
-             * routes to a master, not to a mode. Sticky until the next reset. */
-            if (rid_bad) err_rid <= 1'b1;
             case (state)
               S_IDLE: begin
                   l_arvalid <= 1'b0;

@@ -86,7 +86,17 @@ static inline void flush_coef_bank_to_ddr(int b, uint32_t n)
 #define SAR_WORKBUF_ENABLE 0x574B4231u        /* 'WKB1' -- the ONLY accepted value */
 static inline int sar_workbuf_en(void)
 {
-    return (*(volatile uint32_t *)(uintptr_t)SAR_WORKBUF_ADDR == SAR_WORKBUF_ENABLE);
+    /* DISABLED 2026-07-26 -- WORK IS UNREACHABLE BY THE FABRIC.
+     * The DIC's DDR target window is 0x8000_0000..0xBFFF_FFFF (axiic_c0_params_330.tcl:1360,1363),
+     * so 0xC000_0000 is ONE BYTE past the end of the fabric's address decode. Enabling this made
+     * CT#1 write into nothing and RESAMPLE timed out on silicon (PIPE result=2).
+     * The silicon alias test that motivated this answered the WRONG QUESTION: it proved the CPU
+     * can reach 0xC000_0000, which was never in doubt. The fabric reaches DDR only through FIC_0
+     * and this interconnect window.
+     * To revive: the buffer must live INSIDE 0x8000_0000..0xBFFF_FFFF, and that region is already
+     * full (SIG+SCRATCH+OUT+code = 768 MB exactly), so it needs the DIC target window widened AND
+     * a cached-region reshuffle -- not just a knob. */
+    return 0 && (*(volatile uint32_t *)(uintptr_t)SAR_WORKBUF_ADDR == SAR_WORKBUF_ENABLE);
 }
 /* The buffer the corner-turns write and the next stage reads: WORK when enabled, else SIG. */
 static inline uint32_t sar_ctdst(void) { return sar_workbuf_en() ? BUF_WORK : BUF_SIG; }

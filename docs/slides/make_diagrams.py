@@ -313,47 +313,49 @@ def fig_pfa(out):
 
 def fig_fabric(out):
     """Fabric block diagram: what is actually instantiated and how it is wired."""
-    d = Diagram(1040, 600, "Fabric implementation — SAR_TOP")
-    d.box("mss", 40, 40, 200, 90, "MSS\n4x U54 @ 600 MHz\ndispatcher + 3 workers", "mss", bold=True)
-    d.box("cic", 40, 170, 200, 56, "CIC\ncontrol interconnect", "ip")
+    d = Diagram(1060, 560, "Fabric implementation — SAR_TOP")
+    d.box("mss", 30, 56, 190, 78, "MSS\n4x U54 @ 600 MHz\ndispatcher + 3 workers", "mss", bold=True)
+    d.box("cic", 30, 168, 190, 50, "CIC\ncontrol interconnect", "ip")
     d.edge("mss", "cic", "AXI4-Lite")
 
-    d.box("ddr", 800, 40, 200, 90, "DDR4\n2 GiB\n(fabric sees 1 GiB)", "mem", bold=True)
-    d.box("dic", 800, 170, 200, 56, "DIC\ndata interconnect", "ip")
-    d.box("fic", 800, 256, 200, 46, "FIC_0  64-bit @ 100 MHz\nceiling ~800 MB/s", "ip")
+    d.box("ddr", 840, 50, 190, 84, "DDR4  2 GiB\nfabric window\n0x8000_0000-0xBFFF_FFFF", "mem", bold=True)
+    d.box("dic", 840, 168, 190, 50, "DIC\ndata interconnect", "ip")
+    d.box("fic", 840, 246, 190, 50, "FIC_0  64-bit @ 100 MHz\nceiling ~800 MB/s", "ip")
     d.edge("dic", "ddr", "", double=True)
     d.edge("fic", "dic", "", double=True)
 
-    # chain A
-    d.note("ca", 300, 150, 460, 20, "CoreFFT chain A            (chain B identical)", fs=12)
-    d.box("coef", 300, 178, 130, 56, "COEFG\ncoeffgen", "fab")
-    d.box("feed", 450, 178, 130, 56, "FEED\nfeeder+gather\n+window", "fab")
-    d.box("gbx", 600, 178, 60, 56, "GBX", "fab")
-    d.box("fft", 680, 178, 80, 56, "CoreFFT\n8192-pt", "ip")
-    d.box("unld", 300, 262, 130, 56, "UNLD\nunloader\n+detect", "fab")
-    d.edge("coef", "feed", "idx/wq stream")
-    d.edge("feed", "gbx"); d.edge("gbx", "fft"); d.edge("fft", "unld", "")
-    d.box("ct", 450, 262, 130, 56, "CT\ncorner_turn_v", "fab", bold=True)
-    d.box("res", 600, 262, 160, 56, "RES\nresample  (SmartHLS)", "hls")
+    # CoreFFT chain A, strictly left-to-right so the dataflow reads in one direction
+    d.note("ca", 250, 222, 560, 18, "CoreFFT chain A   (chain B is a second identical instance)", fs=11)
+    d.box("coef", 235, 246, 100, 50, "COEFG\ncoeffgen", "fab")
+    d.box("feed", 395, 246, 120, 50, "FEED\nfeeder+gather\n+window", "fab")
+    d.box("gbx", 535, 246, 55, 50, "GBX", "fab")
+    d.box("fft", 610, 246, 90, 50, "CoreFFT\n8192-pt", "ip")
+    d.box("unld", 720, 246, 100, 50, "UNLD\nunloader\n+detect", "fab")
+    d.edge("coef", "feed", "idx/wq")
+    d.edge("feed", "gbx")
+    d.edge("gbx", "fft")
+    d.edge("fft", "unld")
+
+    d.box("ct", 375, 340, 130, 50, "CT\ncorner_turn_v", "fab", bold=True)
+    d.box("res", 560, 340, 165, 50, "RES\nresample (SmartHLS)", "hls")
 
     for k in ["feed", "unld", "ct", "res"]:
         d.edge(k, "fic", "", dashed=True, color="#8AA")
-    for k in ["coef", "feed", "unld", "ct", "res"]:
+    for k in ["coef", "ct", "res"]:
         d.edge("cic", k, "", dashed=True, color="#CBA")
 
-    d.note("leg", 40, 350, 960, 22,
-           "green = hand-written Verilog     red = SmartHLS (last one in the datapath)     "
-           "purple = hard IP     grey = memory", fs=12)
-    d.note("n1", 40, 385, 960, 90,
-           "Two complete chains run concurrently on disjoint row blocks (SAR_FFTBLK = 64 rows).\n"
-           "Everything reaches DDR through ONE 64-bit port, FIC_0 — so the interconnect, not the kernel "
-           "count, is the shared\nresource that every optimisation eventually runs into. CoreFFT runs in a "
-           "SEPARATE 12.5 MHz clock domain (SLOWCLK);\nthe gearbox GBX crosses 64-bit @ 100 MHz to the "
-           "CoreFFT stream rate.", fs=12)
-    d.note("n2", 40, 490, 960, 70,
-           "Detect and window have no blocks of their own: they are FUSED into the unloader and the feeder.\n"
-           "That is why the stage table shows 0 s for both — the work happens inside another kernel's "
-           "existing DDR pass.", fs=12)
+    d.note("leg", 30, 410, 1000, 18,
+           "green = hand-written Verilog   |   red = SmartHLS (the last one in the datapath)   "
+           "|   purple = hard IP   |   grey = memory", fs=11)
+    d.note("n1", 30, 438, 1000, 60,
+           "Two complete chains run concurrently on disjoint row blocks (SAR_FFTBLK = 64 rows). "
+           "Everything reaches DDR through\nONE 64-bit port, FIC_0 — so the interconnect, not the "
+           "kernel count, is the shared resource every optimisation runs into.\nCoreFFT sits in a "
+           "SEPARATE 12.5 MHz domain (SLOWCLK); the gearbox GBX crosses 64-bit @ 100 MHz to its stream rate.", fs=11)
+    d.note("n2", 30, 508, 1000, 34,
+           "Window and detect have NO block of their own — they are fused into the feeder and the "
+           "unloader respectively,\nwhich is why the stage table reports 0 s for both: the work happens "
+           "inside another kernel's existing DDR pass.", fs=11)
     return d.write(out / "fig-fabric.drawio.svg")
 
 

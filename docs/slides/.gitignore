@@ -1,0 +1,5 @@
+# Rendered output — the Marp markdown and the .drawio.svg figures are the deliverables.
+*.html
+*.pdf
+*.pptx
+slide*.png

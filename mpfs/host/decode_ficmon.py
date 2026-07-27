@@ -113,8 +113,8 @@ def decode_record(w):
     # hand-written Verilog is worth doing, and it is designed to be able to KILL the idea.
     if (w[0] & 0xF) == 4:
         el = elapsed if elapsed else 1
-        ta = w[16] if len(w) > 16 else busy          # TOTAL_ACTIVE (any handshake)
-        rdw = w[18] if len(w) > 18 else 0            # R_DATAWAIT
+        ta = w[17] if len(w) > 17 else busy          # TOTAL_ACTIVE  (firmware r[17])
+        rdw = w[15] if len(w) > 15 else 0            # R_DATAWAIT   (firmware r[15])
         wbeats = w[12] if len(w) > 12 else 0         # W_COUNT (the only BEAT counter here)
         act = 100.0 * ta / el
         idle = 100.0 * max(0, el - ta - rdw) / el

@@ -56,8 +56,10 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/USER_GUIDE.md`
 > §4 (eMMC boot-load) + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > §10 below + the personas under `.claude/agents/`.
-> **Pipeline total: 37.72 s** (measured 2026-07-24, 100 MHz, azimuth-gather + detect + corner-turn/FFT-2 overlap
-> fused build). Window AND detect are now fused into the FFT passes; no CPU stage remains in the datapath.
+> **Pipeline total: 18.45 s** (measured 2026-07-27, 100 MHz, commit `d07bce7`, bit-exact at crop
+> CRC `0x319037b2`). Window AND detect are fused into the FFT passes; no CPU stage remains in the
+> datapath. Per stage: resample 7.267 s · range-FFT 5.788 s · azimuth-FFT 5.396 s.
+> Authoritative table: `docs/ARCHITECTURE.md` §2.
 > How it got here: 110.8 s -> 88.1 s (targeted CCACHE `FLUSH64` writeback of the coefficient banks
 > replacing a per-line whole-L2 flush) -> 79.79 s (2-D Hamming window fused into the range-FFT
 > feeder, deleting a 512 MB-read + 512 MB-write pass) -> ~78.6 s (resample coefficient closed form)
@@ -170,7 +172,8 @@
   inherently on sustained traffic (see §7).
 - **Partition:** host PC (Python) does parse/geometry/coeff-gen/quantize + golden + post; **U54_1**
   orchestrates and runs detect; **FPGA fabric** does the heavy compute
-  (resample→window→FFT→corner-turn→FFT). Fabric clock 62.5 MHz, timing MET.
+  (resample→window→FFT→corner-turn→FFT). Fabric clock **100 MHz** (CoreFFT `SLOWCLK` 12.5 MHz),
+  timing MET multi-corner. The 62.5 MHz figure this line used to carry was superseded 2026-07-24.
 
 ### Crawl / Walk / Run — where THIS project sits
 The vendor "Crawl(Linux)/Walk(bare-metal+AMP)/Run(fabric accel)" ladder applies, but **this project
@@ -238,10 +241,15 @@ L2-coherency handling (see SAR_BRINGUP_REPORT §9.2) for *all* buffers, not some
 
 ### 4.3 ⚠ TWO SAR register-map models — use the per-kernel one
 - **REAL / built (use this):** per-kernel SmartHLS model — `<SC>/sar/sar_kernels.h` +
-  `<SC>/sar/sar_sequencer.c`. Six AXI4-Lite slaves on **MSS FIC0 @ `0x60000000`**, 4 KiB each:
-  `K_CORNER_TURN 0x60000000`(SLAVE0), `K_WINDOW 0x60001000`(1), `K_DETECT 0x60002000`(2),
-  `K_RESAMPLE 0x60003000`(3), `K_FFT_FEEDER 0x60004000`(4), `K_FFT_UNLOADER 0x60005000`(5 — the
-  `CoreAXI4DMAController` that used to own this window was removed). Per kernel: `HLS_START 0x08` (write 1 = start; read 0 = done),
+  `<SC>/sar/sar_sequencer.c`. **NINE** AXI4-Lite slaves on **MSS FIC0 @ `0x60000000`**, 4 KiB each (2026-07-28):
+  `K_CORNER_TURN 0x60000000` (SLAVE0), `K_FFT_FEEDER_B 0x60001000` (1, **was K_WINDOW**),
+  `K_FFT_UNLOADER_B 0x60002000` (2, **was K_RESAMPLE2**), `K_RESAMPLE 0x60003000` (3),
+  `K_FFT_FEEDER 0x60004000` (4), `K_FFT_UNLOADER 0x60005000` (5), `K_FIC0MON 0x60006000` (6),
+  `K_COEFFGEN 0x60007000` (7), `K_COEFFGEN_B 0x60008000` (8).
+  `K_WINDOW` and `K_DETECT` were DELETED, not renumbered — the window kernel was dropped
+  2026-07-25 and the standalone detect kernel was removed when detect became fused into the FFT-2
+  unloader. Their two windows are now chain B's feeder and unloader. Anything still naming
+  `K_WINDOW`/`K_DETECT` is pre-2026-07-25 and must not be used to derive an address. Per kernel: `HLS_START 0x08` (write 1 = start; read 0 = done),
   `HLS_ARG0 0x0c`, `ARG1 0x10`, `ARG2 0x14`, `ARG3 0x18`.
 - **LEGACY / aspirational (do NOT assume on hardware):** monolithic accelerator model —
   `<SC>/sar/sar_accel_driver.h` with a single block at `SAR_ACCEL_BASE 0x60000000`,

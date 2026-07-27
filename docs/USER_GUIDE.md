@@ -264,8 +264,13 @@ By this point you must have, in the **current power cycle**:
 ### 6.2 Run the pipeline
 From `mpfs/host`, using the generic mailbox runner:
 ```bash
-bash run_m3_iso.sh 0x50495045 0 0 300000 0xB0058020
+DETMODE=3 GATHMODE=1 OVLMODE=1 CGENMODE=0x43474E31 DUALFFT=0x44464632 RWRKNW=0x52575204 FFTBLK=64 \n  bash run_m3_iso.sh 0x50495045 0 0 180000 0xB0058020
 ```
+
+> **Every engine knob defaults to OFF** in `run_m3_iso.sh`. The bare command (no env vars)
+> produces an unfused, single-chain run — several seconds slower and NOT the configuration any
+> baseline in these docs was measured with. The line above is the shipping 18.45 s configuration;
+> drop individual knobs only to build a deliberate A/B arm.
 This is the `PIPE` command (`0x50495045`). The runner:
 - selects the shipping **fabric CoreFFT** chain by setting `FFTMODE @0xB0059110 = 1` before arming
   (mode 0 is the legacy CPU-FFT fallback);

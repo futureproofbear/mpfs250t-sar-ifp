@@ -271,8 +271,7 @@ reference crop CRC `0x319037b2` from a cold start. Correlation vs. golden refere
 the Centerfield scene; output bit-identical across every fusion/overlap/clock configuration tested.
 
 Per stage at that baseline: resample 7.267 s (39.4%) · range-FFT (FFT-1, the **azimuth** transform)
-5.788 s · azimuth-FFT (FFT-2, the **range** transform, with corner-turn #2 overlapped into it)
-8.610 s.
+5.788 s · azimuth-FFT (FFT-2, the **range** transform, with corner-turn #2 overlapped into it) 5.396 s.
 
 > **ONE ELOD PER PIPE RUN.** The internal corner-turn transposes SCRATCH → SIG, so a run
 > **overwrites its own input**. A second PIPE without reloading the scene processes the previous

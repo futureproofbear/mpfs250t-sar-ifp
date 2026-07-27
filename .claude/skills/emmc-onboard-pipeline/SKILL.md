@@ -213,13 +213,15 @@ bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 81.5 s
 
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
 #    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
-#      TOTAL 37.72 s (2026-07-24, 100 MHz, azimuth-gather + detect + corner-turn/FFT-2 overlap fused into the FFT passes). Breakdown in
+#      TOTAL 18.45 s (2026-07-27, 100 MHz, commit d07bce7, bit-exact crop CRC 0x319037b2). Breakdown in
 #      exactly one place -- docs/SAR_IMPLEMENTATION_RECORD.md Part 3 -- do not restate it here.
 #    A 300000 ms (5 min) budget is ample; the runner POLLS and returns as soon as it completes.
 #    For CMD 0x50495045 the runner sets FFTMODE @0xB0059110 = 1 (FABRIC CoreFFT chain -- the
 #    shipping FFT path; mode 0 = legacy CPU FFT), and prints per-stage timing from sar_stage_ts
 #    (start/resample/window/rangeFFT/cornerturn/azimuthFFT/detect, 1 us/tick).
-bash run_m3_iso.sh 0x50495045 0 0 300000 0xB0058020        # ~88 s; polls, exits on completion
+# EVERY engine knob defaults OFF in run_m3_iso.sh -- the bare command gives an unfused,
+# single-chain run. This is the 18.45 s shipping configuration:
+DETMODE=3 GATHMODE=1 OVLMODE=1 CGENMODE=0x43474E31 DUALFFT=0x44464632 RWRKNW=0x52575204 FFTBLK=64 \n  bash run_m3_iso.sh 0x50495045 0 0 180000 0xB0058020   # ~18.5 s; polls, exits on completion
 bash run_stage_timing.sh                                   # re-read per-stage timing anytime (no re-run)
 
 # 3) crop-verify: gather center 1024x1024 from DDR OUT, dump, render

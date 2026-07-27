@@ -11,10 +11,14 @@ data), in two implementations:
    FFT, and detection, streaming DDR-to-DDR. Range/azimuth FFTs run on the fabric **CoreFFT**
    hard IP; the MSS RISC-V cores drive the pipeline.
 
-**Status:** the full deci-1 Centerfield scene focuses **end-to-end on silicon** in current
-best case ~37.7 s (100 MHz), scene loaded from the board's own eMMC (no host JTAG data load),
-and the reconstructed 8192² image matches the reference scene-for-scene (0.9923 correlation vs.
-golden, speckle-limited at full single-look resolution).
+**Status:** the full deci-1 Centerfield scene focuses **end-to-end on silicon in 18.45 s**
+(2026-07-27, 100 MHz fabric, timing MET multi-corner), scene loaded from the board's own eMMC
+(no host JTAG data load). Output is **bit-exact** — crop CRC `0x319037b2`, reproduced from a cold
+start — and the reconstructed 8192² image matches the reference scene-for-scene (0.9923 correlation
+vs. golden, speckle-limited at full single-look resolution).
+
+Got there in thirteen individually-measured steps: **110.8 s → 18.45 s**, every one silicon-validated
+with the CRC unchanged. See `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3.
 
 ## Start here
 

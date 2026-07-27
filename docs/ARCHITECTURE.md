@@ -1143,10 +1143,12 @@ dead mem↔stream RTL (§9.2).
 
 ### 10.2 Current timing baseline
 
-**37.72 s** total pipeline time (2026-07-24, 100 MHz fabric clock, azimuth-gather + detect fusion +
-corner-turn/FFT-2 overlap, deci-1 Centerfield scene 5634×4319 → 8192 grid). This is the single
-current number; see `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 for the full chronological optimization history
-(110.8 s → 37.72 s) and the per-optimization before/after measurements — not re-derived here.
+See **§2** for the current baseline and its per-stage table. There is ONE home for that number and
+it is §2 — this section used to restate it and drifted a full generation behind (it claimed 37.72 s
+while §2 said 18.45 s), which is exactly the failure mode duplicating a measurement invites.
+
+For the chronological optimization history (110.8 s → 18.45 s) and the per-optimization before/after
+measurements, see `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3. Not re-derived here either.
 
 ### 10.3 Validation results summary
 

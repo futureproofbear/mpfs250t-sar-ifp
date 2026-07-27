@@ -897,8 +897,14 @@ silicon behaviour.**
 
 - **DDR is `0x80000000`–`0xBFFFFFFF` only. `≥0xC0000000` = ABOVE-DDR decode error** (not a cached/
   non-cached alias — cacheability is MPU-config, not address-aliased). Don't read `0xC8…`/`0xE8…`.
-- Kernel control: `K_CORNER_TURN 0x60000000`, `K_WINDOW 0x60001000`, `K_DETECT 0x60002000`,
-  `K_RESAMPLE 0x60003000`, `K_FFT`/`fft_feeder 0x60004000`, `fft_unloader 0x60005000`. Regs:
+- Kernel control — **NINE** slaves, not six. `K_WINDOW` and `K_DETECT` no longer exist: those two
+  windows were REUSED IN PLACE by the second FFT chain, so poking `0x60001000` expecting the window
+  kernel now drives chain B's feeder. Authoritative list is `sar_kernels.h`; mirrored here as of
+  2026-07-28:
+  `K_CORNER_TURN 0x60000000` (SLAVE0), `K_FFT_FEEDER_B 0x60001000` (1, **was K_WINDOW**),
+  `K_FFT_UNLOADER_B 0x60002000` (2, **was K_RESAMPLE2**), `K_RESAMPLE 0x60003000` (3),
+  `K_FFT_FEEDER 0x60004000` (4), `K_FFT_UNLOADER 0x60005000` (5), `K_FIC0MON 0x60006000` (6),
+  `K_COEFFGEN 0x60007000` (7), `K_COEFFGEN_B 0x60008000` (8). Regs:
   `START +0x08` (write 1=go, read 0=done), `ARG0 +0xc, ARG1 +0x10, ARG2 +0x14, ARG3 +0x18`. **Never read
   a slave that is not present in the programmed fabric — an unmapped AXI4-Lite read hangs the bus
   un-haltably.**

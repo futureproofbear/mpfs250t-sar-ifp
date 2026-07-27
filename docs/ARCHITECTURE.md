@@ -49,9 +49,9 @@ Parts 1–2. This section and §2 describe only the current as-built contract.
 
 ![Figure 1 — SAR pipeline dataflow](img/sar_pipeline.svg)
 
-**Figure 1 — SAR pipeline dataflow.** Stage times are the silicon-verified 25.16 s baseline
+**Figure 1 — SAR pipeline dataflow.** Stage times are the silicon-verified 18.45 s baseline
 (2026-07-27, CRC `0x319037b2`). `*` marks the corner-turn/FFT-2 overlap: CT#2 is strip-pipelined
-under FFT-2, so its ~6 s is hidden and 8.610 s is the merged wall time. Note the stage names are
+under FFT-2, so its cost is hidden and 5.396 s is the merged wall time. Note the stage names are
 historically inverted — "range FFT" is FFT-1, the AZIMUTH transform.
 
 Stages run sequentially: the MSS arms a kernel, polls its DONE flag, then arms the next. This is
@@ -68,9 +68,9 @@ or AXI burst FIFOs.
 | 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
 | 6 | Detect (magnitude) | *fused into the azimuth-FFT unloader (fabric)* | — | — |
 
-Current shipping baseline runtime: **25.16 s** (2026-07-27, 100 MHz fabric clock), verified
+Current shipping baseline runtime: **18.45 s** (2026-07-27, 100 MHz fabric clock), verified
 bit-exact against the reference crop CRC `0x319037b2` from a cold start. This is the single current
-number; the chronological optimization history (110.8 s → 25.16 s, one measured step at a time)
+number; the chronological optimization history (110.8 s → 18.45 s, one measured step at a time)
 lives in `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 — do not re-derive it here. Orchestration is `sar_form_image()`
 in `src/sar/sar_sequencer.c`.
 
@@ -78,9 +78,9 @@ Measured per stage at that baseline:
 
 | stage | time | share |
 |---|---:|---:|
-| resample (range gather + internal corner-turn) | 11.175 s | 44.4% |
-| range-FFT — **FFT-1, the AZIMUTH transform** | 5.374 s | 21.4% |
-| azimuth-FFT — **FFT-2, the RANGE transform**, with corner-turn #2 overlapped into it | 8.610 s | 34.2% |
+| resample (range gather + internal corner-turn) | 7.267 s | 39.4% |
+| range-FFT — **FFT-1, the AZIMUTH transform** | 5.788 s | 31.4% |
+| azimuth-FFT — **FFT-2, the RANGE transform**, with corner-turn #2 overlapped into it | 5.396 s | 29.2% |
 | window / corner-turn / detect | 0 | fused or overlapped |
 
 The `rangeFFT` / `azFFT` field names are historical and **inverted** with respect to what the
@@ -91,6 +91,16 @@ Four changes took 37.72 → 25.16 s, each silicon-validated with the CRC unchang
 coefficient generation, the on-fabric azimuth coefficient generator (`sar_coeffgen.v`), a second
 CoreFFT chain, and the multi-hart block-exponent renormalize epilogue. The last runs in **both**
 FFT passes, which is why it beat its single-pass prediction.
+
+A fifth change took 25.16 → **18.45 s** (−26.7%): replacing the SmartHLS corner-turn with the
+hand-written `corner_turn_v.v`, which issues FULL-WIDTH (`arsize=3'b011`) bursts where the HLS
+kernel issued half-width beats, and double-buffers so fill and drain overlap. Both corner-turn
+sites improved — resample (which contains CT#1) 11.175 → 7.267 s, and the CT#2/FFT-2 overlap
+8.610 → 5.396 s. It costs ~3x the LSRAM of the kernel it replaced (128 blocks vs ~43).
+
+The range-FFT moved the WRONG way, 5.374 → 5.788 s (+8%), and that is unexplained. The likely
+reading is DDR contention: the corner-turns now finish sooner and compete differently for FIC_0.
+It is not attributed, so do not repeat it as if it were.
 
 **Runtime knobs that make up this configuration** (all fail-safe: an unset or cold-boot DDR word
 means OFF, so the shipping binary is behaviour-neutral until deliberately switched):
@@ -1039,17 +1049,25 @@ Full rules: §5.
 
 ### 10.1 Fabric resource usage
 
-Measured on MPFS250T_ES from the **currently shipping, silicon-verified build** (commit `e1ed702`,
-2026-07-27 — the one that reproduces CRC `0x319037b2` at 25.16 s), read from
+Measured on MPFS250T_ES from the **currently shipping, silicon-verified build** (commit `d07bce7`,
+2026-07-27 — the one that reproduces CRC `0x319037b2` at 18.45 s), read from
 `libero_ffv/designer/SAR_TOP/SAR_TOP_compile_netlist_resources.rpt`:
 
 | Type | Used | Device total | % |
 |---|---:|---:|---:|
-| 4LUT (logic) | 83,102 | 254,196 | 32.7% |
-| DFF (registers) | 61,741 | 254,196 | 24.3% |
-| LSRAM (20 Kb blocks) | 327 | 812 | 40.3% |
-| µSRAM | 877 | 2,352 | 37.3% |
+| 4LUT (logic) | 84,130 | 254,196 | 33.1% |
+| DFF (registers) | 62,652 | 254,196 | 24.7% |
+| LSRAM (20 Kb blocks) | 412 | 812 | 50.7% |
+| µSRAM | 866 | 2,352 | 36.8% |
 | Math (18×18 MACC) | 68 | 784 | 8.7% |
+
+LSRAM by block (from `SAR_TOP_compile_netlist_hier_resources.csv`, column 9 — column 8 is µSRAM,
+and reading the wrong one makes `COEFG` look like it owns 396 blocks): `CT` 128, `RES` 66,
+`FEED`/`FEED_B` 54 each, `COEFG`/`COEFG_B` 32 each, `FFT`/`FFT_B` 21 each, `UNLD`/`UNLD_B` 2 each.
+
+The hand-written corner-turn is the single largest LSRAM consumer at **128 blocks**, roughly 3x the
+~43 the SmartHLS kernel used — the price of double-buffering full-width tiles. It bought 6.71 s per
+frame. 400 blocks remain free.
 
 Timing, multi-corner, 100 MHz fabric clock (`OUT0`): setup worst slack **+0.182 ns**, hold
 **+0.029 ns**, both MET with the violation reports clean. `OUT1` (CoreFFT `SLOWCLK`, CLK/8) has
@@ -1062,9 +1080,33 @@ the second CoreFFT chain and the on-fabric coefficient generators: `sar_coeffgen
 8192×32 tables ≈ 48 LSRAM per instance.
 
 > Do not estimate these by hand. Hand-derived LSRAM counts on this design have been wrong in BOTH
-> directions — 50 blocks optimistic for the coefficient generator, ~89 pessimistic for the second
-> chain (projected 416, actual 327, because the reclaimed WIN/RES2 slots were far larger than
-> guessed). Read the report.
+> directions THREE times — 50 blocks optimistic for the coefficient generator, ~89 pessimistic for
+> the second chain (projected 416, actual 327), and 53 optimistic for the hand-written corner-turn
+> (projected ~359 total, actual 412). Read the report.
+
+### 10.1a Power
+
+First measured 2026-07-27 on the verified `d07bce7` build with Libero SmartPower, vectorless
+(`bash mpfs/host/run_power_report.sh`, opt-in — see `docs/fpga/DEV_GUIDE.md` §3.13):
+
+| | mW | share |
+|---|---:|---:|
+| **Total** | **2357.6** | 100% |
+| Static | 436.6 | 18.5% |
+| Dynamic | 1921.0 | 81.5% |
+
+By type: gate 1206.6 (51.2%), memory 481.7 (20.4%), I/O 283.0 (12.0%), net 199.7 (8.5%), core
+static 153.3 (6.5%), DSP 32.8 (1.4%). Main rail VDD 1.05 V at 1991 mA; VDDI 1.1 at 204 mA.
+
+By clock domain the 100 MHz `OUT0` accounts for ~791 mW of the dynamic total (529 clocks / 143
+combinational / 119 register outputs); the 12.5 MHz CoreFFT `SLOWCLK` (`OUT1`) is ~2.5 mW.
+
+Three caveats, or the number misleads. It is **vectorless** — SmartPower assumed default toggle
+rates rather than reading real switching activity, so the build-to-build delta is trustworthy and
+the absolute value is a ballpark. A frame is **not one operating point**: both CoreFFT chains stream
+during the FFT passes while the fabric is near-idle during the CPU renormalize epilogue, so one
+average hides the peak. And it is **fabric only** — it excludes the four U54s, the DDR controller
+and the PHY. For a whole-board figure, read the Icicle Kit's on-board current sense over I2C.
 
 **Per-stage / block breakdown** (aggregated from `SAR_TOP_compile_netlist_hier_resources.csv`,
 same 2026-07-21 build):

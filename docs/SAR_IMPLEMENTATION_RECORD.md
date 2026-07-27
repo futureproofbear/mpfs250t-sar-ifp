@@ -243,7 +243,7 @@ value-level checks (not correlation) that had actually caught these bugs.
 ## Part 3: Optimized approach — what was actually sped up on fabric, and by how much
 
 Once the full pipeline first ran end-to-end on silicon, a sequence of measured optimizations brought
-it from a **110.8 s** baseline down to the current **25.16 s**. Every number below is a real
+it from a **110.8 s** baseline down to the current **18.45 s**. Every number below is a real
 on-silicon measurement (this section is the project's stated single numeric source of truth).
 
 ### 3.1 Chronological before/after
@@ -264,12 +264,14 @@ on-silicon measurement (this section is the project's stated single numeric sour
 | 11 | Second CoreFFT chain (`SAR_DUALFFT='DFF2'`, rows split in blocks of `SAR_FFTBLK`=64) | FFT-1 10.351 s / FFT-2 10.694 s | FFT-1 7.313 s / FFT-2 9.792 s | **−4.7 s** | only pays off *because* of step 10: on the CPU coefficient path there is no budget to feed a second chain, so the firmware refuses and records it in `RPROF[11]` |
 | 12 | Multi-hart block-exponent renormalize epilogue (`SAR_RWRK_NW=0x52575204`) | pipeline 27.83 s | pipeline 25.14 s | **−2.69 s** | beat its ~1.8 s prediction because it runs in **both** FFT passes, not just FFT-1 |
 
-**Current shipping baseline: 25.16 s** (2026-07-27, 100 MHz), verified bit-exact against the
+| 13 | Hand-written corner-turn `corner_turn_v.v` replacing the SmartHLS kernel (full-width `arsize=3'b011` bursts, double-buffered fill/drain) | pipeline 25.16 s | pipeline 18.45 s | **−6.71 s** | biggest single win of the campaign. Costs ~3x the LSRAM (128 vs ~43 blocks). Its FIRST build was bit-WRONG on silicon — see the re-arm bug below |
+
+**Current shipping baseline: 18.45 s** (2026-07-27, 100 MHz), verified bit-exact against the
 reference crop CRC `0x319037b2` from a cold start. Correlation vs. golden reference **0.9923** on
 the Centerfield scene; output bit-identical across every fusion/overlap/clock configuration tested.
 
-Per stage at that baseline: resample 11.175 s (44.4%) · range-FFT (FFT-1, the **azimuth** transform)
-5.374 s · azimuth-FFT (FFT-2, the **range** transform, with corner-turn #2 overlapped into it)
+Per stage at that baseline: resample 7.267 s (39.4%) · range-FFT (FFT-1, the **azimuth** transform)
+5.788 s · azimuth-FFT (FFT-2, the **range** transform, with corner-turn #2 overlapped into it)
 8.610 s.
 
 > **ONE ELOD PER PIPE RUN.** The internal corner-turn transposes SCRATCH → SIG, so a run
@@ -313,16 +315,21 @@ fusion: max |diff| 2 LSB, zero pixels beyond that over 1,048,576, correlation 0.
 
 ### 3.3 Current bottleneck and the next lever
 
-At the **25.16 s** baseline (2026-07-27) the decomposition is:
+At the **18.45 s** baseline (2026-07-27) the decomposition is:
 
 | stage | time | share |
 |---|---:|---:|
-| **resample** (range gather ~5.8 s + internal corner-turn ~5.4 s) | **11.175 s** | **44.4%** |
-| azimuth-FFT (FFT-2 + corner-turn #2 overlapped in) | 8.610 s | 34.2% |
-| range-FFT (FFT-1) | 5.374 s | 21.4% |
+| **resample** (range gather + internal corner-turn) | **7.267 s** | **39.4%** |
+| range-FFT (FFT-1) | 5.788 s | 31.4% |
+| azimuth-FFT (FFT-2 + corner-turn #2 overlapped in) | 5.396 s | 29.2% |
 
-Resample is now the dominant stage and the only one nothing has attacked. Both halves of it are
-levers of roughly equal size.
+The three stages are now within 1.9 s of each other — there is no dominant stage left, which means
+no single remaining change can produce another 25%+ cut. The corner-turn replacement took resample
+11.175 → 7.267 s and the FFT-2/CT#2 overlap 8.610 → 5.396 s.
+
+Range-FFT went the WRONG way across that change, 5.374 → 5.788 s (+0.41 s), and is UNEXPLAINED.
+The plausible reading is FIC_0 contention shifting now that the corner-turns finish sooner, but it
+has not been measured. Treat it as an open item, not a known cost.
 
 #### The corner-turns are ~11 s of the frame, and now measured
 

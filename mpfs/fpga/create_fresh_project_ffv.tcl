@@ -79,6 +79,9 @@ foreach hls {hls_corner_turn hls_detect hls_resample} {
 source "$here/gearbox_idconv_cores.tcl"
 source "$here/feeder_v_core.tcl"
 source "$here/unloader_v_core.tcl"
+# Hand-written corner-turn replacing the SmartHLS corner_turn (E4: 22.7% port active,
+# 41.5% idle, and half-width beats). Same bus interfaces, so the assembly only swaps the name.
+source "$here/corner_turn_v_core.tcl"
 ## axi4_regslice: ONE core, TWO instances (DIC/CIC link timing fix, see axi4_regslice_core.tcl).
 ## sar_fic0s_mon: FIC_0_AXI4_S transaction monitor, NEW 7th CIC target (see sar_fic0s_mon_core.tcl).
 source "$here/axi4_regslice_core.tcl"

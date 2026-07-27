@@ -787,8 +787,36 @@ the shipping entrypoint and are already documented operationally in `docs/USER_G
 | `program_ffv.tcl` / `program_tdest.tcl` | `run_tool PROGRAMDEVICE` on an already-built project (FlashPro6). |
 | `run_hlsfft_build.sh` / `create_fresh_project_hlsfft.tcl` / `build_full_prog_hlsfft.tcl` / `sartop_assembly_hlsfft.tcl` / `program_hlsfft.tcl` / `stage_constraints_hlsfft.tcl` | The abandoned HLS-FFT variant of the flow. Retained as scripts only; the shipping FFT is the fabric CoreFFT chain (§1.1). |
 | `hls_gate.sh` / `lint_netlist.sh` / `trim_mss.py` | SmartHLS output gate, netlist lint (§2), MSS trim helper. |
+| `power_report_ffv.tcl` + `mpfs/host/run_power_report.sh` | Vectorless SmartPower estimate on the current placed-and-routed design (§3.13). **Opt-in — never wire into a build.** |
 | `mpfs/host/run_program.sh` | Flash app ELF via `mpfsBootmodeProgrammer` (boot mode 1). |
 | `efp6_*.cfg` | OpenOCD JTAG test/probe scripts (M2 dump, rate tests, DLL status, ctrl reads). |
+
+### 3.13 Power estimate (opt-in, never automatic)
+
+    bash mpfs/host/run_power_report.sh      # board-free; needs an already placed-and-routed design
+
+Runs Libero SmartPower vectorlessly on the current `libero_ffv` design and exports
+`designer/SAR_TOP/SAR_TOP_power.rpt`, copying it into the newest `mpfs/fpga/bitstreams/` snapshot so
+the number stays attributable to the build that produced it.
+
+**This is deliberately NOT part of `run_build_safe.sh`.** Standing instruction (2026-07-27): ask
+before running it on any future build. Do not wire it into the build flow.
+
+Read the output with three caveats, or it will mislead:
+
+- **Vectorless = default toggle rates, not real activity.** Trust the build-to-build *delta*, not the
+  absolute figure. For a number worth quoting, drive SmartPower from a VCD of an actual pipeline run.
+- **A frame is not one operating point.** Both CoreFFT chains stream during the FFT passes; the fabric
+  is near-idle during the single-threaded renormalize epilogue. One average hides the peak.
+- **Fabric only.** Excludes the four U54s, the DDR controller and the PHY — and the epilogue is pure
+  CPU. For a whole-board figure, read the Icicle Kit's on-board current sense over I2C instead.
+
+The script refuses to start if a Libero/synthesis process is already running (it would contend for the
+same project), and the Tcl deliberately omits `save_project`, so a power run can never mutate the
+project behind a verified bitstream.
+
+As of 2026-07-27 no power analysis had ever been run on this project — there is no historical baseline
+to compare against.
 
 ---
 

@@ -243,7 +243,7 @@ value-level checks (not correlation) that had actually caught these bugs.
 ## Part 3: Optimized approach — what was actually sped up on fabric, and by how much
 
 Once the full pipeline first ran end-to-end on silicon, a sequence of measured optimizations brought
-it from a **110.8 s** baseline down to the current **37.72 s**. Every number below is a real
+it from a **110.8 s** baseline down to the current **25.16 s**. Every number below is a real
 on-silicon measurement (this section is the project's stated single numeric source of truth).
 
 ### 3.1 Chronological before/after
@@ -259,10 +259,31 @@ on-silicon measurement (this section is the project's stated single numeric sour
 | 6 | Corner-turn tile size `CT_T` 32 → 128 | each corner-turn 7.68 s | each corner-turn 6.20 s | −1.48 s each | burst 128 B→512 B, throughput 67→82.6 MB/s (×1.23) — latency-bound, not burst-bound; **pipeline 48.19 → 45.26 s (−2.93 s)** |
 | 7 | Corner-turn / FFT-2 concurrent overlap (`SAR_OVERLAPMODE=1`) | merged corner-turn+FFT-2 17.57 s | merged corner-turn+FFT-2 12.90 s | −4.67 s | ~75% of the corner-turn hidden under FFT-2; **pipeline 45.62 → 40.91 s (−4.35 s, −9.6%)** |
 | 8 | Fabric clock, CCC OUT0 62.5 → 100 MHz | pipeline 40.91 s | pipeline 37.72 s | **−3.19 s (−7.8%)** | only FFT-2's compute scaled with clock; FFT-1 (gather-latency-bound) did not |
+| 9 | Multi-hart resample coefficients (`SAR_CWRK_NW=4`) | pipeline 37.72 s | pipeline 32.97 s | **−4.75 s** | coefficient generation, not the fabric, was pacing FFT-1: 1499 → ~508 µs/row across 4 U54 harts |
+| 10 | On-fabric azimuth coefficient generator (`sar_coeffgen.v`, `SAR_CGENMODE='CGN1'`) | pipeline 32.88 s | pipeline 31.36 s | **−1.52 s** | ~147 µs/row vs 1499 on one hart. Also deletes 6,144 of a row's 8,961 read beats (68.6%) and the per-row L2 flush — the stage stops being coefficient-paced and becomes FFT-paced |
+| 11 | Second CoreFFT chain (`SAR_DUALFFT='DFF2'`, rows split in blocks of `SAR_FFTBLK`=64) | FFT-1 10.351 s / FFT-2 10.694 s | FFT-1 7.313 s / FFT-2 9.792 s | **−4.7 s** | only pays off *because* of step 10: on the CPU coefficient path there is no budget to feed a second chain, so the firmware refuses and records it in `RPROF[11]` |
+| 12 | Multi-hart block-exponent renormalize epilogue (`SAR_RWRK_NW=0x52575204`) | pipeline 27.83 s | pipeline 25.14 s | **−2.69 s** | beat its ~1.8 s prediction because it runs in **both** FFT passes, not just FFT-1 |
 
-**Current shipping baseline: 37.72 s** (2026-07-24, 100 MHz), correlation vs. golden reference
-**0.9923** on the Centerfield scene, output bit-identical across every fusion/overlap/clock
-configuration tested.
+**Current shipping baseline: 25.16 s** (2026-07-27, 100 MHz), verified bit-exact against the
+reference crop CRC `0x319037b2` from a cold start. Correlation vs. golden reference **0.9923** on
+the Centerfield scene; output bit-identical across every fusion/overlap/clock configuration tested.
+
+Per stage at that baseline: resample 11.175 s (44.4%) · range-FFT (FFT-1, the **azimuth** transform)
+5.374 s · azimuth-FFT (FFT-2, the **range** transform, with corner-turn #2 overlapped into it)
+8.610 s.
+
+> **ONE ELOD PER PIPE RUN.** The internal corner-turn transposes SCRATCH → SIG, so a run
+> **overwrites its own input**. A second PIPE without reloading the scene processes the previous
+> run's intermediate data and returns a wrong, run-dependent CRC. Not corruption, and not specific
+> to any configuration — single chain does it identically. This cost a full debugging session
+> before it was understood, and several "failures" attributed to the second chain were only this.
+
+**Steps 9–12 are one story, not four independent wins.** Step 9 revealed that FFT-1 was
+*coefficient-paced*, not fabric-paced — the residual fabric wait was 0.53 µs/row against 1499 µs of
+CPU. Step 10 moved that work into fabric and made the stage FFT-paced. Only *then* was there
+anything for step 11's second CoreFFT chain to do, which is why the firmware couples them and
+silently refuses a second chain without the fabric generator. Doing 11 before 10 would have bought
+nothing.
 
 All fusion/overlap changes above were value-gated against the CPU-path golden or an A/B against the
 known-good path rather than by CRC alone where rounding order deliberately changed (e.g. detect
@@ -292,34 +313,68 @@ fusion: max |diff| 2 LSB, zero pixels beyond that over 1,048,576, correlation 0.
 
 ### 3.3 Current bottleneck and the next lever
 
-Per the project's own stated ranking of the 40.91 s (62.5 MHz) decomposition,
-**FFT-1's feeder (15.98 s, 39.1%) is the largest single stage; the merged corner-turn+FFT-2 (12.90 s,
-31.6%) is second; the range gather + internal corner-turn (11.98 s, 29.3%) is third.** The
-project's own priority-1 item is increasing range-gather throughput, and it was **diagnosed
-2026-07-24 as read-latency-bound**, not a fusion or burst-length opportunity: a v2 FIC_0 monitor
-(write channel + intra-burst RVALID-gap counting) decomposed one gather line (908.8 µs at 100 MHz)
-as
+At the **25.16 s** baseline (2026-07-27) the decomposition is:
 
-| read data moving | read outstanding, DDR not returning | write data moving | genuine idle |
-|---:|---:|---:|---:|
-| 16% | **40%** | 9% | 35% |
+| stage | time | share |
+|---|---:|---:|
+| **resample** (range gather ~5.8 s + internal corner-turn ~5.4 s) | **11.175 s** | **44.4%** |
+| azimuth-FFT (FFT-2 + corner-turn #2 overlapped in) | 8.610 s | 34.2% |
+| range-FFT (FFT-1) | 5.374 s | 21.4% |
 
-— a DDR read-throttle stall, ruling out both a second FIC (the stall is in the shared DDR controller,
-not an AXI-channel conflict) and further output fusion (which could buy at most the 9% write
-fraction). The stated conclusion is that **parallelism is the lever**: the FIC_0 data plane is only
-~25% active during the gather, leaving headroom for a second, independent gather instance to stall
-in parallel rather than in series.
+Resample is now the dominant stage and the only one nothing has attacked. Both halves of it are
+levers of roughly equal size.
 
-The forward-looking design study behind this remains, as of
-this document, explicitly **study only, nothing built** (`Status: study only`). It projects a 2-lane
-range gather (`N=2`) at ~2.4 s saved on the range-gather sub-stage (5.78 → ~3.4 s), identifies a
-hard prerequisite blocker found while wiring a second instance — `sar_axi_idconv`'s ID-stash table is
-keyed only on the AXI ID's low 4 bits, so two *concurrent* kernels collide and mis-route each other's
-write responses, requiring an RTL fix before any N>1 build — and separately flags the corner-turn
-itself (~70 MB/s, drastically below LPDDR4's ceiling) as a "sleeper problem" worth attacking alongside
-gather parallelism rather than after it, since it appears twice in the pipeline and both instances
-share one kernel. This dual-lane range-gather work (`RES2`) is the most recent item on the roadmap —
-in progress, not yet silicon-validated as of the sources this document was written from.
+#### The corner-turns are ~11 s of the frame, and now measured
+
+E4 (FICMON around the whole internal corner-turn, 2026-07-27) moved this from inference to fact.
+5.974 s to move a 256 MiB frame = **85.7 MB/s** against a FIC_0 ceiling of 64 bit × 100 MHz =
+**800 MB/s**:
+
+| | share |
+|---|---:|
+| moving data (`TOTAL_ACTIVE`) | 22.7% |
+| asked, DDR did not deliver (`R_DATAWAIT`) | 35.8% |
+| not even asking (idle) | 41.5% |
+
+and 524,288 write bursts × 128 beats = 67.1 M beats — **512 MiB of 64-bit beat capacity to move a
+256 MiB frame.** The SmartHLS kernel writes one `uint32` per beat and discards half the data bus.
+Three separate defects, of which two are ours to fix (full-width beats ≈ 2×; double-buffered tiles
+close the idle) and one is **not**: `R_DATAWAIT` is inherent to a transpose, because each tile row
+is a separate DRAM page at 32 KiB stride. Double-buffering *hides* that 35.8% under write traffic,
+it does not remove it. `corner_turn_v.v` is in progress.
+
+#### Two earlier conclusions in this section were WRONG — recorded so they are not retried
+
+**"Parallelism is the lever; add a second gather instance (`RES2`)."** The range gather is
+**coefficient-bound, not fabric-bound**: step 9 showed 1499 µs/row of CPU coefficient generation
+against 0.53 µs/row of residual fabric wait — 99.95% of the stage was the CPU. A second gather lane
+parallelises the 0.25%. `RES2` no longer exists in the fabric either; its slot was reclaimed for the
+second FFT chain's unloader. The real lever there is the **pass-1 fabric coefficient generator**
+(~5.8 s, `mpfs/fpga/coeffgen1_design.md`), whose arithmetic is already gated bit-exact at production
+geometry.
+
+**"The interconnect allows one outstanding transaction, so raise it."** The core RTL says otherwise:
+`MAX_OUTSTNDG_TRANS` is per-thread with valid range 1–8 and
+`OPEN_RDTRANS_MAX = max(MAX_OUTSTNDG_TRANS, 2)`, so the design already runs **two** outstanding
+reads per initiator. Even at two the arithmetic permits ~800 MB/s, so the 85.7 MB/s shortfall was
+never an outstanding-transaction limit. Step 6 in the table above had already said as much —
+quadrupling the burst bought only ×1.23, which is not how a latency-bound transfer with too few
+requests in flight behaves.
+
+#### What is left, ranked
+
+1. **Production run on NDSU** — staged at 8192², all coefficient gates pass at that geometry. This
+   is the deliverable; everything else optimises a pipeline that has never processed the real target.
+2. **Hand-written corner-turn** (`corner_turn_v.v`) — ~11 s of frame, measurement-justified above.
+3. **Pass-1 fabric coefficient generator** — ~5.8 s, arithmetic already proven.
+4. **Clock 100 → 125 MHz** — worth only ~1.2 s and currently impossible: setup slack is **+0.182 ns
+   on a 10 ns period**, i.e. a ~9.82 ns critical path. Needs path surgery first.
+
+A dead end worth recording: overlapping the internal corner-turn against FFT-1 needs a third frame
+buffer, and there is nowhere to put one. The cached window is full to the byte (SIG + SCRATCH + OUT
++ code end exactly at `0xB000_0000`) and the non-cached segment at `0xC000_0000` is **outside the
+DIC's decode** — the fabric cannot reach it. Widening that window corrupts the baseline while still
+passing timing. Verified on silicon, twice.
 
 ---
 

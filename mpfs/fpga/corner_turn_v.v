@@ -41,7 +41,8 @@ module corner_turn_v #(
     parameter integer AXI_DATA_W = 64,
     parameter integer AXI_ID_W   = 4,
     parameter integer T_LOG2     = 7,      // tile edge = 128 (matches the tuned CT_T)
-    parameter integer MAX_BURST  = 64      // beats per AR/AW; 64 beats x 8 B = 512 B = one tile row
+    parameter integer MAX_BURST  = 64,     // beats per AR/AW; 64 beats x 8 B = 512 B = one tile row
+    parameter integer GRID       = 8192    // frame edge; overridden small in the TB so a run is seconds
 )(
     input  wire                     clk,
     input  wire                     resetn,
@@ -158,7 +159,6 @@ module corner_turn_v #(
     // ============================ geometry ============================
     // H and W are the frame edge. The SmartHLS register map carries no dims -- ct2_strip_arm()
     // passes only src/dst/c_base/c_count -- so the grid is fixed, exactly as the HLS kernel had it.
-    localparam integer GRID   = 8192;
     localparam integer EL_B   = 4;                       // element = uint32
     localparam integer EPB    = AXI_DATA_W / (EL_B*8);   // elements per beat = 2
     localparam integer ROWBTS = (T / EPB);               // beats per tile row = 64
@@ -178,7 +178,7 @@ module corner_turn_v #(
     reg [1:0]  fst;
     reg [15:0] fi;                       // which row of the tile
     reg [8:0]  frem;                     // beats still expected in this burst
-    reg [T_LOG2-1:0] fcol;               // element-pair index within the row
+    reg [T_LOG2-2:0] fcol;               // element-PAIR index within the row (one bit narrower)
 
     wire [31:0] src_row_off = (({16'd0, r0} + {16'd0, fi}) * GRID + {16'd0, c0}) * EL_B;
     wire [8:0]  f_beats     = tw[T_LOG2:1];            // tw/2, tw is even for T=128 tiles
@@ -188,7 +188,7 @@ module corner_turn_v #(
     reg [1:0]  dst_st;
     reg [15:0] dj;                       // which column of the tile == which dst row
     reg [8:0]  drem;
-    reg [T_LOG2-1:0] drow;               // element-pair index down the column
+    reg [T_LOG2-2:0] drow;               // element-PAIR index down the column (one bit narrower)
 
     wire [31:0] dst_row_off = (({16'd0, c0} + {16'd0, dj}) * GRID + {16'd0, r0}) * EL_B;
     wire [8:0]  d_beats     = th[T_LOG2:1];            // th/2
@@ -201,8 +201,15 @@ module corner_turn_v #(
     wire        f_lo_bank = fi[0];
     wire [TW_AW-1:0] f_addr = {fi[T_LOG2-1:0], fcol};
     wire        d_lo_bank = dj[0];
-    wire [TW_AW-1:0] d_addr_lo = {{drow, 1'b0}[T_LOG2-1:0], dj[T_LOG2-1:1]};
-    wire [TW_AW-1:0] d_addr_hi = {{drow, 1'b1}[T_LOG2-1:0], dj[T_LOG2-1:1]};
+    /* The bank read is REGISTERED, so d_q0/d_q1 lag their address by a cycle. Addressing on `drow`
+     * therefore presents beat k-1's data as beat k -- the TB caught exactly that (dst[2] carried
+     * dst[0]'s value). Address on the NEXT drow instead, so the registered output lands in step
+     * with the beat being presented. */
+    wire [T_LOG2-2:0] drow_nxt = ((dst_st == D_DATA) && m_wready) ? (drow + 1'b1) : drow;
+    wire [T_LOG2-1:0] d_row_lo = {drow_nxt, 1'b0};   // element row 2*drow
+    wire [T_LOG2-1:0] d_row_hi = {drow_nxt, 1'b1};   // element row 2*drow+1
+    wire [TW_AW-1:0] d_addr_lo = {d_row_lo, dj[T_LOG2-1:1]};
+    wire [TW_AW-1:0] d_addr_hi = {d_row_hi, dj[T_LOG2-1:1]};
 
     reg [31:0] d_q0, d_q1;
     always @(posedge clk) begin
@@ -244,7 +251,7 @@ module corner_turn_v #(
         if (!resetn) begin
             fst <= F_IDLE; dst_st <= D_IDLE; busy <= 1'b0;
             r0 <= 16'd0; c0 <= 16'd0; fi <= 16'd0; dj <= 16'd0;
-            fcol <= {T_LOG2{1'b0}}; drow <= {T_LOG2{1'b0}};
+            fcol <= {(T_LOG2-1){1'b0}}; drow <= {(T_LOG2-1){1'b0}};
             frem <= 9'd0; drem <= 9'd0;
             m_arvalid <= 1'b0; m_awvalid <= 1'b0;
             m_araddr <= {AXI_ADDR_W{1'b0}}; m_awaddr <= {AXI_ADDR_W{1'b0}};
@@ -253,7 +260,7 @@ module corner_turn_v #(
             if (start_pulse && !busy) begin
                 busy <= 1'b1; last_tile <= 1'b0;
                 r0 <= 16'd0; c0 <= c_first;
-                fi <= 16'd0; fcol <= {T_LOG2{1'b0}};
+                fi <= 16'd0; fcol <= {(T_LOG2-1){1'b0}};
                 fst <= F_AR;
             end
 
@@ -265,7 +272,7 @@ module corner_turn_v #(
                     m_arlen   <= f_beats[7:0] - 8'd1;
                     m_arvalid <= 1'b1;
                     frem      <= f_beats;
-                    fcol      <= {T_LOG2{1'b0}};
+                    fcol      <= {(T_LOG2-1){1'b0}};
                 end else if (m_arready) begin
                     m_arvalid <= 1'b0;
                     fst       <= F_DATA;
@@ -282,7 +289,7 @@ module corner_turn_v #(
             F_DONE: begin
                 // hand the tile to the drain side
                 dj     <= 16'd0;
-                drow   <= {T_LOG2{1'b0}};
+                drow   <= {(T_LOG2-1){1'b0}};
                 dst_st <= D_AW;
                 fst    <= F_IDLE;
             end
@@ -297,7 +304,7 @@ module corner_turn_v #(
                     m_awlen   <= d_beats[7:0] - 8'd1;
                     m_awvalid <= 1'b1;
                     drem      <= d_beats;
-                    drow      <= {T_LOG2{1'b0}};
+                    drow      <= {(T_LOG2-1){1'b0}};
                 end else if (m_awready) begin
                     m_awvalid <= 1'b0;
                     dst_st    <= D_DATA;

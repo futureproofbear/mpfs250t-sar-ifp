@@ -142,8 +142,10 @@ module corner_turn_v #(
     // ============================ tile buffer, banked (i^j)&1 ============================
     // Two banks of T*T/2 words. Both sides read/write TWO elements per cycle, and the XOR
     // guarantees the pair always straddles the banks -- see the header.
-    (* syn_ramstyle = "lsram" *) reg [31:0] bank0 [0:(1<<TW_AW)-1];
-    (* syn_ramstyle = "lsram" *) reg [31:0] bank1 [0:(1<<TW_AW)-1];
+    // DOUBLE-BUFFERED: an extra MSB selects the half, so fill and drain can work on
+    // different tiles at the same time. This is what attacks the 41.5% idle E4 measured.
+    (* syn_ramstyle = "lsram" *) reg [31:0] bank0 [0:(2<<TW_AW)-1];
+    (* syn_ramstyle = "lsram" *) reg [31:0] bank1 [0:(2<<TW_AW)-1];
 
     // Address within a bank for element (i,j): the pair (i, j>>1) is unique per bank.
     // verilator lint_off UNUSED
@@ -164,7 +166,19 @@ module corner_turn_v #(
     localparam integer ROWBTS = (T / EPB);               // beats per tile row = 64
 
     // Tile origin. c0 walks the strip [c_base, c_base+c_count), r0 walks the full height.
-    reg [15:0] r0, c0;
+    // Fill runs AHEAD of drain, so they need separate tile coordinates. `nfull` is the handshake:
+    // fill may start while nfull < 2, drain may start while nfull > 0. The tile a buffer holds is
+    // remembered per buffer so drain knows where to write it.
+    reg [15:0] fr0, fc0;                 // tile the FILL side is loading
+    reg [15:0] tile_r0 [0:1];            // tile each buffer holds
+    reg [15:0] tile_c0 [0:1];
+    reg        fb, db;                   // which buffer fill writes / drain reads
+    reg [1:0]  nfull;                    // buffers filled and awaiting drain
+    reg        fill_done;                // fill has issued every tile
+    wire [15:0] r0 = fr0;                // fill-side geometry (th/tw below use these)
+    wire [15:0] c0 = fc0;
+    wire [15:0] dr0 = tile_r0[db];       // drain-side geometry
+    wire [15:0] dc0 = tile_c0[db];
     wire [15:0] c_end   = (c_count == 32'd0) ? GRID[15:0] : (c_base[15:0] + c_count[15:0]);
     wire [15:0] c_first = (c_count == 32'd0) ? 16'd0      : c_base[15:0];
     // Ragged edges: the last tile in each direction may be short (min() in corner_turn.cpp).
@@ -174,8 +188,8 @@ module corner_turn_v #(
     // ============================ FILL: src -> tile buffer ============================
     // One AR per tile row: tw elements, contiguous, = tw/EPB beats. Bursts never cross 4 KB
     // because a tile row is 512 B and every row base is 4-byte aligned within a 32 KiB row.
-    localparam F_IDLE=2'd0, F_AR=2'd1, F_DATA=2'd2, F_DONE=2'd3;
-    reg [1:0]  fst;
+    localparam F_IDLE=3'd0, F_AR=3'd1, F_DATA=3'd2, F_DONE=3'd3, F_WAIT=3'd4;
+    reg [2:0]  fst;
     reg [15:0] fi;                       // which row of the tile
     reg [8:0]  frem;                     // beats still expected in this burst
     reg [T_LOG2-2:0] fcol;               // element-PAIR index within the row (one bit narrower)
@@ -190,8 +204,10 @@ module corner_turn_v #(
     reg [8:0]  drem;
     reg [T_LOG2-2:0] drow;               // element-PAIR index down the column (one bit narrower)
 
-    wire [31:0] dst_row_off = (({16'd0, c0} + {16'd0, dj}) * GRID + {16'd0, r0}) * EL_B;
-    wire [8:0]  d_beats     = th[T_LOG2:1];            // th/2
+    wire [31:0] dst_row_off = (({16'd0, dc0} + {16'd0, dj}) * GRID + {16'd0, dr0}) * EL_B;
+    wire [15:0] d_th        = ((GRID   - dr0) < T) ? (GRID[15:0] - dr0) : T[15:0];
+    wire [15:0] d_tw        = ((c_end  - dc0) < T) ? (c_end      - dc0) : T[15:0];
+    wire [8:0]  d_beats     = d_th[T_LOG2:1];          // th/2 of the DRAIN's tile
 
     // ---- bank access ---------------------------------------------------------------------
     // FILL beat k of row i carries elements (i,2k) and (i,2k+1): banks i&1 and ~(i&1), SAME
@@ -199,7 +215,7 @@ module corner_turn_v #(
     // ~(j&1) at addresses {2k, j>>1} and {2k+1, j>>1}.  Both pairs straddle the banks -- that
     // is the whole point of bank = (i^j)&1.
     wire        f_lo_bank = fi[0];
-    wire [TW_AW-1:0] f_addr = {fi[T_LOG2-1:0], fcol};
+    wire [TW_AW:0]   f_addr = {fb, fi[T_LOG2-1:0], fcol};
     wire        d_lo_bank = dj[0];
     /* The bank read is REGISTERED, so d_q0/d_q1 lag their address by a cycle. Addressing on `drow`
      * therefore presents beat k-1's data as beat k -- the TB caught exactly that (dst[2] carried
@@ -208,8 +224,8 @@ module corner_turn_v #(
     wire [T_LOG2-2:0] drow_nxt = ((dst_st == D_DATA) && m_wready) ? (drow + 1'b1) : drow;
     wire [T_LOG2-1:0] d_row_lo = {drow_nxt, 1'b0};   // element row 2*drow
     wire [T_LOG2-1:0] d_row_hi = {drow_nxt, 1'b1};   // element row 2*drow+1
-    wire [TW_AW-1:0] d_addr_lo = {d_row_lo, dj[T_LOG2-1:1]};
-    wire [TW_AW-1:0] d_addr_hi = {d_row_hi, dj[T_LOG2-1:1]};
+    wire [TW_AW:0]   d_addr_lo = {db, d_row_lo, dj[T_LOG2-1:1]};
+    wire [TW_AW:0]   d_addr_hi = {db, d_row_hi, dj[T_LOG2-1:1]};
 
     reg [31:0] d_q0, d_q1;
     always @(posedge clk) begin
@@ -245,26 +261,31 @@ module corner_turn_v #(
     assign m_wlast  = (drem == 9'd1);
     assign m_bready = 1'b1;
 
-    reg last_tile;
-
+    // FILL and DRAIN are now INDEPENDENT state machines sharing only `nfull`. Fill loads tile n+1
+    // into one buffer while drain writes tile n out of the other, so the read-side DDR stalls
+    // (R_DATAWAIT, 35.8% and NOT removable) hide under write traffic instead of adding to it.
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
             fst <= F_IDLE; dst_st <= D_IDLE; busy <= 1'b0;
-            r0 <= 16'd0; c0 <= 16'd0; fi <= 16'd0; dj <= 16'd0;
+            fr0 <= 16'd0; fc0 <= 16'd0; fi <= 16'd0; dj <= 16'd0;
             fcol <= {(T_LOG2-1){1'b0}}; drow <= {(T_LOG2-1){1'b0}};
             frem <= 9'd0; drem <= 9'd0;
             m_arvalid <= 1'b0; m_awvalid <= 1'b0;
             m_araddr <= {AXI_ADDR_W{1'b0}}; m_awaddr <= {AXI_ADDR_W{1'b0}};
-            m_arlen <= 8'd0; m_awlen <= 8'd0; last_tile <= 1'b0;
+            m_arlen <= 8'd0; m_awlen <= 8'd0;
+            fb <= 1'b0; db <= 1'b0; nfull <= 2'd0; fill_done <= 1'b0;
+            tile_r0[0] <= 16'd0; tile_r0[1] <= 16'd0;
+            tile_c0[0] <= 16'd0; tile_c0[1] <= 16'd0;
         end else begin
             if (start_pulse && !busy) begin
-                busy <= 1'b1; last_tile <= 1'b0;
-                r0 <= 16'd0; c0 <= c_first;
-                fi <= 16'd0; fcol <= {(T_LOG2-1){1'b0}};
+                busy <= 1'b1; fill_done <= 1'b0;
+                fr0 <= 16'd0; fc0 <= c_first;
+                fi  <= 16'd0; fcol <= {(T_LOG2-1){1'b0}};
+                fb  <= 1'b0;  db <= 1'b0; nfull <= 2'd0;
                 fst <= F_AR;
             end
 
-            // ---- FILL: one AR per tile row, tw/2 beats each ----
+            // ---------------- FILL: src -> buffer fb ----------------
             case (fst)
             F_AR: begin
                 if (!m_arvalid) begin
@@ -282,22 +303,33 @@ module corner_turn_v #(
                 fcol <= fcol + 1'b1;
                 frem <= frem - 1'b1;
                 if (frem == 9'd1) begin
-                    if (fi + 16'd1 >= th) begin fst <= F_DONE; end
+                    if (fi + 16'd1 >= th) fst <= F_DONE;
                     else begin fi <= fi + 16'd1; fst <= F_AR; end
                 end
             end
             F_DONE: begin
-                // hand the tile to the drain side
-                dj     <= 16'd0;
-                drow   <= {(T_LOG2-1){1'b0}};
-                dst_st <= D_AW;
-                fst    <= F_IDLE;
+                // publish this tile to the drain side, then move on if a buffer is free
+                tile_r0[fb] <= fr0;
+                tile_c0[fb] <= fc0;
+                fb          <= ~fb;
+                fi          <= 16'd0;
+                if (fc0 + T[15:0] >= c_end) begin
+                    fc0 <= c_first;
+                    if (fr0 + T[15:0] >= GRID[15:0]) begin fill_done <= 1'b1; fst <= F_IDLE; end
+                    else begin fr0 <= fr0 + T[15:0]; fst <= F_WAIT; end
+                end else begin
+                    fc0 <= fc0 + T[15:0]; fst <= F_WAIT;
+                end
             end
+            F_WAIT: if (nfull < 2'd2) fst <= F_AR;      // a buffer freed up
             default: ;
             endcase
 
-            // ---- DRAIN: one AW per tile column, th/2 beats each ----
+            // ---------------- DRAIN: buffer db -> dst ----------------
             case (dst_st)
+            D_IDLE: if (nfull != 2'd0) begin
+                dj <= 16'd0; drow <= {(T_LOG2-1){1'b0}}; dst_st <= D_AW;
+            end
             D_AW: begin
                 if (!m_awvalid) begin
                     m_awaddr  <= dst_base + dst_row_off;
@@ -314,28 +346,28 @@ module corner_turn_v #(
                 drow <= drow + 1'b1;
                 drem <= drem - 1'b1;
                 if (drem == 9'd1) begin
-                    if (dj + 16'd1 >= tw) dst_st <= D_DONE;
+                    if (dj + 16'd1 >= d_tw) dst_st <= D_DONE;
                     else begin dj <= dj + 16'd1; dst_st <= D_AW; end
                 end
             end
             D_DONE: begin
-                // advance to the next tile: c0 across the strip, then r0 down the frame
-                if (c0 + T[15:0] >= c_end) begin
-                    c0 <= c_first;
-                    if (r0 + T[15:0] >= GRID[15:0]) begin
-                        busy   <= 1'b0;       // whole frame (or strip) done
-                        dst_st <= D_IDLE;
-                    end else begin
-                        r0 <= r0 + T[15:0];
-                        fi <= 16'd0; fst <= F_AR; dst_st <= D_IDLE;
-                    end
-                end else begin
-                    c0 <= c0 + T[15:0];
-                    fi <= 16'd0; fst <= F_AR; dst_st <= D_IDLE;
-                end
+                db     <= ~db;
+                dst_st <= D_IDLE;
             end
             default: ;
             endcase
+
+            // ---------------- nfull: the only coupling between the two ----------------
+            // Both sides can move on the same cycle, so handle the pair together rather than
+            // letting one clobber the other's update.
+            case ({fst == F_DONE, dst_st == D_DONE})
+                2'b10: nfull <= nfull + 1'b1;
+                2'b01: nfull <= nfull - 1'b1;
+                default: ;                       // 2'b11 nets to zero, 2'b00 no change
+            endcase
+
+            // done when every tile has been filled AND every filled buffer has been drained
+            if (fill_done && (nfull == 2'd0) && (dst_st == D_IDLE) && !m_awvalid) busy <= 1'b0;
         end
     end
 

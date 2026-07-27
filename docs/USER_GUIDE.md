@@ -140,9 +140,17 @@ bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000     # ELOD: eMMC -> DDR, ~81
 Use this only when the eMMC is not yet provisioned. Stage the scene on the host, then load each
 blob over JTAG:
 ```bash
-python mpfs/host/serialize_inputs.py --in <scene>_CPHD.cphd --out jtag_full
-# -> jtag_full/{sig.bin, f0/df/pr/tans/invorder/krgrid/kcgrid/hamr/hamc.bin, job.bin, load.gdb}
+python mpfs/host/serialize_inputs.py --in <scene>_CPHD.cphd --out jtag_full --grid 8192
+# -> jtag_full/{sig.bin, f0/df/pr/tans/invorder/krgrid/kcgrid/hamr/hamc.bin, job.bin,
+#              layout.json, load.gdb}
 ```
+`--grid 8192` is **load-bearing** and is NOT the default: the fabric CoreFFT is fixed at 8192
+(firmware `SAR_GRID`), but `--grid` defaults to `0` = legacy per-scene next-pow2. For the
+Centerfield scene the natural pow2 happens to be 8192 too, so omitting it appears to work — on any
+other scene it silently stages tables the fabric cannot use. Note also that `--in` is a required
+flag, not a positional argument, and decimation is two knobs (`--deci-pulse` / `--deci-sample`,
+both default 1); there is no `--deci`.
+
 Then, from a halted GDB session, `source jtag_full/load.gdb` (or run the equivalent OpenOCD
 `load_image` sequence). Measured rate is **~84 kbit/s (~111 s/MB)** — a full ~97 MB scene is
 **~2.7 hr**. This is latency-bound, not bandwidth-bound; it is identical at 2 MHz and 6 MHz JTAG

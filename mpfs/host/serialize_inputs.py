@@ -9,22 +9,41 @@ All the irregular work (sarpy parse, PVP geometry, resample-coefficient
 generation) stays here on the host -- the board never parses a CPHD. This is the
 GUI-free, no-network, no-SD workflow: the only board link is the debugger.
 
-Fabric-loaded outputs (default ./jtag_stage/), in the resample kernel's format:
-    sig.bin      int16 interleaved I/Q, raw signal (M*N*2 samples)   -> SIG_ADDR
-    rs_idx1.bin  int32  pass-1 (range) gather indices  (M*N)         -> RS_COEF_BASE
-    rs_wq1.bin   int16  pass-1 Q15 interp weights      (M*N)
-    rs_idx2.bin  int32  pass-2 (azimuth) gather indices(N*M)
-    rs_wq2.bin   int16  pass-2 Q15 interp weights      (N*M)
-    rs_order.bin int32  pulse permutation for pass 2   (M)
-    win.bin      int16  full 2-D Hamming taper, Q15, row-major (M*N) (window kernel)
-    job.bin      96-byte job descriptor                              -> JOB_ADDR
-    layout.json  dims, FFT lengths, addresses+sizes+CRCs, BFP scale, geocode, coeff corr
-    load.gdb     'restore <bin> binary <addr>' for each buffer (SoftConsole GDB)
+Fabric-loaded outputs (default ./jtag_stage/) -- the CURRENT 10-role format:
+    sig.bin       int16 interleaved I/Q, raw signal (M*N*2 samples)  -> SIG_ADDR
+    f0.bin        float32 per-pulse start frequency        (M)       -> F0_ADDR
+    df.bin        float32 per-pulse frequency step          (M)      -> DF_ADDR
+    pr.bin        float32 per-pulse range to scene centre   (M)      -> PR_ADDR
+    tans.bin      float32 sorted tan(phi) source grid       (M)      -> TANS_ADDR
+    invorder.bin  int32  pulse permutation for pass 2       (M)      -> INVORDER_ADDR
+    krgrid.bin    float32 uniform KR output grid            (Np)     -> KRGRID_ADDR
+    kcgrid.bin    float32 uniform KC output grid            (Mp)     -> KCGRID_ADDR
+    hamr.bin      int16  Q15 Hamming taper, range axis      (Np)     -> HAMR_ADDR
+    hamc.bin      int16  Q15 Hamming taper, azimuth axis    (Mp)     -> HAMC_ADDR
+    job.bin       96-byte job descriptor                             -> JOB_ADDR
+    layout.json   dims, FFT lengths, addresses+sizes+CRCs, BFP scale, geocode
+    load.gdb      'restore <bin> binary <addr>' for each buffer (SoftConsole GDB)
 Also written for off-board geocode/debug only (not loaded to the board): kr/kc/tanphi.bin.
+
+NOTE: resample COEFFICIENTS are not staged. They are computed on-MSS per line from the
+geometry above (layout.json records `coeffs: computed on-MSS per line from this geometry`),
+so there are no rs_idx*/rs_wq*/rs_order/win blobs -- an earlier version of this docstring
+advertised them and they have never been written by this code. The 2-D taper is likewise
+separable (hamr x hamc) and fused into the FFT-1 feeder, not a full M*N win.bin.
 
 Usage:
     python serialize_inputs.py --in <scene>_CPHD.cphd [--out jtag_stage]
+                               [--grid 8192] [--crop-sample K]
                                [--deci-pulse K] [--deci-sample K]
+
+  --in is REQUIRED and is a flag, not a positional argument.
+  --grid is LOAD-BEARING for anything that will run on silicon: the fabric CoreFFT is
+    fixed at 8192 (firmware SAR_GRID), but --grid defaults to 0 = legacy per-scene
+    next-pow2. Pass --grid 8192 for every on-board stage. A scene whose natural pow2
+    is not 8192 will otherwise stage tables the fabric cannot use, silently.
+  --deci-pulse / --deci-sample are two separate knobs (there is no --deci; argparse
+    prefix matching cannot disambiguate them). Both default to 1, so a deci-1 stage
+    simply omits them.
 """
 import sys
 import json

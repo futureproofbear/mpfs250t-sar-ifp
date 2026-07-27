@@ -85,6 +85,14 @@ Project-specific rules earned on this SAR-on-silicon work. They complement the g
   the GUI. Before any destructive or hard-to-reverse operation (delete, overwrite, reconfigure), verify
   the target is recoverable (in git / backed up), prefer in-place edits and work on copies. Fix your own
   messes headless rather than handing cleanup to the user.
+- **Run the `doc-accuracy` agent at every baseline/milestone.** Before declaring a new baseline,
+  publishing or sharing docs, or after any measured number changes, audit the docs against the
+  SOURCE (mode 1) and against a new-engineer/external reader (mode 2). Documentation drift here has
+  been real and damaging: a docstring advertised six coefficient blobs (`rs_idx1.bin`, `rs_wq1.bin`,
+  `rs_idx2.bin`, `rs_wq2.bin`, `rs_order.bin`, `win.bin`) that the code has NEVER written, a skill
+  showed a bare positional CPHD path that argparse rejects, and the load-bearing `--grid 8192` was
+  omitted from the documented stage command while defaulting to a value no on-silicon run can use.
+  None of that is catchable by reading the docs; it needs the code opened alongside.
 - **Capture and UPDATE runbooks the same session.** Store reusable procedures/gotchas in the runbook
   docs (`docs/fpga/DEV_GUIDE.md`, `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3, …) and write a proven
   procedure or new gotcha back into the relevant runbook in the SAME turn it is established — with the

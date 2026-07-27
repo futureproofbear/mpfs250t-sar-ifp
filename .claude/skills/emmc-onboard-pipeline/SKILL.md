@@ -125,7 +125,7 @@ reference placement digit-for-digit). All paths below are relative to the repo r
 - **Docs** — `docs/USER_GUIDE.md` §4 (eMMC boot-load) + this skill (= authoritative recipe).
 - **NOT committed** (large binaries; regenerate): the staged scene `jtag_stage_deci1/` and packed
   `emmc_input.img`. The Centerfield scene is ALREADY on the eMMC INPUT partition, so the immediate
-  LOAD/PIPE/SAVEOUT run needs neither. To (re)provision a scene: `serialize_inputs.py <CPHD> ...` →
+  LOAD/PIPE/SAVEOUT run needs neither. To (re)provision a scene: `serialize_inputs.py --in <CPHD> --out <stage> --grid 8192` →
   `emmc_pack.py` → `run_emmc_restore.sh` → `run_emmc_prov_iso.sh`. The NDSU production CPHD is under
   `data/umbra_ndsu_20231110/`.
 

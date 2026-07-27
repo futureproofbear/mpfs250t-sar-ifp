@@ -99,6 +99,9 @@ module corner_turn_v #(
     // ============================ AXI4-Lite control slave ============================
     reg [31:0] src_base, dst_base, c_base, c_count;
     reg        start_pulse, busy;
+    // The cycle a new run actually launches. Needed in the FSM below to suppress the done-detect,
+    // which would otherwise see the PREVIOUS run's state and strand busy low.
+    wire       starting = start_pulse & ~busy;
 
     assign s_awready = s_awvalid & s_wvalid & ~s_bvalid;
     assign s_wready  = s_awready;
@@ -277,7 +280,7 @@ module corner_turn_v #(
             tile_r0[0] <= 16'd0; tile_r0[1] <= 16'd0;
             tile_c0[0] <= 16'd0; tile_c0[1] <= 16'd0;
         end else begin
-            if (start_pulse && !busy) begin
+            if (starting) begin
                 busy <= 1'b1; fill_done <= 1'b0;
                 fr0 <= 16'd0; fc0 <= c_first;
                 fi  <= 16'd0; fcol <= {(T_LOG2-1){1'b0}};
@@ -366,8 +369,15 @@ module corner_turn_v #(
                 default: ;                       // 2'b11 nets to zero, 2'b00 no change
             endcase
 
-            // done when every tile has been filled AND every filled buffer has been drained
-            if (fill_done && (nfull == 2'd0) && (dst_st == D_IDLE) && !m_awvalid) busy <= 1'b0;
+            // done when every tile has been filled AND every filled buffer has been drained.
+            // NOT on the launch cycle: `fill_done <= 1'b0` above is non-blocking, so `fill_done`
+            // still reads the PREVIOUS run's 1 here, and being the later assignment this clear
+            // would beat the `busy <= 1'b1` above and strand the kernel idle. Every start after
+            // the first then reports instant-done -- the firmware's sar_k_wait returns at once and
+            // the pipeline runs on untransposed data. Shipped to silicon 2026-07-27; invisible to
+            // any bench that resets between runs (see tb_corner_turn_v `rearm` cases).
+            if (!starting && fill_done && (nfull == 2'd0) && (dst_st == D_IDLE) && !m_awvalid)
+                busy <= 1'b0;
         end
     end
 

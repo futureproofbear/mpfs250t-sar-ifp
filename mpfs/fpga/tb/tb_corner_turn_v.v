@@ -23,6 +23,7 @@ module ct_case #(
     parameter integer T_LOG2   = 2,        // T = 4
     parameter integer CB       = 0,        // c_base  -- strip column base
     parameter integer CC       = 0,        // c_count -- 0 = full frame
+    parameter integer NRUNS    = 1,        // arm the SAME instance this many times (RE-ARM path)
     parameter         NAME     = "case"
 )(output reg done, output reg [31:0] bad);
     localparam integer READ_LAT = 7;       // cycles between AR accept and first R beat
@@ -138,7 +139,7 @@ module ct_case #(
         end
     endtask
 
-    integer i, j, nbad, guard;
+    integer i, j, nbad, guard, run, busy_seen;
     initial begin
         s_awaddr=0; s_awvalid=0; s_wdata=0; s_wvalid=0; s_bready=1;
         s_araddr=0; s_arvalid=0; s_rready=1;
@@ -163,40 +164,68 @@ module ct_case #(
         resetn = 1'b1;
         repeat (4) @(posedge clk);
 
-        lite_w(12'h00c, SRC_BASE);
-        lite_w(12'h010, DST_BASE);
-        lite_w(12'h014, CB[31:0]);  // c_base
-        lite_w(12'h018, CC[31:0]);  // c_count (0 => full frame)
-        lite_w(12'h008, 32'd1);     // START
+        // RE-ARM LOOP. The kernel is started NRUNS times WITHOUT an intervening reset, because that
+        // is what the firmware does: CT#1 inside resample, then CT#2 per strip under
+        // fft2_ct_overlap, all on one instance between power cycles. Running each case exactly once
+        // after reset -- what this bench did until 2026-07-27 -- cannot see a stale-state re-arm
+        // bug, and one shipped to silicon as an instant-completing corner-turn.
+        for (run = 0; run < NRUNS; run = run + 1) begin
+            // re-poison the destination so run N's PASS can never be run N-1's data
+            for (i = 0; i < NEL + GUARD; i = i + 1) mem_dst[i] = 32'hDEAD_BEEF;
 
-        guard = 0;
-        @(posedge clk);
-        while (dut.busy && guard < 2000000) begin @(posedge clk); guard = guard + 1; end
-        if (dut.busy) begin
-            $display("  TIMEOUT: busy never cleared after %0d cycles", guard);
-            nbad = nbad + 1;
-        end
-        repeat (32) @(posedge clk);
+            lite_w(12'h00c, SRC_BASE);
+            lite_w(12'h010, DST_BASE);
+            lite_w(12'h014, CB[31:0]);  // c_base
+            lite_w(12'h018, CC[31:0]);  // c_count (0 => full frame)
+            lite_w(12'h008, 32'd1);     // START
 
-        for (i = 0; i < NEL; i = i + 1) begin
-            if (mem_dst[i] !== golden[i]) begin
-                if (nbad < 10)
-                    $display("  dst[%0d] (r=%0d c=%0d) got %08x want %08x",
-                             i, i / GRID_OVR, i % GRID_OVR, mem_dst[i], golden[i]);
+            // busy MUST assert. If it never does, the firmware's sar_k_wait returns instantly and
+            // the pipeline runs on untransposed data -- silent, and the exact silicon failure.
+            busy_seen = 0;
+            guard = 0;
+            while (!busy_seen && guard < 64) begin
+                @(posedge clk);
+                if (dut.busy) busy_seen = 1;
+                guard = guard + 1;
+            end
+            if (!busy_seen) begin
+                $display("  %0s run %0d: BUSY NEVER ASSERTED after START (kernel reports instant done)",
+                         NAME, run);
                 nbad = nbad + 1;
             end
-        end
 
-        // the guard must be untouched -- any write past the frame is a bug, however benign it looks
-        for (i = NEL; i < NEL + GUARD; i = i + 1)
-            if (mem_dst[i] !== 32'hDEAD_BEEF) begin
-                if (nbad < 12) $display("  %0s: OUT-OF-BOUNDS write at +%0d (%08x)", NAME, i-NEL, mem_dst[i]);
+            guard = 0;
+            while (dut.busy && guard < 2000000) begin @(posedge clk); guard = guard + 1; end
+            if (dut.busy) begin
+                $display("  %0s run %0d: TIMEOUT, busy never cleared after %0d cycles", NAME, run, guard);
                 nbad = nbad + 1;
             end
+            repeat (32) @(posedge clk);
+
+            for (i = 0; i < NEL; i = i + 1) begin
+                if (mem_dst[i] !== golden[i]) begin
+                    if (nbad < 10)
+                        $display("  %0s run %0d: dst[%0d] (r=%0d c=%0d) got %08x want %08x",
+                                 NAME, run, i, i / GRID_OVR, i % GRID_OVR, mem_dst[i], golden[i]);
+                    nbad = nbad + 1;
+                end
+            end
+
+            // the guard must be untouched -- any write past the frame is a bug, however benign it looks
+            for (i = NEL; i < NEL + GUARD; i = i + 1)
+                if (mem_dst[i] !== 32'hDEAD_BEEF) begin
+                    if (nbad < 12) $display("  %0s run %0d: OUT-OF-BOUNDS write at +%0d (%08x)",
+                                            NAME, run, i-NEL, mem_dst[i]);
+                    nbad = nbad + 1;
+                end
+        end
+
         if (nbad == 0)
-            $display("  %0s (GRID=%0d, T=%0d): PASS (%0d elements bit-exact, guard clean)", NAME, GRID_OVR, (1<<T_LOG2), NEL);
+            $display("  %0s (GRID=%0d, T=%0d, %0d run(s)): PASS (%0d elements bit-exact, guard clean)",
+                     NAME, GRID_OVR, (1<<T_LOG2), NRUNS, NEL);
         else
-            $display("  %0s (GRID=%0d, T=%0d): FAIL (%0d of %0d wrong)", NAME, GRID_OVR, (1<<T_LOG2), nbad, NEL);
+            $display("  %0s (GRID=%0d, T=%0d, %0d run(s)): FAIL (%0d wrong)",
+                     NAME, GRID_OVR, (1<<T_LOG2), NRUNS, nbad);
         bad  = nbad[31:0];
         done = 1'b1;
     end
@@ -208,18 +237,26 @@ endmodule
 // is exactly tiled, so the ragged path is defensive -- which is precisely why it needs a test:
 // untested defensive code that is wrong looks handled.
 module tb_corner_turn_v;
-    wire d0, d1, d2; wire [31:0] b0, b1, b2;
+    wire d0, d1, d2, d3, d4; wire [31:0] b0, b1, b2, b3, b4;
     ct_case #(.GRID_OVR(16), .T_LOG2(2), .NAME("exact ")) u_exact (.done(d0), .bad(b0));
     ct_case #(.GRID_OVR(14), .T_LOG2(2), .NAME("ragged")) u_ragged(.done(d1), .bad(b1));
     // STRIP: what fft2_ct_overlap actually drives (c_base/c_count), never simulated until now.
     ct_case #(.GRID_OVR(16), .T_LOG2(2), .CB(4), .CC(8), .NAME("strip ")) u_strip(.done(d2), .bad(b2));
+    // RE-ARM: the same instance started three times with NO reset between. Silicon does exactly this
+    // and nothing above can see it -- each case above resets, runs once, and stops. A corner-turn
+    // that leaves stale state behind passes every single-run case and reports instant-done from the
+    // second start onward, which is what reached the board on 2026-07-27.
+    ct_case #(.GRID_OVR(16), .T_LOG2(2), .NRUNS(3), .NAME("rearm ")) u_rearm(.done(d3), .bad(b3));
+    // RE-ARM in strip mode: what the overlap path drives, repeatedly, per strip.
+    ct_case #(.GRID_OVR(16), .T_LOG2(2), .CB(4), .CC(8), .NRUNS(3), .NAME("rearmS")) u_rearms(.done(d4), .bad(b4));
     initial begin
-        wait (d0 && d1 && d2);
+        wait (d0 && d1 && d2 && d3 && d4);
         #1;
-        if (b0 == 0 && b1 == 0 && b2 == 0)
+        if (b0 == 0 && b1 == 0 && b2 == 0 && b3 == 0 && b4 == 0)
             $display("==== corner_turn_v: PASS (all cases bit-exact) ====");
         else
-            $display("==== corner_turn_v: FAIL (exact=%0d ragged=%0d strip=%0d) ====", b0, b1, b2);
+            $display("==== corner_turn_v: FAIL (exact=%0d ragged=%0d strip=%0d rearm=%0d rearmS=%0d) ====",
+                     b0, b1, b2, b3, b4);
         $finish;
     end
 endmodule

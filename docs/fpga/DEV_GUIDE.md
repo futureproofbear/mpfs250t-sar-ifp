@@ -1027,6 +1027,32 @@ single FlashPro6 owner):
 
 ### 4.9 Methodology lessons (apply these first)
 
+**EVERY kernel testbench MUST re-arm the SAME instance at least twice, with NO reset between.**
+This is now the single highest-yield gate for hand-written RTL on this project, because the firmware
+always drives a kernel repeatedly between power cycles (CT#1 in resample, then CT#2 once per strip
+under `fft2_ct_overlap`), while a bench that instantiates a fresh case per scenario resets before
+each one and therefore *cannot* see stale state. Three separate incidents, same shape:
+
+| date | module | bench said | silicon did |
+|---|---|---|---|
+| (earlier) | CoreFFT integration | golden TB ran ONE transform | re-arm path broken |
+| 2026-07-26 | `sar_coeffgen` pass-1 | 12/12 + 4/4 mutants | pass-2 regressed |
+| 2026-07-27 | `corner_turn_v` | 3/3 cases bit-exact | instant-done, then hang |
+
+The `corner_turn_v` case is the clearest specimen. `busy <= 1'b1` and `fill_done <= 1'b0` on the
+launch cycle, then later in the SAME `always` block a done-detect reading `fill_done` — which is
+still the previous run's `1`, because non-blocking assignments do not update mid-block. The later
+assignment wins, `busy` never asserts, `sar_k_wait` returns immediately, and the pipeline runs on
+untransposed data. Synthesis, P&R, setup AND hold all passed; the crop CRC was simply wrong.
+
+The symptom pair to recognise on silicon: **a stage timer reading microseconds when it should read
+seconds** (instant-done), and **the next stage hanging** (it is waiting on data that never arrived).
+A stage reporting ~0 µs is not "fast", it is "did not run".
+
+`tb_corner_turn_v.v` now takes an `NRUNS` parameter and carries `rearm` / `rearmS` cases; re-poison
+the destination between runs or run N passes on run N-1's data. Copy that pattern into every new
+kernel bench.
+
 Hard-won from a debug session on an all-zero-image regression:
 - **"RETURN=0 / stage completes" ≠ "data is correct."** The pipeline reported RETURN=0 for a whole
   session while emitting an all-zero image. Always verify data (CRC / read-back / correlate), never just

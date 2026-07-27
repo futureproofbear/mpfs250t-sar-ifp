@@ -64,11 +64,39 @@ or AXI burst FIFOs.
 | 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
 | 6 | Detect (magnitude) | *fused into the azimuth-FFT unloader (fabric)* | — | — |
 
-Current shipping baseline runtime: **37.72 s** (2026-07-24, 100 MHz fabric clock, azimuth-gather +
-detect fusion + corner-turn/FFT-2 overlap). This is the single current number; the chronological
-optimization history that got here (110.8 s → 37.72 s, one measured step at a time) lives in
-`docs/SAR_GUIDE.md` Part 3 — do not re-derive it here. Orchestration is `sar_form_image()` in
-`src/sar/sar_sequencer.c`.
+Current shipping baseline runtime: **25.16 s** (2026-07-27, 100 MHz fabric clock), verified
+bit-exact against the reference crop CRC `0x319037b2` from a cold start. This is the single current
+number; the chronological optimization history (110.8 s → 25.16 s, one measured step at a time)
+lives in `docs/SAR_GUIDE.md` Part 3 — do not re-derive it here. Orchestration is `sar_form_image()`
+in `src/sar/sar_sequencer.c`.
+
+Measured per stage at that baseline:
+
+| stage | time | share |
+|---|---:|---:|
+| resample (range gather + internal corner-turn) | 11.175 s | 44.4% |
+| range-FFT — **FFT-1, the AZIMUTH transform** | 5.374 s | 21.4% |
+| azimuth-FFT — **FFT-2, the RANGE transform**, with corner-turn #2 overlapped into it | 8.610 s | 34.2% |
+| window / corner-turn / detect | 0 | fused or overlapped |
+
+The `rangeFFT` / `azFFT` field names are historical and **inverted** with respect to what the
+transforms do: `rangeFFT` is FFT-1, the azimuth transform, and `azFFT` is FFT-2, the range
+transform. The table above is authoritative; the field names are not.
+
+Four changes took 37.72 → 25.16 s, each silicon-validated with the CRC unchanged: multi-hart
+coefficient generation, the on-fabric azimuth coefficient generator (`sar_coeffgen.v`), a second
+CoreFFT chain, and the multi-hart block-exponent renormalize epilogue. The last runs in **both**
+FFT passes, which is why it beat its single-pass prediction.
+
+**Runtime knobs that make up this configuration** (all fail-safe: an unset or cold-boot DDR word
+means OFF, so the shipping binary is behaviour-neutral until deliberately switched):
+`DETMODE=3`, `GATHMODE=1`, `OVLMODE=1`, `SAR_CGENMODE='CGN1'`, `SAR_DUALFFT='DFF2'`,
+`SAR_RWRK_NW=0x52575204`, `SAR_FFTBLK` default 64.
+
+> **ONE ELOD PER PIPE RUN.** The internal corner-turn transposes SCRATCH → SIG, so a run
+> **overwrites its own input**. A second PIPE without reloading the scene silently processes the
+> previous run's intermediate data and returns a wrong, run-dependent CRC. This is not corruption
+> and not specific to any one configuration — single chain does it identically.
 
 **Buffer flow per pass** (see §3 below for the full buffer map):
 
@@ -672,7 +700,8 @@ Runtime engine-select knobs (environment variables to `run_m3_iso.sh` for A/B te
 | `SAR_CWRK_NW` @ `0xB0059134` | 2/3/4 = spread per-line resample-coefficient generation over that many U54 harts; anything else (incl. cold-boot garbage) = 1 = single-hart |
 | `SAR_RWRK_NW` @ `0xB005912C` | `0x52575202/03/04` (`'RWR'\|nw`) = split the FFT block-exponent renormalize epilogue over 2/3/4 harts; **any other value = OFF** (the word is uninitialised DDR on a cold boot, so only the exact magic enables it). A/B is same-binary: run once without it, once with `0x52575204`, and compare `RPROF[8]` and the output CRC — the split is bit-identical by construction (`mpfs/host/check_renorm_split.py`), so the CRC MUST NOT move |
 | `SAR_CGENMODE` @ `0xB0059138` | `0x43474E31` (`'CGN1'`) = azimuth resample coefficients from the on-fabric `sar_coeffgen`; **any other value = OFF** (DDR/CPU coefficient path). Bit-exact by construction, so the output CRC MUST NOT move |
-| `SAR_DUALFFT` @ `0xB005913C` | `0x44464632` (`'DFF2'`) = split each FFT pass's ROWS across TWO CoreFFT chains (chain A even rows, chain B odd rows); **any other value = ONE chain** (the word is uninitialised DDR on a cold boot, so only the exact magic enables it). Requires `SAR_CGENMODE` on for FFT-1 — on the CPU coefficient path the stage is already CPU-paced and the firmware silently drops back to one chain, recording that in `RPROF[11]`. The BFP contract (`emax` = max over all `sar_row_exp[]`, then per-row shift) is order- and partition-independent, so the split is bit-exact: the A/B is same-bitstream and same-binary, and the output CRC MUST NOT move |
+| `SAR_DUALFFT` @ `0xB005913C` | `0x44464632` (`'DFF2'`) = split each FFT pass's ROWS across TWO CoreFFT chains in CONTIGUOUS BLOCKS of `SAR_FFTBLK` rows (chain A takes a block, chain B the next); **any other value = ONE chain** (the word is uninitialised DDR on a cold boot, so only the exact magic enables it). Requires `SAR_CGENMODE` on for FFT-1 — on the CPU coefficient path the stage is already CPU-paced and the firmware silently drops back to one chain, recording that in `RPROF[11]`. The BFP contract (`emax` = max over all `sar_row_exp[]`, then per-row shift) is order- and partition-independent, so the split is bit-exact: the A/B is same-bitstream and same-binary, and the output CRC MUST NOT move |
+| `SAR_FFTBLK` @ `0xB0059140` | consecutive rows a chain takes before handing over, when `SAR_DUALFFT` is on. Must DIVIDE `seg = 8192/nch`; **0, garbage or a non-divisor falls back to the default 64**, which is the silicon-measured best. This is a DRAM-LOCALITY knob ONLY — every value tiles the frame exactly, so none of them can change the output. Measured (valid runs, one ELOD each): blk 64 → 27.83 s, blk 4096 (contiguous halves) → 28.28 s. blk 1 and 256 have never been validly measured, so 64 is best-known, not proven optimal |
 
 Fabric kernels are controlled over AXI4-Lite through FIC0; per-kernel register offsets are in
 `src/sar/sar_kernels.h`. There are two register-map models in the project's history — the
@@ -920,29 +949,32 @@ Full rules: §5.
 
 ### 10.1 Fabric resource usage
 
-Measured on MPFS250T_ES, timing MET (multi-corner) at the build's clock — the most recent resource
-snapshot available is the **window-fused-feeder build, 2026-07-21** (i.e. after window fusion, but
-this predates the later detect fusion, azimuth-gather fusion, corner-turn/FFT-2 overlap, and the
-100 MHz clock bump — no newer resource table exists in the source docs, so treat the LUT/DFF/LSRAM
-figures as approximate for the current shipping build, not exact):
+Measured on MPFS250T_ES from the **currently shipping, silicon-verified build** (commit `e1ed702`,
+2026-07-27 — the one that reproduces CRC `0x319037b2` at 25.16 s), read from
+`libero_ffv/designer/SAR_TOP/SAR_TOP_compile_netlist_resources.rpt`:
 
-| Type | Used | Device total | % | Δ vs prev build |
-|---|---|---|---|---|
-| 4LUT (logic) | 30,377 | 254,196 | 11.95% | +644 |
-| DFF (registers) | 26,045 | 254,196 | 10.25% | +762 |
-| LSRAM (20 Kb blocks) | 132 | 812 | 16.26% | +7 (fused-window taper table) |
-| µSRAM (64×12) | 71 | 2,352 | 3.02% | 0 |
-| Math (18×18 MACC) | 19 | 784 | 2.42% | +6 (fused-window multiplies) |
+| Type | Used | Device total | % |
+|---|---:|---:|---:|
+| 4LUT (logic) | 83,102 | 254,196 | 32.7% |
+| DFF (registers) | 61,741 | 254,196 | 24.3% |
+| LSRAM (20 Kb blocks) | 327 | 812 | 40.3% |
+| µSRAM | 877 | 2,352 | 37.3% |
+| Math (18×18 MACC) | 68 | 784 | 8.7% |
 
-The +7 LSRAM / +6 MACC are exactly the fused window: a 4096×32b taper table (inferred as block
-RAM, not LUTs) and 6 signed 16×16 multiplies across two pipeline stages. Timing at that point:
-setup worst slack +6.865 ns at 62.5 MHz, hold "No Path" across three corners post-layout. The
-critical path was in the DIC interconnect (`rdata_interleave_fifo` → `FIC_0_AXI4_S_ARVALID`), not
-the feeder.
+Timing, multi-corner, 100 MHz fabric clock (`OUT0`): setup worst slack **+0.182 ns**, hold
+**+0.029 ns**, both MET with the violation reports clean. `OUT1` (CoreFFT `SLOWCLK`, CLK/8) has
++67.8 ns setup. **The 100 MHz domain has very little margin left** — the critical path is ~9.82 ns
+of a 10 ns period — so any change that lengthens it, or a clock increase, needs path surgery first
+rather than optimism.
 
-An earlier 2026-07-11 milestone measurement reported 11.8% 4LUT / 15.6% LSRAM / 1.7% MACC — from a
-build predating the window fusion (and predating the CoreFFT chain replacing the original DMA
-datamover); the table above is the more current of the two and should be used.
+Growth since the 2026-07-21 window-fused build (30,377 LUT / 132 LSRAM / 19 MACC) is dominated by
+the second CoreFFT chain and the on-fabric coefficient generators: `sar_coeffgen` alone is three
+8192×32 tables ≈ 48 LSRAM per instance.
+
+> Do not estimate these by hand. Hand-derived LSRAM counts on this design have been wrong in BOTH
+> directions — 50 blocks optimistic for the coefficient generator, ~89 pessimistic for the second
+> chain (projected 416, actual 327, because the reclaimed WIN/RES2 slots were far larger than
+> guessed). Read the report.
 
 **Per-stage / block breakdown** (aggregated from `SAR_TOP_compile_netlist_hier_resources.csv`,
 same 2026-07-21 build):

@@ -155,6 +155,70 @@ module corner_turn_v #(
     endfunction
     // verilator lint_on UNUSED
 
+    // ============================ geometry ============================
+    // H and W are the frame edge. The SmartHLS register map carries no dims -- ct2_strip_arm()
+    // passes only src/dst/c_base/c_count -- so the grid is fixed, exactly as the HLS kernel had it.
+    localparam integer GRID   = 8192;
+    localparam integer EL_B   = 4;                       // element = uint32
+    localparam integer EPB    = AXI_DATA_W / (EL_B*8);   // elements per beat = 2
+    localparam integer ROWBTS = (T / EPB);               // beats per tile row = 64
+
+    // Tile origin. c0 walks the strip [c_base, c_base+c_count), r0 walks the full height.
+    reg [15:0] r0, c0;
+    wire [15:0] c_end   = (c_count == 32'd0) ? GRID[15:0] : (c_base[15:0] + c_count[15:0]);
+    wire [15:0] c_first = (c_count == 32'd0) ? 16'd0      : c_base[15:0];
+    // Ragged edges: the last tile in each direction may be short (min() in corner_turn.cpp).
+    wire [15:0] th = ((GRID   - r0) < T) ? (GRID[15:0]   - r0) : T[15:0];
+    wire [15:0] tw = ((c_end  - c0) < T) ? (c_end        - c0) : T[15:0];
+
+    // ============================ FILL: src -> tile buffer ============================
+    // One AR per tile row: tw elements, contiguous, = tw/EPB beats. Bursts never cross 4 KB
+    // because a tile row is 512 B and every row base is 4-byte aligned within a 32 KiB row.
+    localparam F_IDLE=2'd0, F_AR=2'd1, F_DATA=2'd2, F_DONE=2'd3;
+    reg [1:0]  fst;
+    reg [15:0] fi;                       // which row of the tile
+    reg [8:0]  frem;                     // beats still expected in this burst
+    reg [T_LOG2-1:0] fcol;               // element-pair index within the row
+
+    wire [31:0] src_row_off = (({16'd0, r0} + {16'd0, fi}) * GRID + {16'd0, c0}) * EL_B;
+    wire [8:0]  f_beats     = tw[T_LOG2:1];            // tw/2, tw is even for T=128 tiles
+
+    // ============================ DRAIN: tile buffer -> dst ============================
+    localparam D_IDLE=2'd0, D_AW=2'd1, D_DATA=2'd2, D_DONE=2'd3;
+    reg [1:0]  dst_st;
+    reg [15:0] dj;                       // which column of the tile == which dst row
+    reg [8:0]  drem;
+    reg [T_LOG2-1:0] drow;               // element-pair index down the column
+
+    wire [31:0] dst_row_off = (({16'd0, c0} + {16'd0, dj}) * GRID + {16'd0, r0}) * EL_B;
+    wire [8:0]  d_beats     = th[T_LOG2:1];            // th/2
+
+    // ---- bank access ---------------------------------------------------------------------
+    // FILL beat k of row i carries elements (i,2k) and (i,2k+1): banks i&1 and ~(i&1), SAME
+    // address {i,k}.  DRAIN beat k of column j carries (2k,j) and (2k+1,j): banks j&1 and
+    // ~(j&1) at addresses {2k, j>>1} and {2k+1, j>>1}.  Both pairs straddle the banks -- that
+    // is the whole point of bank = (i^j)&1.
+    wire        f_lo_bank = fi[0];
+    wire [TW_AW-1:0] f_addr = {fi[T_LOG2-1:0], fcol};
+    wire        d_lo_bank = dj[0];
+    wire [TW_AW-1:0] d_addr_lo = {{drow, 1'b0}[T_LOG2-1:0], dj[T_LOG2-1:1]};
+    wire [TW_AW-1:0] d_addr_hi = {{drow, 1'b1}[T_LOG2-1:0], dj[T_LOG2-1:1]};
+
+    reg [31:0] d_q0, d_q1;
+    always @(posedge clk) begin
+        if (fst == F_DATA && m_rvalid && m_rready) begin
+            if (f_lo_bank) begin
+                bank1[f_addr] <= m_rdata[31:0];
+                bank0[f_addr] <= m_rdata[63:32];
+            end else begin
+                bank0[f_addr] <= m_rdata[31:0];
+                bank1[f_addr] <= m_rdata[63:32];
+            end
+        end
+        d_q0 <= d_lo_bank ? bank1[d_addr_lo] : bank0[d_addr_lo];
+        d_q1 <= d_lo_bank ? bank0[d_addr_hi] : bank1[d_addr_hi];
+    end
+
     assign m_arid    = {AXI_ID_W{1'b0}};
     assign m_awid    = {AXI_ID_W{1'b0}};
     assign m_arsize  = 3'b011;                 // 8 bytes/beat -- FULL WIDTH, unlike the HLS kernel
@@ -162,5 +226,110 @@ module corner_turn_v #(
     assign m_arburst = 2'b01;                  // INCR
     assign m_awburst = 2'b01;
     assign m_wstrb   = {(AXI_DATA_W/8){1'b1}}; // every beat carries 2 whole elements
+
+    // ============================ FILL / DRAIN sequencer ============================
+    // SINGLE-BUFFERED for now: fill a tile, then drain it. That already wins the ~2x from
+    // full-width beats. Double buffering (fill n+1 while draining n) is the follow-on that
+    // attacks the 41.5% idle, and it is deliberately NOT bundled here -- the TB lands first so
+    // the overlap cannot silently change the data.
+    assign m_rready = (fst == F_DATA);
+    assign m_wvalid = (dst_st == D_DATA);
+    assign m_wdata  = {d_q1, d_q0};
+    assign m_wlast  = (drem == 9'd1);
+    assign m_bready = 1'b1;
+
+    reg last_tile;
+
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            fst <= F_IDLE; dst_st <= D_IDLE; busy <= 1'b0;
+            r0 <= 16'd0; c0 <= 16'd0; fi <= 16'd0; dj <= 16'd0;
+            fcol <= {T_LOG2{1'b0}}; drow <= {T_LOG2{1'b0}};
+            frem <= 9'd0; drem <= 9'd0;
+            m_arvalid <= 1'b0; m_awvalid <= 1'b0;
+            m_araddr <= {AXI_ADDR_W{1'b0}}; m_awaddr <= {AXI_ADDR_W{1'b0}};
+            m_arlen <= 8'd0; m_awlen <= 8'd0; last_tile <= 1'b0;
+        end else begin
+            if (start_pulse && !busy) begin
+                busy <= 1'b1; last_tile <= 1'b0;
+                r0 <= 16'd0; c0 <= c_first;
+                fi <= 16'd0; fcol <= {T_LOG2{1'b0}};
+                fst <= F_AR;
+            end
+
+            // ---- FILL: one AR per tile row, tw/2 beats each ----
+            case (fst)
+            F_AR: begin
+                if (!m_arvalid) begin
+                    m_araddr  <= src_base + src_row_off;
+                    m_arlen   <= f_beats[7:0] - 8'd1;
+                    m_arvalid <= 1'b1;
+                    frem      <= f_beats;
+                    fcol      <= {T_LOG2{1'b0}};
+                end else if (m_arready) begin
+                    m_arvalid <= 1'b0;
+                    fst       <= F_DATA;
+                end
+            end
+            F_DATA: if (m_rvalid) begin
+                fcol <= fcol + 1'b1;
+                frem <= frem - 1'b1;
+                if (frem == 9'd1) begin
+                    if (fi + 16'd1 >= th) begin fst <= F_DONE; end
+                    else begin fi <= fi + 16'd1; fst <= F_AR; end
+                end
+            end
+            F_DONE: begin
+                // hand the tile to the drain side
+                dj     <= 16'd0;
+                drow   <= {T_LOG2{1'b0}};
+                dst_st <= D_AW;
+                fst    <= F_IDLE;
+            end
+            default: ;
+            endcase
+
+            // ---- DRAIN: one AW per tile column, th/2 beats each ----
+            case (dst_st)
+            D_AW: begin
+                if (!m_awvalid) begin
+                    m_awaddr  <= dst_base + dst_row_off;
+                    m_awlen   <= d_beats[7:0] - 8'd1;
+                    m_awvalid <= 1'b1;
+                    drem      <= d_beats;
+                    drow      <= {T_LOG2{1'b0}};
+                end else if (m_awready) begin
+                    m_awvalid <= 1'b0;
+                    dst_st    <= D_DATA;
+                end
+            end
+            D_DATA: if (m_wready) begin
+                drow <= drow + 1'b1;
+                drem <= drem - 1'b1;
+                if (drem == 9'd1) begin
+                    if (dj + 16'd1 >= tw) dst_st <= D_DONE;
+                    else begin dj <= dj + 16'd1; dst_st <= D_AW; end
+                end
+            end
+            D_DONE: begin
+                // advance to the next tile: c0 across the strip, then r0 down the frame
+                if (c0 + T[15:0] >= c_end) begin
+                    c0 <= c_first;
+                    if (r0 + T[15:0] >= GRID[15:0]) begin
+                        busy   <= 1'b0;       // whole frame (or strip) done
+                        dst_st <= D_IDLE;
+                    end else begin
+                        r0 <= r0 + T[15:0];
+                        fi <= 16'd0; fst <= F_AR; dst_st <= D_IDLE;
+                    end
+                end else begin
+                    c0 <= c0 + T[15:0];
+                    fi <= 16'd0; fst <= F_AR; dst_st <= D_IDLE;
+                end
+            end
+            default: ;
+            endcase
+        end
+    end
 
 endmodule

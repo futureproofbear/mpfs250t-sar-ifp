@@ -30,7 +30,7 @@
   <text x="259" y="130" text-anchor="middle" font-size="10.5" fill="#333333">keystone / polar-format</text>
   <text x="259" y="145" text-anchor="middle" font-size="10.5" fill="#333333">range gather + transpose</text>
   <text x="259" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric gather kernel</text>
-  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">11.98 s</text>
+  <text x="259" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#b5651d">11.175 s</text>
 
   <!-- 2 window -->
   <rect x="366" y="88" width="130" height="102" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8" stroke-dasharray="5 3"/>
@@ -47,7 +47,7 @@
   <text x="593" y="126" text-anchor="middle" font-size="9.5" fill="#333333">8192-pt · BFP · window+gather fused</text>
   <text x="593" y="139" text-anchor="middle" font-size="9" fill="#888888">code name: "range FFT" (K_FFT1)</text>
   <text x="593" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
-  <text x="593" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">15.97 s</text>
+  <text x="593" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">5.374 s</text>
 
   <!-- 4 corner turn -->
   <rect x="690" y="88" width="138" height="102" rx="6" fill="#d6e4f7" stroke="#2c5aa0" stroke-width="1.8"/>
@@ -55,7 +55,7 @@
   <text x="759" y="130" text-anchor="middle" font-size="10.5" fill="#333333">global transpose</text>
   <text x="759" y="145" text-anchor="middle" font-size="10.5" fill="#333333">tiled via LSRAM</text>
   <text x="759" y="163" text-anchor="middle" font-size="11" fill="#2c5aa0">fabric kernel, strip-pipelined</text>
-  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">6.20 s*</text>
+  <text x="759" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">hidden*</text>
 
   <!-- 5 azimuth fft -->
   <rect x="852" y="88" width="146" height="102" rx="6" fill="#dcedd6" stroke="#4a7c3f" stroke-width="1.8"/>
@@ -63,7 +63,7 @@
   <text x="925" y="126" text-anchor="middle" font-size="9.5" fill="#333333">8192-pt · BFP · detect fused</text>
   <text x="925" y="139" text-anchor="middle" font-size="9" fill="#888888">code name: "azimuth FFT" (K_FFT2)</text>
   <text x="925" y="163" text-anchor="middle" font-size="11" fill="#4a7c3f">fabric CoreFFT</text>
-  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">12.90 s*</text>
+  <text x="925" y="181" text-anchor="middle" font-size="14" font-weight="700" fill="#1a1a1a">8.610 s*</text>
 
   <!-- 6 detect -->
   <rect x="1022" y="88" width="130" height="102" rx="6" stroke-dasharray="5 3" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>

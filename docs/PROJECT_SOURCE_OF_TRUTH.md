@@ -471,6 +471,9 @@ agent with four stacked layers — Knowledge (skills + runbooks + memory), Execu
 headless harnesses), Verification (goal-driven, value-level, loop-until-proven), and Handoff
 (self-contained baselines + skills).](img/ai_framework_diagram.svg)
 
+**Figure 5 — AI framework layers.** Knowledge / Execution / Verification / Handoff. Portable to
+other FPGA-SoC projects via `ai-framework/`.
+
 Two kinds of block:
 
 - **Skills** (`.claude/skills/`) — knowledge packs that load into the session when their topic comes
@@ -509,6 +512,10 @@ laws, assumes every software-correctness claim is false until routing is shown u
 to semantic JSON state), Architectural Critic (concurrency/arbitration/handshake laws), and
 Synthesis & Repair (localized HLS/Verilog/C patches).](img/ai_agent_topology.svg)
 
+**Figure 6 — Multi-agent topology.** Ingestion & Triage supplies facts, the Architectural Critic
+diagnoses, Synthesis & Repair writes the fix. Separating them is what stops a plausible narrative
+being mistaken for a root cause.
+
 The target execution model wraps that loop in an explicit multi-stage gate — compile, then a
 virtual-simulation gate that must first *reproduce* the failure and then clear it, then a
 hardware-in-the-loop gate on real silicon — so a fix is never accepted on a claim, only on evidence
@@ -518,6 +525,9 @@ from the next gate up:
 gate -> virtual-sim gate (reproduce then clear the lockup) -> hardware-in-the-loop gate (TREADY high,
 count past threshold, deadlock cleared) -> verified fix; any gate failure feeds telemetry back to the
 Critic.](img/ai_closed_loop_harness.svg)
+
+**Figure 7 — Closed-loop verification harness.** Compile → simulation → hardware-in-the-loop, each
+a gate. Still `[Target]`, not `[As-run]`.
 
 This closed-loop harness is still `[Target]`, not `[As-run]` — today a person runs it stage by stage
 and reads each gate's result rather than a deterministic runner enforcing it end to end.

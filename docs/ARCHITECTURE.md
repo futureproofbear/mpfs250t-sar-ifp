@@ -48,7 +48,12 @@ Parts 1–2. This section and §2 describe only the current as-built contract.
 
 ## 2. Pipeline dataflow
 
-![SAR pipeline dataflow](img/sar_pipeline.svg)
+![Figure 1 — SAR pipeline dataflow](img/sar_pipeline.svg)
+
+**Figure 1 — SAR pipeline dataflow.** Stage times are the silicon-verified 25.16 s baseline
+(2026-07-27, CRC `0x319037b2`). `*` marks the corner-turn/FFT-2 overlap: CT#2 is strip-pipelined
+under FFT-2, so its ~6 s is hidden and 8.610 s is the merged wall time. Note the stage names are
+historically inverted — "range FFT" is FFT-1, the AZIMUTH transform.
 
 Stages run sequentially: the MSS arms a kernel, polls its DONE flag, then arms the next. This is
 not a fused concurrent pipeline. Every stage is a DDR-to-DDR streaming pass, because the frame
@@ -219,6 +224,13 @@ Two things this depends on, both deliberate:
 
 ### 2.4 The two FFT passes — a naming correction
 
+![Figure 8 — CoreFFT streaming chain](img/sar_corefft_chain.svg)
+
+**Figure 8 — CoreFFT streaming chain.** `fft_feeder → gearbox → CoreFFT → fft_unloader`. Since
+2026-07-26 there are **TWO** such chains (`FEED/GBX/FFT/UNLD` and `FEED_B/GBX_B/FFT_B/UNLD_B`),
+enabled by `SAR_DUALFFT` and splitting each pass's rows in contiguous blocks; the figure shows one.
+
+
 The shipping FFT is the Microchip **CoreFFT hard IP**, driven as a streaming chain
 `fft_feeder → gearbox → CoreFFT → fft_unloader`, selected at runtime by `SAR_FFTMODE` @
 `0xB0059110` = 1 (mode 0 is a retained legacy CPU FFT in `sar_fft.c`). The feeder and unloader are
@@ -356,9 +368,80 @@ default is `detect_mode == 3` (fused fabric detect, `DETMODE=3`). That single li
 stale leftover from before the fusion became the default; this document treats `DETMODE=3` /
 fabric-fused as current, consistent with the majority of sources and with §2's stage table above.
 
+### 2.5a Resample coefficients — where they come from, and how fast
+
+The resample gathers do not compute geometry; they consume precomputed per-output pairs
+`(idx, wq)` — a source index and a Q15 interpolation weight — and evaluate
+
+```
+out[q] = lerp(src[idx[q]], src[idx[q]+1], wq[q])      idx < 0 => zero fill (the FFT pad)
+```
+
+There are `Mp` = 8192 of these **per line**, and 8192 lines per pass, so a pass needs **67 million
+coefficient pairs**. Producing them, not consuming them, was the pipeline's dominant cost for most
+of its history.
+
+**The two passes are not symmetric, and that is the whole story.**
+
+| | pass 1 (range) | pass 2 (azimuth) |
+|---|---|---|
+| inverts | `kr = 2·pr/C·(f0 + j·df)` onto uniform `KR` | `kc = kr·tanφ` onto uniform `KC` |
+| in the source variable | **affine** | **not** affine |
+| so the inverse is | closed form: `t = (KR[q] − x0)·inv` | a **search** in sorted `tan_s` |
+| cost | 1 subtract + 1 multiply per output | bracket advance + divide-free interpolation |
+
+Pass 2's search is why `sar_coeffs_init()` sorts `tanφ` into `tan_s`, why `invorder[]` exists (pass 1
+writes row `i` to `invorder[i]` so rows arrive tan-sorted), and why `tan_s` must be **strictly
+monotonic** — a repeated value makes the bracket ill-posed. It is also why the on-fabric generator
+carries three 8192×32 tables (`tanmem`, `itanmem`, `kcmem`) rather than one.
+
+#### Throughput: CPU vs fabric
+
+Measured per line of pass 2 (silicon, 8192 outputs):
+
+| producer | µs/row | vs fabric floor |
+|---|---:|---|
+| CPU, single hart (`sar_coeffs_pass2`) | **1499** | 2.1× slower than CoreFFT |
+| CPU, 4 harts (`SAR_CWRK_NW=4`) | **~508** | still pacing the stage |
+| **on-fabric `sar_coeffgen`** | **~147** | **4.7× faster than the CoreFFT floor** |
+| CoreFFT itself (the irreducible consumer) | 698 | — |
+
+The CoreFFT floor is 69,790 cycles/row = 698 µs at 100 MHz. So with CPU coefficients the stage is
+**coefficient-paced** — the fabric sits idle waiting — and with the fabric generator it becomes
+**FFT-paced**, which is the point: only then does a second CoreFFT chain buy anything, and that
+coupling is enforced in firmware (`SAR_DUALFFT` silently drops to one chain unless `SAR_CGENMODE`
+is on, recording it in `RPROF[11]`).
+
+Confirmed by the residual-wait probe: with CPU coefficients `RPROF[9]` (fabric wait after coeff-gen
+returns) is **0.53 µs/row**, i.e. 99.95% of the stage was the CPU.
+
+#### How the fabric generator works
+
+`sar_coeffgen.v` is hand-written, streams `{m_idx, m_wq}` straight into the FFT‑1 feeder's
+`c_idx/c_wq/c_valid/c_ready` port, and has **no AXI4 initiator at all** — it costs zero DIC ports
+and touches DDR never. Streaming also deletes the `idx`/`wq` DDR round-trip: 6,144 of a row's 8,961
+read beats (**68.6%**) and the CPU's per-row L2 flush disappear with it.
+
+The one division (`1/dx`, `RINV`) is **per row, not per output**, so it stays on the CPU and arrives
+as a scalar — there is no divider in fabric.
+
+Correctness is not argued from simulation: `mpfs/host/check_coeffgen_fixed.py` proves the integer
+binary32 datapath **bit-identical** to the C reference on real staged geometry, including at
+production 8192×8192, so switching the source cannot move the pipeline CRC. That is what makes
+`SAR_CGENMODE` a same-bitstream, same-binary A/B.
+
+**Pass 1 is still on the CPU.** It is the cheaper maths (closed form, one table, ~16 LSRAM instead
+of 48) and is the largest remaining lever at ~5.8 s — see `mpfs/fpga/coeffgen1_design.md`. Its
+arithmetic is already gated bit-exact at production geometry; what it lacks is a consumer, since
+`RES` reads `idx`/`wq` from DDR rather than from a stream.
+
 ### 2.6 Data movement: how bytes get between fabric and DDR
 
-![Fabric to DDR routing](img/sar_fabric_ddr_routing.svg)
+![Figure 2 — Fabric-to-DDR routing](img/sar_fabric_ddr_routing.svg)
+
+**Figure 2 — Fabric-to-DDR routing.** Every fabric master reaches DDR through the DIC and FIC_0;
+FIC_0 is non-coherent, which is why the CPU must flush L2 before arming a kernel. The DIC has one
+DDR target window (`0x8000_0000..0xBFFF_FFFF`) — addresses outside it are not decoded at all.
 
 Two planes cross FIC_0, and only one of them matters for performance. Full interconnect topology
 (masters, targets, AXI ID handling): §9.
@@ -386,7 +469,11 @@ running line `i`.
 
 ### 2.7 AXI beat packing
 
-![AXI beat packing](img/sar_axi_packing.svg)
+![Figure 3 — AXI beat packing](img/sar_axi_packing.svg)
+
+**Figure 3 — AXI beat packing.** Why element width matters on a 64-bit port: a 4-byte element per
+beat wastes half the bus. Measured on the corner-turn (E4, 2026-07-27): 524,288 bursts × 128 beats
+= 512 MiB of beat capacity to move a 256 MiB frame.
 
 The bus is 64-bit, but `AxSIZE` decides how many of those 8 bytes a beat actually carries (2^n).
 The resample kernel originally moved one C element per beat: `AxSIZE 3'd2` (4 bytes) for `in`,
@@ -417,7 +504,11 @@ Two streams are deliberately left unpacked:
 
 ## 3. Memory map & buffers
 
-![DDR memory map](img/sar_ddr_map.svg)
+![Figure 4 — DDR memory map](img/sar_ddr_map.svg)
+
+**Figure 4 — DDR memory map.** The cached window is full to the byte: SIG + SCRATCH + OUT + code
+end exactly at `0xB000_0000`. There is no room for a fourth frame buffer, and the non-cached
+segment at `0xC000_0000` is NOT reachable by the fabric.
 
 Defined in `src/sar/ddr_sar_layout.h` and mirrored by `mpfs/host/ddr_layout.py`. These two must
 stay in lock-step; the header is the bare-metal mirror, the Python module is the host-side single

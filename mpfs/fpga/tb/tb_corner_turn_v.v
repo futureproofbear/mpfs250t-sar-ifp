@@ -21,6 +21,8 @@
 module ct_case #(
     parameter integer GRID_OVR = 16,       // frame edge
     parameter integer T_LOG2   = 2,        // T = 4
+    parameter integer CB       = 0,        // c_base  -- strip column base
+    parameter integer CC       = 0,        // c_count -- 0 = full frame
     parameter         NAME     = "case"
 )(output reg done, output reg [31:0] bad);
     localparam integer READ_LAT = 7;       // cycles between AR accept and first R beat
@@ -148,10 +150,14 @@ module ct_case #(
             mem_src[i] = 32'hC0DE_0000 | i[15:0];
             mem_dst[i] = 32'hDEAD_BEEF;          // poison: an untouched element must FAIL
         end
-        // golden: dst[c*H + r] = src[r*W + c]
-        for (i = 0; i < GRID_OVR; i = i + 1)
-            for (j = 0; j < GRID_OVR; j = j + 1)
-                golden[j*GRID_OVR + i] = mem_src[i*GRID_OVR + j];
+        // golden: dst[c*H + r] = src[r*W + c], but ONLY for columns the strip covers.
+        // Rows outside [CB, CB+CC) must remain poisoned -- that is what proves a strip does not
+        // write outside its range, which fft2_ct_overlap's producer/consumer barrier depends on.
+        for (i = 0; i < NEL; i = i + 1) golden[i] = 32'hDEAD_BEEF;
+        for (j = 0; j < GRID_OVR; j = j + 1)
+            if ((CC == 0) || ((j >= CB) && (j < CB + CC)))
+                for (i = 0; i < GRID_OVR; i = i + 1)
+                    golden[j*GRID_OVR + i] = mem_src[i*GRID_OVR + j];
 
         repeat (8) @(posedge clk);
         resetn = 1'b1;
@@ -159,8 +165,8 @@ module ct_case #(
 
         lite_w(12'h00c, SRC_BASE);
         lite_w(12'h010, DST_BASE);
-        lite_w(12'h014, 32'd0);     // c_base
-        lite_w(12'h018, 32'd0);     // c_count = 0 => full frame
+        lite_w(12'h014, CB[31:0]);  // c_base
+        lite_w(12'h018, CC[31:0]);  // c_count (0 => full frame)
         lite_w(12'h008, 32'd1);     // START
 
         guard = 0;
@@ -202,14 +208,18 @@ endmodule
 // is exactly tiled, so the ragged path is defensive -- which is precisely why it needs a test:
 // untested defensive code that is wrong looks handled.
 module tb_corner_turn_v;
-    wire d0, d1; wire [31:0] b0, b1;
+    wire d0, d1, d2; wire [31:0] b0, b1, b2;
     ct_case #(.GRID_OVR(16), .T_LOG2(2), .NAME("exact ")) u_exact (.done(d0), .bad(b0));
     ct_case #(.GRID_OVR(14), .T_LOG2(2), .NAME("ragged")) u_ragged(.done(d1), .bad(b1));
+    // STRIP: what fft2_ct_overlap actually drives (c_base/c_count), never simulated until now.
+    ct_case #(.GRID_OVR(16), .T_LOG2(2), .CB(4), .CC(8), .NAME("strip ")) u_strip(.done(d2), .bad(b2));
     initial begin
-        wait (d0 && d1);
+        wait (d0 && d1 && d2);
         #1;
-        if (b0 == 0 && b1 == 0) $display("==== corner_turn_v: PASS (both cases bit-exact) ====");
-        else                    $display("==== corner_turn_v: FAIL (exact=%0d ragged=%0d) ====", b0, b1);
+        if (b0 == 0 && b1 == 0 && b2 == 0)
+            $display("==== corner_turn_v: PASS (all cases bit-exact) ====");
+        else
+            $display("==== corner_turn_v: FAIL (exact=%0d ragged=%0d strip=%0d) ====", b0, b1, b2);
         $finish;
     end
 endmodule

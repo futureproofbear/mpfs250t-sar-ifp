@@ -917,7 +917,11 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         { RP_T0(t);
           rc = fft_join(nch, budget);
           RP_ACC(9, t); }
-        if (row == 1u) ficmon_snapshot(1u, 3u, Mp);  /* E1: slot 1, pass tag 3 = FFT-1 row group */
+        /* E1 (FFT-1 row group) DISABLED 2026-07-27: it shares slot 1 with the range gather and runs
+         * later, so it overwrote the gather record. Its result is already captured and recorded --
+         * ~80% genuine FIC_0 idle (util 5.2%, r_datawait 7.3%, write 7.7%), i.e. FFT-1 is NOT
+         * bus-bound. Re-enable only after moving SAR_CWRK to free a real third slot. */
+        (void)0;  /* was: if (row == 1u) ficmon_snapshot(1u, 3u, Mp); */
         RPROF[10] += nch;
         if (rc) return rc;
         /* Rule (a): every chain's exponent is read HERE, after the join and before the next arm.
@@ -1094,7 +1098,18 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         { RP_T0(t);
           if (!sar_k_wait(K_RESAMPLE, spins)) return 0;
           RP_ACC(3, t); }
-        if (i == 0u) ficmon_snapshot(0u, 1u, Np / 2u);   /* Np samples, 2/beat */
+        /* SLOT 1, not slot 0: the internal corner-turn snapshots slot 0 (pass tag 4) LATER in the
+         * same frame, so a range-gather record written here was overwritten every run and the
+         * 5.2 s gather -- the largest single block in the frame -- was never actually observable.
+         * Found 2026-07-27 when E4 was read expecting gather data and returned corner-turn data.
+         *
+         * There is NO slot 2. FICMON's allocation ends at 0xB00592E0 and SAR_CWRK_ADDR starts at
+         * 0xB0059300 (sar_coeff_workers.h) -- only 32 bytes, and a record is 80. Writing a slot 2
+         * overruns the coefficient-worker control block, which silently drops the renormalize
+         * epilogue to single-hart: measured 2026-07-27 as +2.0 s range-FFT and +1.6 s azimuth-FFT
+         * (frame 18.48 -> 22.04 s) with resample untouched. Do not add a slot here without moving
+         * SAR_CWRK first. */
+        if (i == 0u) ficmon_snapshot(1u, 1u, Np / 2u);   /* Np samples, 2/beat */
         RPROF[4]++;
         b ^= 1;
     }

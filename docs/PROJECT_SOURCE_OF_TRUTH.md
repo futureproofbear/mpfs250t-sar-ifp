@@ -466,10 +466,20 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 This repo ships a Claude Code / Agent framework so a new session gets the accumulated knowledge
 automatically, rather than re-deriving it.
 
-![AI framework: a HUMAN layer (intent, hardware actions, approval gates, judgement) over an AI
-agent with four stacked layers — Knowledge (skills + runbooks + memory), Execution (hygiene-baked
-headless harnesses), Verification (goal-driven, value-level, loop-until-proven), and Handoff
-(self-contained baselines + skills).](img/ai_framework_diagram.svg)
+```mermaid
+flowchart TB
+  H["HUMAN<br/>intent · hardware actions · approval gates · judgement"]
+  subgraph AI["AI agent"]
+    direction TB
+    K["KNOWLEDGE<br/>skills + runbooks + memory"]
+    E["EXECUTION<br/>hygiene-baked headless harnesses"]
+    V["VERIFICATION<br/>goal-driven · value-level · loop-until-proven"]
+    D["HANDOFF<br/>self-contained baselines + skills"]
+    K --> E --> V --> D
+  end
+  H --> AI
+  D -. "next session starts here" .-> K
+```
 
 **Figure 5 — AI framework layers.** Knowledge / Execution / Verification / Handoff. Portable to
 other FPGA-SoC projects via `ai-framework/`.
@@ -508,9 +518,15 @@ ground-truth state, proposes no fixes), `architectural-critic` (spatial concurre
 laws, assumes every software-correctness claim is false until routing is shown unblocked), and
 `synthesis-repair` (localized HLS/Verilog/C patches strictly within the Critic's constraints):
 
-![Multi-agent topology: an Orchestrator/Judge over three agents — Ingestion & Triage (raw JTAG/ILA
-to semantic JSON state), Architectural Critic (concurrency/arbitration/handshake laws), and
-Synthesis & Repair (localized HLS/Verilog/C patches).](img/ai_agent_topology.svg)
+```mermaid
+flowchart TB
+  O["Orchestrator / Judge"]
+  A1["ingestion-triage<br/>raw JTAG/ILA → semantic JSON state<br/><b>proposes no fixes</b>"]
+  A2["architectural-critic<br/>concurrency · arbitration · CDC · handshake laws<br/><b>assumes every software claim is false</b><br/>until routing is shown unblocked"]
+  A3["synthesis-repair<br/>localized HLS/Verilog/C patches<br/><b>strictly within the Critic's constraints</b>"]
+  O --> A1 --> A2 --> A3
+  A3 --> O
+```
 
 **Figure 6 — Multi-agent topology.** Ingestion & Triage supplies facts, the Architectural Critic
 diagnoses, Synthesis & Repair writes the fix. Separating them is what stops a plausible narrative
@@ -521,10 +537,19 @@ virtual-simulation gate that must first *reproduce* the failure and then clear i
 hardware-in-the-loop gate on real silicon — so a fix is never accepted on a claim, only on evidence
 from the next gate up:
 
-![Closed-loop harness: deadlock -> JTAG capture -> Agents 1+2 diagnose -> Agent 3 repair -> compile
-gate -> virtual-sim gate (reproduce then clear the lockup) -> hardware-in-the-loop gate (TREADY high,
-count past threshold, deadlock cleared) -> verified fix; any gate failure feeds telemetry back to the
-Critic.](img/ai_closed_loop_harness.svg)
+```mermaid
+flowchart LR
+  DL["deadlock<br/>on silicon"] --> CAP["JTAG capture"]
+  CAP --> DIAG["ingestion-triage<br/>+ architectural-critic<br/>diagnose"]
+  DIAG --> REP["synthesis-repair<br/>patch"]
+  REP --> G1{"compile<br/>gate"}
+  G1 -->|pass| G2{"virtual-sim gate<br/>reproduce, then clear<br/>the lockup"}
+  G2 -->|pass| G3{"hardware-in-the-loop<br/>TREADY high, count past<br/>threshold, deadlock cleared"}
+  G3 -->|pass| OK["verified fix"]
+  G1 -->|fail| DIAG
+  G2 -->|fail| DIAG
+  G3 -->|fail| DIAG
+```
 
 **Figure 7 — Closed-loop verification harness.** Compile → simulation → hardware-in-the-loop, each
 a gate. Still `[Target]`, not `[As-run]`.

@@ -328,6 +328,45 @@ no single remaining change can produce another 25%+ cut. The corner-turn replace
 11.175 → 7.267 s and the FFT-2/CT#2 overlap 8.610 → 5.396 s.
 
 Range-FFT went the WRONG way across that change, 5.374 → 5.788 s (+0.41 s), and is UNEXPLAINED.
+
+### 3.3a Where the time actually goes (E4, measured 2026-07-27)
+
+Bus telemetry from `sar_fic0s_mon.v`, decoded with `mpfs/host/decode_ficmon.py`. This section
+replaces argument with measurement; several earlier plans were re-ranked by it.
+
+Resample sub-stages (`run_stage_timing.sh`): range gather **5.212 s**, internal corner-turn (CT#1)
+**2.064 s**, azimuth gather 0 (fused into the FFT-1 feeder).
+
+| kernel | port active | DDR read-wait | genuine idle | burst shape |
+|---|---:|---:|---:|---|
+| CT#1 — before (SmartHLS) | 22.7% | 35.8% | **41.5%** | half-width |
+| CT#1 — after (`corner_turn_v`) | 26.2% | **71.8%** | **2.0%** | 64-beat avg |
+| range gather (RES, SmartHLS) | 23.2% | 36.9% | **~40%** | **98.2% in 65–256** |
+| FFT-1 row group | 5.2% | 7.3% | **~80%** | 17–64 |
+
+Three conclusions, each of which overturned a plan:
+
+- **The corner-turn is finished as a kernel problem.** Idle collapsed 41.5% → 2.0%; the rewrite
+  did exactly what it was for. It now moves 256 MiB in 2.06 s (~260 MB/s against an 800 MB/s FIC_0
+  ceiling), so ~3x port headroom remains but is blocked by DDR read latency. The next lever is
+  outstanding-read depth / prefetch, an interconnect change — **not** a third rewrite.
+- **`resample_v.v` is NOT justified as a burst fix.** The range gather already issues long bursts
+  (98.2% in the 65–256 bucket, avg 71.9 beats), unlike the corner-turn it was modelled on. Its
+  ~40% idle points off-bus, at the CPU pass-1 coefficient path — which bounds the pass-1 fabric
+  coeffgen win at roughly **2 s** and makes it the one clearly justified lever.
+- **The range-FFT regression is not bus contention.** FFT-1 is ~80% bus-idle, so the +0.42 s must
+  be off-bus: CoreFFT on the 12.5 MHz `SLOWCLK`, coefficient generation, or the renormalize.
+
+Run-to-run spread over three ELOD+PIPE cycles: total 18.477 / 18.484 / 18.591 s. Resample is
+deterministic to **0.4 ms**; range-FFT is the noisy stage at **120 ms**. The +0.42 s regression is
+~3.5x that spread, so it is real and not sampling noise.
+
+> **FICMON has exactly TWO slots**, and `FICMON_REC()` is bare address arithmetic with no bounds
+> check. A `ficmon_snapshot(2, ...)` writes 80 bytes at `0xB00592E0`, 48 of them onto `SAR_CWRK_ADDR`
+> (`0xB0059300`) — the coefficient-worker control block. Measured cost when this happened
+> accidentally: the renormalize epilogue silently dropped to single-hart, frame 18.48 → 22.04 s
+> (+2.0 s range-FFT, +1.6 s azimuth-FFT, resample untouched). An unintended but clean measurement of
+> what the multi-hart epilogue is worth.
 The plausible reading is FIC_0 contention shifting now that the corner-turns finish sooner, but it
 has not been measured. Treat it as an open item, not a known cost.
 
@@ -406,3 +445,23 @@ passing timing. Verified on silicon, twice.
   compile-time `DDR_SIZE` (1 GB) and the build report's stated board DRAM (2 GB); this
   guide did not re-resolve it, since it is a pre-silicon planning note rather than part of the
   optimization or algorithm narrative.
+
+### 3.4 Remaining levers, ranked by MEASUREMENT (2026-07-27)
+
+Ranked after E4, not before it. Two entries were demoted and one promoted by the measurement, so
+prefer this table to any earlier prose. Frame 18.45 s; resample 7.267 · range-FFT 5.788 ·
+azimuth-FFT 5.396.
+
+| lever | est. payoff | basis | status |
+|---|---:|---|---|
+| Pass-1 fabric coeffgen | **~2 s** | measured: ~40% of a 5.212 s gather is bus-idle | RTL fixed + 12/12 gated; build pending |
+| Range-FFT regression | ~0.4 s | measured, 3.5x the run spread | off-bus; cause unknown |
+| Corner-turn prefetch / outstanding reads | unknown | 71.8% read-wait, ~3x port headroom | interconnect change, not RTL |
+| `resample_v.v` | small alone | bursts ALREADY long — no burst defect | only as the coefficient-stream consumer |
+| CT#1 / FFT-1 overlap | ≤2 s | CT#1 measured 2.064 s | needs WORK buffer; DIC window blocks it |
+| Four FFT chains | ~0 | serial epilogue (measured worth 3.6 s) dominates | not recommended |
+| Raise fabric clock | 0–3 s | +0.182 ns slack on a ~9.82 ns path | needs path surgery; raises power |
+
+Sanity ceiling: stacking the plausible wins optimistically lands near **11–13 s**, not single
+digits. The three stages are within 1.9 s of each other, so no single change can repeat the
+corner-turn's 26.7%.

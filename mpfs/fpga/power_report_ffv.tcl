@@ -17,7 +17,7 @@
 set here [file normalize [file dirname [info script]]]
 set proj "$here/libero_ffv"
 
-if {[catch { open_project -project "$proj/sar_accel.prjx" } e]} {
+if {[catch { open_project -file "$proj/sar_accel.prjx" } e]} {
     puts "POWER_ERR: cannot open project: $e"
     puts "@@@ DONE"
     return

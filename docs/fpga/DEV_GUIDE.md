@@ -1031,13 +1031,29 @@ single FlashPro6 owner):
 This is now the single highest-yield gate for hand-written RTL on this project, because the firmware
 always drives a kernel repeatedly between power cycles (CT#1 in resample, then CT#2 once per strip
 under `fft2_ct_overlap`), while a bench that instantiates a fresh case per scenario resets before
-each one and therefore *cannot* see stale state. Three separate incidents, same shape:
+each one and therefore *cannot* see stale state.
 
-| date | module | bench said | silicon did |
-|---|---|---|---|
-| (earlier) | CoreFFT integration | golden TB ran ONE transform | re-arm path broken |
-| 2026-07-26 | `sar_coeffgen` pass-1 | 12/12 + 4/4 mutants | pass-2 regressed |
-| 2026-07-27 | `corner_turn_v` | 3/3 cases bit-exact | instant-done, then hang |
+| date | module | bench said | silicon did | cause |
+|---|---|---|---|---|
+| (earlier) | CoreFFT integration | golden TB ran ONE transform | re-arm path broken | re-arm |
+| 2026-07-27 | `corner_turn_v` | 3/3 cases bit-exact | instant-done, then hang | re-arm |
+| 2026-07-26 | `sar_coeffgen` pass-1 | 12/12 + 4/4 mutants | pass-2 regressed | **NOT re-arm** — see below |
+
+Checked 2026-07-27 and recorded so nobody re-runs the search: the `sar_coeffgen` pass-1 regression
+is **not** an instance of this bug. Its `busy` is set in `C_IDLE` and cleared in `C_DRAIN` — mutually
+exclusive FSM states, so no same-cycle override is possible — the pass-2 pipeline taps were correctly
+re-timed with the added stages (`asc_d[7]/frac_d2` → `asc_d[9]/frac_d4`), `OF_LIM` is derived from
+`EMIT_LAT` so the output FIFO auto-scaled, and `tb_sar_coeffgen.v` already re-arms per case. The
+leading hypothesis is now TIMING: that commit took `EMIT_LAT` 11 → 13 and added `f2i_floor`
+(variable shift) plus `i2f_small` (14-iteration priority encoder) to a module in the 100 MHz domain,
+which has only **+0.182 ns** setup slack. Pipeline those two functions and check the timing report
+before retrying. See `mpfs/fpga/coeffgen1_design.md` §7.
+
+The other hand-written modules were swept at the same time and are clean by construction:
+`fft_feeder_v.v`, `fft_unloader_v.v` and `sar_fic0s_mon.v` re-initialise each register in its own
+small `always` block (`else if (start_pulse) beat_idx <= 0;`), one register per block, so no
+ordering hazard exists. `corner_turn_v` was the outlier — one large block with a trailing
+conditional clear.
 
 The `corner_turn_v` case is the clearest specimen. `busy <= 1'b1` and `fill_done <= 1'b0` on the
 launch cycle, then later in the SAME `always` block a done-detect reading `fill_done` — which is

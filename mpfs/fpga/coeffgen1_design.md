@@ -1,7 +1,11 @@
 # Pass-1 (range) on-fabric coefficient generator — design
 
-Target: the **~5.8 s CPU-bound range gather** inside `resample`, which is now the largest single
-block in the frame (resample 11.18 s of 25.14 s = 44.5%, silicon 2026-07-26).
+Target: the **CPU-bound range gather** inside `resample`.
+
+> **NUMBERS BELOW ARE STALE (2026-07-26).** They were written against resample 11.18 s of a
+> 25.14 s frame. The hand-written corner-turn has since taken resample to **7.267 s** of an
+> **18.45 s** frame (2026-07-27). The gather's own share has NOT been re-measured since the fabric
+> coefficient generator landed — run E4 (`decode_ficmon.py`) before trusting any projection here.
 
 Status: **arithmetic gated, RTL not written.** `mpfs/host/check_coeffgen1_fixed.py` (commit
 `d676018`) proves the datapath below is bit-identical to `sar_coeffs_pass1_range()` on real staged
@@ -113,10 +117,43 @@ every board-free gate).
 
 ## 6. Expected gain
 
-Removes the CPU coefficient generation from the range gather (~5.8 s) and, because the stream
-deletes the `idx`/`wq` DDR round-trip, some of the gather's own read traffic as well. Resample
-11.18 s → ~5.5 s, frame 25.14 s → ~19.5 s. **Projected, not measured** — per the runtime-loop-bound
-lesson, A/B on silicon before believing it.
+~~Resample 11.18 s → ~5.5 s, frame 25.14 s → ~19.5 s.~~ **WITHDRAWN** — computed against a baseline
+that no longer exists. The frame is already 18.45 s, below that projection's end state, without this
+change.
+
+What can still be said: the change removes CPU coefficient generation from the range gather and
+deletes the `idx`/`wq` DDR round-trip, so it removes read traffic as well. The SIZE of the win is
+unknown until E4 says how much of the 7.267 s resample stage is coefficient-bound versus
+fabric-bound. The 2026-07 measurement (99.6% coeff-gen / 0.25% kernel wait) PREDATES the fabric
+coeffgen and cannot be carried forward.
+
+## 7. Post-mortem of the reverted attempt (2026-07-27)
+
+Commit `7191894` implemented this and regressed **pass 2** on silicon; it was reverted in `e1ed702`.
+Re-examined 2026-07-27, and the obvious suspect is ruled out — do not re-run this search:
+
+- **Not a re-arm bug.** `busy` is set in `C_IDLE`, cleared in `C_DRAIN`; mutually exclusive FSM
+  states, so the same-cycle override that broke `corner_turn_v` cannot occur here.
+- **Taps were correct.** The pass-2 pipeline taps moved with the added stages, `asc_d[7]/frac_d2`
+  → `asc_d[9]/frac_d4`, consistent with `EMIT_LAT` 11 → 13.
+- **FIFO was correct.** `OF_LIM = (1<<OF_AW) - EMIT_LAT - 2` auto-scaled 19 → 17.
+- **The bench already re-armed.** `tb_sar_coeffgen.v` issues a fresh START per case.
+
+What that commit DID do to the shipping path: lengthen it from 11 to 13 stages and add two large
+combinational blocks — `f2i_floor` (variable shift) and `i2f_small` (a 14-iteration priority-encoder
+loop) — inside a module in the 100 MHz domain that has **+0.182 ns** of setup slack, on a critical
+path already ~9.82 ns of a 10 ns period.
+
+**Leading hypothesis: timing, not logic.** Per `CLAUDE.md`, a timing violation mimics a functional
+bug perfectly and the toolchain programs a failing bitstream silently. Before retrying:
+
+1. Pipeline `f2i_floor` and `i2f_small` into their own registered stages rather than leaving them
+   combinational.
+2. Build and read the timing report FIRST — treat any slack regression on `OUT0` as the finding.
+3. Only then go to silicon.
+
+This is a hypothesis, not a confirmed root cause. It has not been proven, because proving it needs
+a build and a timing report that were not retained.
 
 The other ~5.4 s in resample is the internal corner-turn (`sar_sequencer.c:1059-1066`), a blocking
 full-frame transpose. It cannot be pipelined against its producer (a transpose needs all input rows

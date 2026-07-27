@@ -86,7 +86,7 @@ Project-specific rules earned on this SAR-on-silicon work. They complement the g
   the target is recoverable (in git / backed up), prefer in-place edits and work on copies. Fix your own
   messes headless rather than handing cleanup to the user.
 - **Capture and UPDATE runbooks the same session.** Store reusable procedures/gotchas in the runbook
-  docs (`docs/fpga/DEV_GUIDE.md`, `docs/SAR_GUIDE.md` Part 3, …) and write a proven
+  docs (`docs/fpga/DEV_GUIDE.md`, `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3, …) and write a proven
   procedure or new gotcha back into the relevant runbook in the SAME turn it is established — with the
   exact command, expected output, and the failure mode it avoids — so it survives into new sessions.
 - **Environment:** no PowerShell — a standing preference, use `cmd`/git-bash instead. Machine/account

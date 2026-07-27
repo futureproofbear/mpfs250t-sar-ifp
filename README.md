@@ -21,7 +21,7 @@ golden, speckle-limited at full single-look resolution).
 | I want to... | Read |
 |---|---|
 | Bring up the board, load data, build/program the latest bitstream, run it, and verify the output | **[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md)** |
-| Understand the algorithm, how it was ported from Python to fabric, and what was optimized (and by how much) | **[`docs/SAR_GUIDE.md`](docs/SAR_GUIDE.md)** |
+| Understand the algorithm, how it was ported from Python to fabric, and what was optimized (and by how much) | **[`docs/SAR_IMPLEMENTATION_RECORD.md`](docs/SAR_IMPLEMENTATION_RECORD.md)** |
 | Get the detailed as-built design reference (fixed-point contracts, memory map, register semantics, diagrams) | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) |
 | Work on this repo with an AI coding agent | [`docs/PROJECT_SOURCE_OF_TRUTH.md`](docs/PROJECT_SOURCE_OF_TRUTH.md) (authoritative index for an LLM, including §10 on the AI agent framework) |
 | Go deep on FPGA architecture (interconnect topology, HLS gotchas, headless build internals) | [`docs/fpga/`](docs/fpga/) |
@@ -40,7 +40,7 @@ mpfs250t-sar-ifp/
 │       └── render_quarters.py      # per-quarter / stitched image render of silicon OUT
 ├── docs/
 │   ├── USER_GUIDE.md          # operate the board: bring-up, load, build+program, run, verify
-│   ├── SAR_GUIDE.md           # algorithm, staged fabric port, optimization history
+│   ├── SAR_IMPLEMENTATION_RECORD.md           # algorithm, staged fabric port, optimization history
 │   └── fpga/                  # deep architecture reference, runbooks, silicon test procedures
 ├── data/                      # local mirror of the Umbra S3 bucket layout (git-ignored)
 └── output/                    # generated products (images, .npy — git-ignored)
@@ -83,7 +83,7 @@ python src/form_image_pfa.py
 ```
 
 First run downloads the ~196 MB CPHD into `data/` (anonymous HTTPS, no AWS credentials); later
-runs reuse the cache. See [`docs/SAR_GUIDE.md`](docs/SAR_GUIDE.md) for the algorithm this
+runs reuse the cache. See [`docs/SAR_IMPLEMENTATION_RECORD.md`](docs/SAR_IMPLEMENTATION_RECORD.md) for the algorithm this
 implements and the knobs at the top of the script.
 
 ## Quick run — silicon emulator (board-free)

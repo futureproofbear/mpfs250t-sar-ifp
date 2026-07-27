@@ -195,7 +195,7 @@ session you confirm a new mis-synthesis. Both are CLAUDE.md runbook rules.
 
 Gates 0–2 are exactly the per-change, board-free value verification a change must
 pass before it is eligible to be batched onto silicon (see the batch-confidence
-protocol in `docs/SAR_GUIDE.md` Part 3). The ledger's `lie_ratio → 1.0` is the
+protocol in `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3). The ledger's `lie_ratio → 1.0` is the
 evidence that a restructure actually removed a Class-B dependency.
 
 See also: `sar-verification-methodology` (the value gate), `mpfs-platform-gotchas`

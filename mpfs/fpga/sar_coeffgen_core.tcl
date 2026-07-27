@@ -3,7 +3,7 @@
 # feeder_v_core.tcl's create_links/create_hdl_core/hdl_core_add_bif/hdl_core_assign_bif_signal
 # pattern.
 #
-# NO SmartHLS ANYWHERE IN THIS PATH. sar_coeffgen.v is hand-written by mandate (docs/SAR_GUIDE.md
+# NO SmartHLS ANYWHERE IN THIS PATH. sar_coeffgen.v is hand-written by mandate (docs/SAR_IMPLEMENTATION_RECORD.md
 # Part 2, docs/fpga/DEV_GUIDE.md 1): SmartHLS has silently produced dead RTL (the mem->stream
 # feeder) and dropped sign extension (the detect (int16_t)(x>>16) miscompile) on this toolchain,
 # and this module is float32-exact arithmetic feeding a value gate -- exactly the class of code

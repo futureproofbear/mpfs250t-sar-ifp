@@ -81,9 +81,9 @@
 > from the pre-packing kernel). Scheduled 22,545 cycles = 361 us/line against ~880 us measured, so
 > the 2.44x gap is AXI STALL on a correct schedule (`axi_ii_lie`), not a burst failure. Localising
 > it needs the FIC_0 monitor (ARLEN histogram + inter-burst gap counters), still unbuilt. See
-> `docs/SAR_GUIDE.md` Part 3 and the `axi_ii_lie` entries in
+> `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 and the `axi_ii_lie` entries in
 > `docs/fpga/hls_silicon_stats.jsonl`. The per-stage breakdown lives in exactly one place,
-> [`docs/SAR_GUIDE.md`](SAR_GUIDE.md) Part 3; detailed current
+> [`docs/SAR_IMPLEMENTATION_RECORD.md`](SAR_IMPLEMENTATION_RECORD.md) Part 3; detailed current
 > design (dataflow, buffer map, fixed-point contracts, eMMC layout, register semantics):
 > [`docs/ARCHITECTURE.md`](ARCHITECTURE.md). Open next: the NDSU production scene; and automating the
 > closed-loop sim→HIL gate.
@@ -96,7 +96,7 @@
 > into the FFT unloader -- see the status block above)* detect ran on the MSS CPU (`detect_mode`
 > @`0xB0059118`) because
 > SmartHLS mis-synthesizes the fabric detect's sign extension. Full status + per-stage timing + latency roadmap:
-> [`docs/SAR_GUIDE.md`](SAR_GUIDE.md) Part 3; silicon-debug harness + learnings:
+> [`docs/SAR_IMPLEMENTATION_RECORD.md`](SAR_IMPLEMENTATION_RECORD.md) Part 3; silicon-debug harness + learnings:
 > [`docs/fpga/DEV_GUIDE.md`](fpga/DEV_GUIDE.md) §4. The CoreFFT note below is historical.
 >
 > **CURRENT STATUS (2026-07-04) — CoreFFT write-back reworked (DMA → HLS unloader → gearbox skid FIFO).**
@@ -339,9 +339,9 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
     design), `docs/fpga/DEV_GUIDE.md` §2 (silent-failure firebreaks +
     `lint_netlist.sh`/`run_build_safe.sh`), `docs/fpga/DEV_GUIDE.md` §3, `docs/ARCHITECTURE.md` §8 (register map).
   - *Status / active:* `docs/ARCHITECTURE.md` §5 (full on-silicon bring-up + cache-coherency doc cross-check),
-    `docs/SAR_GUIDE.md` (DMA control-slave root-cause→fix, RESOLVED),
+    `docs/SAR_IMPLEMENTATION_RECORD.md` (DMA control-slave root-cause→fix, RESOLVED),
     `docs/fpga/DEV_GUIDE.md` §4 (reusable active-probe methodology), `docs/USER_GUIDE.md`.
-  - *History (resolved journey — narrative now told in* `docs/SAR_GUIDE.md` *):* the CoreFFT milestone
+  - *History (resolved journey — narrative now told in* `docs/SAR_IMPLEMENTATION_RECORD.md` *):* the CoreFFT milestone
     decisions (M1/M2), the dataplane bring-up + fix incidents, the FIC0 probe plan, the AXI ID-restore
     integration, and the SmartDesign ID-converter GUI steps.
 
@@ -401,7 +401,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
   feeding the DMA's reduced AXI4-Lite control through a 64→32 DWC, black-holing reads; fix = CIC
   `TARGET5_TYPE=1` (AXI4-Lite) + 11-bit address slice (`sd_create_pin_slices`). **Both interconnects
   upgraded to CoreAXI4Interconnect 3.0.130** (was 2.9.100; DMA = CoreAXI4DMAController 2.2.107, CoreFFT
-  8.1.100). Detail: `docs/SAR_GUIDE.md` + `docs/ARCHITECTURE.md` §9.
+  8.1.100). Detail: `docs/SAR_IMPLEMENTATION_RECORD.md` + `docs/ARCHITECTURE.md` §9.
 - DDR JTAG loopback + CRC integrity (M0). **Bulk JTAG load integrity proven** (2026-06-30): 1 MB and
   8 MB loads byte-identical to source (`dump_image` + host cmp, MD5 match), and confirmed via the
   on-target CRC32 mailbox (§4.5).
@@ -452,7 +452,7 @@ Root: `mpfs/fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/src/` (= `<SC>/`)
 ---
 
 ## 9. Cross-references
-- Algorithm, staged fabric port, and optimization history: [`docs/SAR_GUIDE.md`](SAR_GUIDE.md).
+- Algorithm, staged fabric port, and optimization history: [`docs/SAR_IMPLEMENTATION_RECORD.md`](SAR_IMPLEMENTATION_RECORD.md).
 - Detailed design/architecture reference: [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 - Operate the board (bring-up/load/build/program/run/verify): [`docs/USER_GUIDE.md`](USER_GUIDE.md).
 - Fabric development gotchas (SmartHLS antipatterns, interconnect conventions, Libero/Tcl traps,

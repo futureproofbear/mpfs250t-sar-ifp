@@ -6,7 +6,7 @@ SmartHLS kernel, changing the SmartDesign interconnect, or debugging a silicon i
 - **How to operate the finished board** (bring-up, build, program, run, verify, troubleshooting table) —
   that is [`docs/USER_GUIDE.md`](../USER_GUIDE.md).
 - **What the processor computes and how it got here** (algorithm, staged Python→fabric port,
-  optimization history) — that is [`docs/SAR_GUIDE.md`](../SAR_GUIDE.md).
+  optimization history) — that is [`docs/SAR_IMPLEMENTATION_RECORD.md`](../SAR_IMPLEMENTATION_RECORD.md).
 - **What the system is** (block diagram, memory map, resource usage) — that is
   [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
@@ -54,7 +54,7 @@ fails" from being rediscovered every session. It is consumed by
 harness — see the `hls-trust-harness` skill for the full gate pipeline).
 
 For the *narrative* of how the first three of these were discovered (FFT twiddle drop, window-fusion
-miscompile, detect sign-extension), see `docs/SAR_GUIDE.md` Part 2 "The FFT's own staged journey." What
+miscompile, detect sign-extension), see `docs/SAR_IMPLEMENTATION_RECORD.md` Part 2 "The FFT's own staged journey." What
 follows is the durable, actionable guard for each — what code pattern to avoid and what catches it.
 
 **Update discipline:** add or amend an entry the same session you confirm a new mis-synthesis — with the
@@ -970,7 +970,7 @@ fault in or out without the board, compare the FFT's **complex** output to the e
    divergence can be diagnosed, not just detected.
 
 This check is what proved the shipping CoreFFT chain phase-exact (0.0° spread at both 256 and 8192
-points, forward −j convention) — see `docs/SAR_GUIDE.md` for that result in context. Use this technique
+points, forward −j convention) — see `docs/SAR_IMPLEMENTATION_RECORD.md` for that result in context. Use this technique
 again any time a future FFT/gearbox change needs to be cleared of a phase/sign fault without a silicon
 rebuild.
 

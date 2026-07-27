@@ -7,7 +7,7 @@
 The range-gather sub-stage of resample was diagnosed as READ-LATENCY-BOUND: a v2 FIC_0 monitor
 decomposed one gather line (908.8 us at 100 MHz) as 16% read-busy / 40% read-outstanding-DDR-not-
 returning / 9% write-busy / 35% idle. With the FIC_0 data plane only ~25% active during the
-gather, the diagnosis (`docs/SAR_GUIDE.md` Part 3 / memory `gather-stall-read-latency-bound`) was
+gather, the diagnosis (`docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 / memory `gather-stall-read-latency-bound`) was
 that a second, independent gather instance could stall in parallel rather than in series, since a
 second FIC (AXI-channel conflict) is not the bottleneck — the shared DDR controller is.
 

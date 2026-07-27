@@ -80,5 +80,5 @@ memory: resample-latency chunked-flush, Step B silicon test outstanding).
 | corefft_rearm | k_fft | observation | — | golden TB ran one transform, never the re-arm path |
 
 See also: HLS_SILICON_STATS drives the batch-confidence gates described in
-[`../SAR_GUIDE.md`](../SAR_GUIDE.md) Part 3 and the
+[`../SAR_IMPLEMENTATION_RECORD.md`](../SAR_IMPLEMENTATION_RECORD.md) Part 3 and the
 `hls-trust-harness` skill.

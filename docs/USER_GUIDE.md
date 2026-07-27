@@ -16,7 +16,7 @@ corner-turn, azimuth FFT, detect — almost entirely in FPGA fabric on a **Polar
 and computes small per-line resample coefficients; it never touches bulk sample data.
 
 For the algorithm, kernel contracts, memory map, and design rationale, see
-[`docs/ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/SAR_GUIDE.md`](SAR_GUIDE.md). This document covers
+[`docs/ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/SAR_IMPLEMENTATION_RECORD.md`](SAR_IMPLEMENTATION_RECORD.md). This document covers
 only **how to run it** on real hardware.
 
 This repository (`mpfs250t-sar-ifp`) is self-contained: firmware, host tooling, and the Libero fabric
@@ -283,7 +283,7 @@ stuck kernel returns a `TIMEOUT_*` code rather than locking up JTAG.
 **Current baseline runtime** (measured 2026-07-24, 100 MHz fabric clock, fused
 azimuth-gather + fused detect + corner-turn/FFT-2 overlap, deci-1 Centerfield scene 5634×4319 →
 8192 grid): **37.72 s** total, per
-[`docs/SAR_GUIDE.md`](SAR_GUIDE.md) Part 3 (the single source of
+[`docs/SAR_IMPLEMENTATION_RECORD.md`](SAR_IMPLEMENTATION_RECORD.md) Part 3 (the single source of
 truth for the per-stage breakdown — do not re-derive it here). With the eMMC boot-load (§4.1, 81.5 s)
 this puts a full load-and-focus cycle at roughly **two minutes**.
 

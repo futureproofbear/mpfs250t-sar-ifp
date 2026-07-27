@@ -24,7 +24,7 @@ target-neutral (see `sar-pipeline-design`); the FPGA/toolchain specifics are sco
   hardware uses the per-kernel `sar_kernels.h` model, not the monolithic one).
 - `docs/ARCHITECTURE.md` — the detailed current design (dataflow, buffer map, fixed-point contracts,
   eMMC layout, register semantics, diagrams, as-built pipeline, block usage).
-- `docs/SAR_GUIDE.md` Part 3 — status + per-stage timing (the single source of truth for per-stage
+- `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 — status + per-stage timing (the single source of truth for per-stage
   timing) + latency roadmap.
 - `docs/fpga/DEV_GUIDE.md` §4 — the JTAG single-kernel isolation harness + coherent-DDR
   read technique. Read before ANY silicon debug.
@@ -38,7 +38,7 @@ Proven (on silicon):
   CoreFFT confirmed at runtime) → ROI crop rendered to a coherent focused image. No host JTAG data load.
   Reproducible: the superseded 88.1 s baseline ran 88.04 s / 88.11 s, output byte-identical to the previous
   88.1 s pre-flush-fix build had the same top-left 1024² ROI crc `0xd596c9eb`).
-  Per-stage breakdown (single source of truth): `docs/SAR_GUIDE.md` Part 3; re-read
+  Per-stage breakdown (single source of truth): `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3; re-read
   anytime with `bash mpfs/host/run_stage_timing.sh`.
 - Full pipeline runs end-to-end and forms a correctly focused image (corr 0.9923 vs the CPHD-derived
   golden). Resample, window, corner-turn all validated.
@@ -63,7 +63,7 @@ Open / next (image is already correct; these are latency + hardening):
 - Deferred quality studies: FFT-size trade and a higher-order (sinc) resample kernel vs the current
   two-tap linear interpolation.
 - Cosmetic: ~50 % OUT saturation (raise the detect/out-shift headroom).
-See `README.md` (status) and `docs/SAR_GUIDE.md` Part 3 (roadmap) for the consolidated open-items list.
+See `README.md` (status) and `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 (roadmap) for the consolidated open-items list.
 
 ## Map of the other skills
 - `sar-pipeline-design` — the datapath stages + fixed-point/BFP/streaming contracts. (design)

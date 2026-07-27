@@ -1,6 +1,6 @@
 # SAR image former — architecture reference
 
-The consolidated "what the design IS" reference for the spotlight-mode SAR image-formation
+A document describing the baseline reference design for a spotlight-mode SAR image-formation
 processor on PolarFire SoC MPFS250T_ES: pipeline dataflow, memory map, fixed-point/BFP contracts,
 control interface and register map, AMBA/AXI interconnect topology, and fabric resource usage /
 current timing baseline. This is where to look up a register offset, a memory address, an
@@ -8,9 +8,8 @@ interconnect topology fact, or a fixed-point contract while writing new code aga
 
 This document does **not** cover *how to operate* the board (bring-up, build, program, run,
 verify — see [`USER_GUIDE.md`](USER_GUIDE.md)) or *how the design got built / optimized*
-(the Python-to-fabric port, the staged engine history, the chronological before/after timing —
-see [`SAR_GUIDE.md`](SAR_GUIDE.md)). Where this document needs a single current timing number it
-states it and points to `SAR_GUIDE.md` Part 3 rather than re-deriving the optimization history.
+see [`SAR_IMPLEMENTATION_RECORD.md`](SAR_IMPLEMENTATION_RECORD.md)). Where this document needs a single current timing number it
+states it and points to `SAR_IMPLEMENTATION_RECORD.md` Part 3 rather than re-deriving the optimization history.
 
 ## Table of contents
 
@@ -39,9 +38,9 @@ taper it, then take a separable 2-D FFT and detect magnitude.
 The processing frame is a fixed 8192 × 8192 complex grid. A full capture is decimated to fit;
 per-axis sizing and rejection rules live in `mpfs/host/ddr_layout.py` (`plan_frame` /
 `check_input_dims`). Only the native 8192-point transform exists — 16384-point and multi-length
-paths were dropped (see `docs/SAR_GUIDE.md` for why).
+paths were dropped (see `docs/SAR_IMPLEMENTATION_RECORD.md` for why).
 
-For the algorithm derivation and the software-to-fabric port history, see `docs/SAR_GUIDE.md`
+For the algorithm derivation and the software-to-fabric port history, see `docs/SAR_IMPLEMENTATION_RECORD.md`
 Parts 1–2. This section and §2 describe only the current as-built contract.
 
 ---
@@ -72,7 +71,7 @@ or AXI burst FIFOs.
 Current shipping baseline runtime: **25.16 s** (2026-07-27, 100 MHz fabric clock), verified
 bit-exact against the reference crop CRC `0x319037b2` from a cold start. This is the single current
 number; the chronological optimization history (110.8 s → 25.16 s, one measured step at a time)
-lives in `docs/SAR_GUIDE.md` Part 3 — do not re-derive it here. Orchestration is `sar_form_image()`
+lives in `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 — do not re-derive it here. Orchestration is `sar_form_image()`
 in `src/sar/sar_sequencer.c`.
 
 Measured per stage at that baseline:
@@ -181,7 +180,7 @@ The MSS double-buffers: while the fabric kernel gathers line `i` from coefficien
 CPU fills bank `b^1` for line `i+1`. Coefficient generation is float on the CPU; the interpolation
 itself is fixed-point in fabric. Steps overlap by design, so coefficient generation for line `i+1`
 hides behind the kernel running line `i` — coefficient work is currently "free" and becomes the
-binding constraint only once the gather is substantially faster (see `SAR_GUIDE.md` Part 3 §3.3).
+binding constraint only once the gather is substantially faster (see `SAR_IMPLEMENTATION_RECORD.md` Part 3 §3.3).
 
 **Resample is three workloads with different parallelism** (measured 2026-07-21, deci-1
 Centerfield, `sar_resample_ts[0..3]`):
@@ -327,7 +326,7 @@ exactly — verified on silicon at 6.20 s, bit-identical to the pre-strip baseli
 sequential (default), 1 = the overlap path. Only takes effect when `SAR_GATHERMODE=1` and
 `detect_mode=3` (the shipping gather-fused + detect-fused configuration).
 
-Measured result (~75% of the corner-turn hidden under FFT-2): see `docs/SAR_GUIDE.md` Part 3 for
+Measured result (~75% of the corner-turn hidden under FFT-2): see `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 for
 the numbers; this section documents only the mechanism.
 
 ### 2.5 Detect
@@ -363,7 +362,7 @@ sext16(u) = (int32_t)((u & 0xFFFF) ^ 0x8000) - 0x8000
 
 Engine selection is runtime: `detect_mode` @ `0xB0059118`. **Note:** an earlier draft of this
 document (§2.4) stated "`1` = CPU detect (the shipping path)", but every other current source
-(`SAR_GUIDE.md` Part 3) states the shipping
+(`SAR_IMPLEMENTATION_RECORD.md` Part 3) states the shipping
 default is `detect_mode == 3` (fused fabric detect, `DETMODE=3`). That single line looks like a
 stale leftover from before the fusion became the default; this document treats `DETMODE=3` /
 fabric-fused as current, consistent with the majority of sources and with §2's stage table above.
@@ -563,7 +562,7 @@ scalars plus the SIG/OUT/SCRATCH bases (also true of the eMMC-loaded path, §6).
   uint16.
 
 Datapath sizing, from the fixed-point emulator study (`src/fixedpoint.py` /
-`form_image_pfa_fixed.py`; full quantization-study numbers and rationale in `docs/SAR_GUIDE.md`
+`form_image_pfa_fixed.py`; full quantization-study numbers and rationale in `docs/SAR_IMPLEMENTATION_RECORD.md`
 Part 1/§1.3 and Part 2 Stage 1): **16-bit mantissa, 18-bit twiddle, 48-bit accumulate, BFP
 arithmetic shift after every stage.** Measured FFT block-exponent growth is +9/+10 bits (range
 pass −6→3 over 13 stages, azimuth pass 3→13), covered by a 5-bit exponent per FFT line. At 16-bit
@@ -572,7 +571,7 @@ usable dynamic range at ~4.6 ENOB. If 53 dB proves marginal, 18-bit mantissa buy
 more and still fits one 18×18 DSP per multiply.
 
 Confirmed CoreFFT configuration (in-place Radix-2, natural-order in/out matching the golden's
-convention), from `docs/SAR_GUIDE.md` Part 2 Stage 2:
+convention), from `docs/SAR_IMPLEMENTATION_RECORD.md` Part 2 Stage 2:
 
 | Parameter | Value | Why |
 |---|---|---|
@@ -592,7 +591,7 @@ The alternative — a classic 1/N implemented as `>>1` after each of the 13 butt
 truncates the small AC bins to zero and collapses the image to DC-only (corr ~0). Fixed-point FFT
 dynamic range must be managed with a block exponent, not per-stage truncation. (The CPU FFT
 fallback, `sar_fft.c` mode 0, hit this exact bug historically before switching to full-precision
-`int32` accumulation with one global block exponent applied at the output — see `SAR_GUIDE.md`
+`int32` accumulation with one global block exponent applied at the output — see `SAR_IMPLEMENTATION_RECORD.md`
 Part 2.)
 
 Note that the IP's `SCALE_EXP` register is not the same quantity as a software BFP block exponent
@@ -892,7 +891,7 @@ wiring source: `mpfs/fpga/build_full_prog_ffv.tcl`.
   the root cause of an early "M3 FFT-stage hang" that looked functional but was a timing-failing
   bitstream programmed silently), lowered to 62.5 MHz to close timing (0 setup / 0 hold
   violations), and later raised back to 100 MHz once the timing margin and the actual latency
-  bottleneck were understood. See `docs/SAR_GUIDE.md` Part 2 Stage 4 and Part 3 §3.1 item 8 for the
+  bottleneck were understood. See `docs/SAR_IMPLEMENTATION_RECORD.md` Part 2 Stage 4 and Part 3 §3.1 item 8 for the
   full story — not repeated here. PolarFire CCC output = `VCO/(DIV×4)`, not `VCO/DIV`.
 - **Reset:** `MSS:MSS_RESET_N_M2F` → `RST:EXT_RST_N`; `CCC:PLL_LOCK_0` → `RST:PLL_LOCK`. `RST`
   emits `FABRIC_RESET_N` (active-low, synchronized to the fabric clock) → `FFT:NGRST`,
@@ -955,7 +954,7 @@ pass-through and does **not** throttle outstanding transactions.
 > other's response IDs and mis-route. This is invisible to synthesis and to timing closure — such
 > a design builds clean and fails only on silicon. Fixing it is an RTL change to
 > `sar_axi_idconv.v` (forward `master_number` through the 4-bit tag, since `master_id` is always
-> 0). See `docs/SAR_GUIDE.md` Part 3 §3.3 — this is the hard prerequisite blocker found
+> 0). See `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 §3.3 — this is the hard prerequisite blocker found
 > while scoping a 2nd concurrent gather instance.
 
 ### 9.7 FFT stream path & write-back (AXI4-Stream)
@@ -1104,7 +1103,7 @@ dead mem↔stream RTL (§9.2).
 
 **37.72 s** total pipeline time (2026-07-24, 100 MHz fabric clock, azimuth-gather + detect fusion +
 corner-turn/FFT-2 overlap, deci-1 Centerfield scene 5634×4319 → 8192 grid). This is the single
-current number; see `docs/SAR_GUIDE.md` Part 3 for the full chronological optimization history
+current number; see `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 for the full chronological optimization history
 (110.8 s → 37.72 s) and the per-optimization before/after measurements — not re-derived here.
 
 ### 10.3 Validation results summary
@@ -1159,7 +1158,7 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 | Deviation | Reason |
 |---|---|
 | Detect is fabric, in the FFT unloader (not a kernel of its own) | The standalone HLS detect kernel is unusable (sign-extension miscompile). Fusing it into `fft_unloader_v.v` in Verilog both fixes that and deletes a 19+ s pass (§2.5) |
-| Resample gather is II=1 but ~2.44× AXI-stalled | The kernel schedules at II=1 on all 4 loops (22,545 cyc = 361 µs/line) yet measures ~880 µs — AXI stall on a correct schedule, not a burst failure (an earlier "single-beat reads" claim was a stale-report error). Diagnosed 2026-07-24 as DDR read-throttle (see `docs/SAR_GUIDE.md` Part 3 §3.3); localising further needs the FIC_0 monitor |
+| Resample gather is II=1 but ~2.44× AXI-stalled | The kernel schedules at II=1 on all 4 loops (22,545 cyc = 361 µs/line) yet measures ~880 µs — AXI stall on a correct schedule, not a burst failure (an earlier "single-beat reads" claim was a stale-report error). Diagnosed 2026-07-24 as DDR read-throttle (see `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 §3.3); localising further needs the FIC_0 monitor |
 | FFT feeder/unloader are hand-written Verilog | SmartHLS mem ↔ stream kernels synthesize to dead RTL |
 | Window is fused into the FFT feeder (Verilog), not into resample (HLS) | Two distinct SmartHLS miscompiles on the resample-fusion route; the Verilog feeder route works and is silicon-proven (§2.3) |
 | `silicon_emulator.window_fixed()` is NOT bit-exact vs `window.cpp` | It applies the two tapers as two separate `>>15` rounds; the kernel folds them into one `cw` first. Differs in the low bit. Pre-existing, found 2026-07-21, unresolved — the mirror's docstring claims bit-accuracy, so one of the two should change |
@@ -1167,7 +1166,7 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 | ~50% of OUT saturates at 65535 | Traced to the detect path's BFP shift register (`SAR_REG_BFP_SHIFT` @ `0x6000_001C`, r/w in `sar_accel_driver.c`), not the FFT — raising FFT `out_shift` headroom self-cancels across the two passes. Cosmetic; correlation is measured on unsaturated pixels; de-saturate by lowering that register from firmware if ever needed |
 | `WIN`/`DET` HLS kernels remain synthesized, unused | Fusing their function into hand-written Verilog (feeder/unloader) fixed correctness and deleted their standalone passes, but the original kernels were never stripped from the bitstream — ~7.2k LUT / 5k DFF / 16 LSRAM / 48 µSRAM / 8 Math reclaimable (§10.1) |
 
-**Unresolved contradiction in the source material (flagged, not resolved):** two now-superseded standalone docs (`AMBA_ARCHITECTURE.md`, `SAR_PIPELINE_PROCESS.md` — since folded into this document and `docs/USER_GUIDE.md` respectively) described `fft_unloader` as a SmartHLS-generated kernel (`K_FFT_UNLOADER`, replacing the removed `CoreAXI4DMAController` on 2026-07-04). The pipeline's own current statements (this document's §2.4/§2.5, sourced from this document's predecessor `SAR_DESIGN.md` and `SAR_GUIDE.md`) are explicit that both the feeder and unloader are **hand-written Verilog**, "not a style choice," because SmartHLS mem↔stream kernels synthesize to dead RTL — and the detect-fusion story (§2.5) specifically relies on hand-written Verilog with explicit `signed` operands, which only makes sense if the unloader itself is Verilog (`fft_unloader_v.v`), not HLS C++. The most likely reconciliation: the unloader started as an HLS kernel on 2026-07-04 (when it replaced the DMA) and was rewritten to hand-written Verilog on 2026-07-21 when detect was fused into it — but no source document states this rewrite explicitly, so it is presented here as inferred, not confirmed. This document follows its predecessor `SAR_DESIGN.md`/`SAR_GUIDE.md` as authoritative (hand-written Verilog, current) per the same resolution `SAR_GUIDE.md`'s own "Notes on source material" section already applied.
+**Unresolved contradiction in the source material (flagged, not resolved):** two now-superseded standalone docs (`AMBA_ARCHITECTURE.md`, `SAR_PIPELINE_PROCESS.md` — since folded into this document and `docs/USER_GUIDE.md` respectively) described `fft_unloader` as a SmartHLS-generated kernel (`K_FFT_UNLOADER`, replacing the removed `CoreAXI4DMAController` on 2026-07-04). The pipeline's own current statements (this document's §2.4/§2.5, sourced from this document's predecessor `SAR_DESIGN.md` and `SAR_IMPLEMENTATION_RECORD.md`) are explicit that both the feeder and unloader are **hand-written Verilog**, "not a style choice," because SmartHLS mem↔stream kernels synthesize to dead RTL — and the detect-fusion story (§2.5) specifically relies on hand-written Verilog with explicit `signed` operands, which only makes sense if the unloader itself is Verilog (`fft_unloader_v.v`), not HLS C++. The most likely reconciliation: the unloader started as an HLS kernel on 2026-07-04 (when it replaced the DMA) and was rewritten to hand-written Verilog on 2026-07-21 when detect was fused into it — but no source document states this rewrite explicitly, so it is presented here as inferred, not confirmed. This document follows its predecessor `SAR_DESIGN.md`/`SAR_IMPLEMENTATION_RECORD.md` as authoritative (hand-written Verilog, current) per the same resolution `SAR_IMPLEMENTATION_RECORD.md`'s own "Notes on source material" section already applied.
 
 SmartHLS is treated as an untrusted, behavioural-only tool. Every kernel output is value-checked on
 silicon after a rebuild — see the `hls-trust-harness` skill and

@@ -49,7 +49,7 @@ Parts 1–2. This section and §2 describe only the current as-built contract.
 
 ## 2. Pipeline dataflow
 
-![Figure 1 — SAR pipeline dataflow](img/sar_pipeline.svg)
+![Figure 1 — SAR pipeline dataflow](img/sar_pipeline.drawio.svg)
 
 **Figure 1 — SAR pipeline dataflow.** Stage times are the silicon-verified 18.45 s baseline
 (2026-07-27, CRC `0x319037b2`). `*` marks the corner-turn/FFT-2 overlap: CT#2 is strip-pipelined
@@ -61,14 +61,26 @@ not a fused concurrent pipeline. Every stage is a DDR-to-DDR streaming pass, bec
 (256 MiB complex) far exceeds on-chip SRAM; on-chip each stage holds only a row, a transpose tile,
 or AXI burst FIFOs.
 
+Buffers in the **shipping** configuration (`GATHMODE=1`, `DETMODE=3`), taken from
+`sar_form_image()` rather than restated from memory:
+
 | # | Stage | Engine | In | Out |
 |---|---|---|---|---|
-| 1 | Resample (range + transpose + azimuth) | fabric gather kernel + MSS coefficients | SIG | SCRATCH |
-| 2 | Window (2-D Hamming) | *fused into the range-FFT feeder* | — | — |
-| 3 | Range FFT | fabric CoreFFT | SCRATCH | SCRATCH |
-| 4 | Corner-turn (transpose) | fabric kernel | SCRATCH | SIG |
-| 5 | Azimuth FFT | fabric CoreFFT | SIG | SIG |
-| 6 | Detect (magnitude) | *fused into the azimuth-FFT unloader (fabric)* | — | — |
+| 1 | Resample — range gather | `RES` + MSS coefficients | SIG | SCRATCH |
+| 1 | Resample — internal corner-turn (**CT#1**) | `CT` (`corner_turn_v`) | SCRATCH | **SIG** |
+| 2 | Window (2-D Hamming, separable) | *fused into the FFT-1 feeder* | — | — |
+| 3 | FFT-1 (**azimuth** transform) + azimuth gather | `FEED`→`GBX`→CoreFFT→`UNLD` | SIG | SCRATCH |
+| 4 | Corner-turn (**CT#2**) | `CT` (`corner_turn_v`) | SCRATCH | SIG |
+| 5 | FFT-2 (**range** transform) | `FEED`→`GBX`→CoreFFT→`UNLD` | SIG | **OUT** |
+| 6 | Detect (magnitude) | *fused into the FFT-2 unloader* | — | — |
+
+Note stage 1: the range gather writes SCRATCH and CT#1 then writes **SIG** — which is why a frame
+**overwrites its own input**, and why the one-ELOD-per-PIPE rule below exists. With `OVLMODE=1`,
+stages 4 and 5 are folded: CT#2 is strip-pipelined under FFT-2 (`fft2_ct_overlap()`), so the stage
+timer reports CT#2 as 0 and FFT-2 as the merged wall time.
+
+Non-shipping configurations move these buffers around (`gather_fused` and `det_fused` each flip a
+source or destination). The table above is the one that produces CRC `0x319037b2`.
 
 Current shipping baseline runtime: **18.45 s** (2026-07-27, 100 MHz fabric clock), verified
 bit-exact against the reference crop CRC `0x319037b2` from a cold start. This is the single current
@@ -256,9 +268,9 @@ the fixed-point mirror (`silicon_emulator.py`) and the sequencer: the frame afte
 
 | Pipeline position | True axis it transforms | Fused into it | Historical CODE name (still in the RTL/timing printout) |
 |---|---|---|---|
-| **FFT-1** (first pass, `SCRATCH→SIG`) | **azimuth** | the 2-D Hamming **window** + the azimuth resample gather | `rangeFFT` / "range FFT" / the first `fft_pass` |
-| corner-turn | (global transpose) | — | `cornerturn` |
-| **FFT-2** (second pass, `SCRATCH→SIG/OUT`) | **range** | magnitude **detect** | `azFFT` / "azimuth FFT" / the second `fft_pass` |
+| **FFT-1** (first pass, `SIG→SCRATCH`) | **azimuth** | the 2-D Hamming **window** + the azimuth resample gather | `rangeFFT` / "range FFT" / the first `fft_pass` |
+| corner-turn (CT#2) | (global transpose, `SCRATCH→SIG`) | — | `cornerturn` |
+| **FFT-2** (second pass, `SIG→OUT`) | **range** | magnitude **detect** | `azFFT` / "azimuth FFT" / the second `fft_pass` |
 
 The code identifiers (`sar_stage_ts` labels, `SAR_SEQ_TIMEOUT_FFT1/2`, the `run_m3_iso.sh`
 printout strings `range-FFT`/`azimuth-FFT`) were **not** renamed — parsers and old logs depend on
@@ -1220,10 +1232,10 @@ These are deliberate and load-bearing. Do not "fix" them without reading the lin
 | Window is fused into the FFT feeder (Verilog), not into resample (HLS) | Two distinct SmartHLS miscompiles on the resample-fusion route; the Verilog feeder route works and is silicon-proven (§2.3) |
 | `silicon_emulator.window_fixed()` is NOT bit-exact vs `window.cpp` | It applies the two tapers as two separate `>>15` rounds; the kernel folds them into one `cw` first. Differs in the low bit. Pre-existing, found 2026-07-21, unresolved — the mirror's docstring claims bit-accuracy, so one of the two should change |
 | eMMC uses single-block transfers, not SDMA | Interrupts are off on hart1; SDMA would hang unhaltably |
-| ~50% of OUT saturates at 65535 | Traced to the detect path's BFP shift register (`SAR_REG_BFP_SHIFT` @ `0x6000_001C`, r/w in `sar_accel_driver.c`), not the FFT — raising FFT `out_shift` headroom self-cancels across the two passes. Cosmetic; correlation is measured on unsaturated pixels; de-saturate by lowering that register from firmware if ever needed |
+| ~50% of OUT saturates at 65535 | Traced to the detect path's BFP shift register (`SAR_REG_BFP_SHIFT` @ `0x6000_001C`, r/w in `sar_accel_driver.c`), not the FFT — raising FFT `out_shift` headroom self-cancels across the two passes. Cosmetic; correlation is measured on unsaturated pixels; **do NOT write `0x6000_001C`** — that address belongs to the LEGACY monolithic driver model, and in the built fabric it lands inside `K_CORNER_TURN`'s control window (`sar_kernels.h`). The live equivalent is the FFT renormalise headroom at `SAR_FFT_HEADROOM_ADDR` (`0xB0059114`) |
 | `WIN`/`DET` HLS kernels remain synthesized, unused | Fusing their function into hand-written Verilog (feeder/unloader) fixed correctness and deleted their standalone passes, but the original kernels were never stripped from the bitstream — ~7.2k LUT / 5k DFF / 16 LSRAM / 48 µSRAM / 8 Math reclaimable (§10.1) |
 
-**Unresolved contradiction in the source material (flagged, not resolved):** two now-superseded standalone docs (`AMBA_ARCHITECTURE.md`, `SAR_PIPELINE_PROCESS.md` — since folded into this document and `docs/USER_GUIDE.md` respectively) described `fft_unloader` as a SmartHLS-generated kernel (`K_FFT_UNLOADER`, replacing the removed `CoreAXI4DMAController` on 2026-07-04). The pipeline's own current statements (this document's §2.4/§2.5, sourced from this document's predecessor `SAR_DESIGN.md` and `SAR_IMPLEMENTATION_RECORD.md`) are explicit that both the feeder and unloader are **hand-written Verilog**, "not a style choice," because SmartHLS mem↔stream kernels synthesize to dead RTL — and the detect-fusion story (§2.5) specifically relies on hand-written Verilog with explicit `signed` operands, which only makes sense if the unloader itself is Verilog (`fft_unloader_v.v`), not HLS C++. The most likely reconciliation: the unloader started as an HLS kernel on 2026-07-04 (when it replaced the DMA) and was rewritten to hand-written Verilog on 2026-07-21 when detect was fused into it — but no source document states this rewrite explicitly, so it is presented here as inferred, not confirmed. This document follows its predecessor `SAR_DESIGN.md`/`SAR_IMPLEMENTATION_RECORD.md` as authoritative (hand-written Verilog, current) per the same resolution `SAR_IMPLEMENTATION_RECORD.md`'s own "Notes on source material" section already applied.
+**RESOLVED 2026-07-28 (was flagged as an unresolved source-material contradiction):** two now-superseded standalone docs described `fft_unloader` as a SmartHLS kernel. It is **hand-written Verilog** — `mpfs/fpga/fft_unloader_v.v` exists and is what `sartop_assembly.tcl` instantiates. The likely history is that it began as an HLS kernel on 2026-07-04 when it replaced the `CoreAXI4DMAController`, and was rewritten in Verilog on 2026-07-21 when detect was fused into it — which is consistent with §2.5's account, since the detect fusion relies on explicit `signed` operands that the HLS path mis-synthesised. The rewrite is inferred; the CURRENT state is not — it is checked in and readable. `docs/fpga/DEV_GUIDE.md` §2's historical note, which was the last place still asserting the HLS side, has been corrected.
 
 SmartHLS is treated as an untrusted, behavioural-only tool. Every kernel output is value-checked on
 silicon after a rebuild — see the `hls-trust-harness` skill and

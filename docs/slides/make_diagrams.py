@@ -454,15 +454,49 @@ def fig_bug(out):
     return d.write(out / "fig-bug.drawio.svg")
 
 
+def fig_arch_pipeline(out):
+    """ARCHITECTURE.md Figure 1. Lives in docs/img/, not the deck -- the architecture doc owns it.
+
+    Replaces a hand-authored SVG that drifted a full generation behind its own caption (it showed
+    37.72 s and the 62.5 MHz stage split while the caption said 18.45 s). Generated so the next
+    baseline change is a one-line edit here rather than SVG surgery."""
+    d = Diagram(1080, 380, "Figure 1 — SAR pipeline dataflow (18.45 s baseline, CRC 0x319037b2)")
+    d.box("sig", 30, 96, 120, 62, "SIG\nraw signal", "mem", bold=True)
+    d.box("s1", 175, 96, 150, 62, "1. Resample\nrange gather\n5.212 s", "fab")
+    d.box("ct1", 350, 96, 140, 62, "CT#1\ntranspose\n2.064 s", "fab")
+    d.box("f1", 515, 96, 165, 62, "3. FFT-1  AZIMUTH\n+ gather + window\n5.788 s", "ip")
+    d.box("ct2", 705, 96, 140, 62, "CT#2\n(hidden under\nFFT-2)", "fab", dashed=True)
+    d.box("f2", 870, 96, 180, 62, "5. FFT-2  RANGE\n+ detect\n5.396 s", "ip")
+    d.edge("sig", "s1"); d.edge("s1", "ct1", "SCRATCH")
+    d.edge("ct1", "f1", "SIG"); d.edge("f1", "ct2", "SCRATCH")
+    d.edge("ct2", "f2", "SIG")
+    d.box("out", 870, 196, 180, 50, "OUT\nuint16 image", "mem", bold=True)
+    d.edge("f2", "out")
+    d.note("t", 30, 200, 800, 44,
+           "resample 7.267 s  =  range gather 5.212 + CT#1 2.064        TOTAL 18.45 s\n"
+           "Window is fused into the FFT-1 feeder and detect into the FFT-2 unloader: neither has a kernel.", fs=12)
+    d.note("n", 30, 262, 1020, 96,
+           "CT#2 is dashed because it has no wall-clock line of its own: with OVLMODE=1 it is "
+           "strip-pipelined UNDER FFT-2\n(fft2_ct_overlap), so the stage timer attributes the merged time to "
+           "FFT-2.\n\nNAMING TRAP: the code calls FFT-1 `rangeFFT` and FFT-2 `azFFT` — inverted. The labels "
+           "above are the PHYSICAL axes.", fs=12)
+    return d.write(out / "sar_pipeline.drawio.svg")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
     a = ap.parse_args()
-    out = pathlib.Path(__file__).resolve().parent / a.out
+    here = pathlib.Path(__file__).resolve().parent
+    out = here / a.out
     out.mkdir(parents=True, exist_ok=True)
     for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa,
                fig_fabric, fig_dataflow, fig_timing, fig_bug):
         print("wrote", fn(out))
+    # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
+    img = (here / ".." / "img").resolve()
+    img.mkdir(parents=True, exist_ok=True)
+    print("wrote", fig_arch_pipeline(img))
 
 
 if __name__ == "__main__":

@@ -271,7 +271,7 @@ mode below.
 
 > **Historical note:** the conventions were written against the `CoreAXI4DMAController`'s AXI4-Lite
 > control slave. That DMA has since been **removed** from the design — CoreFFT→DDR write-back is now the
-> HLS `fft_unloader` + a gearbox output skid FIFO, and the specific "CIC slave-5 = `TARGET5_TYPE=1`"
+> **hand-written** `fft_unloader_v.v` + a gearbox output skid FIFO, and the specific "CIC slave-5 = `TARGET5_TYPE=1`"
 > example below no longer describes a live component. The conventions themselves (isolate the config
 > plane, match target `TYPE` to protocol, use explicit width-mismatch slices, lint-gate every build) are
 > general rules and still apply to any future config-plane peripheral.
@@ -817,8 +817,7 @@ The script refuses to start if a Libero/synthesis process is already running (it
 same project), and the Tcl deliberately omits `save_project`, so a power run can never mutate the
 project behind a verified bitstream.
 
-As of 2026-07-27 no power analysis had ever been run on this project — there is no historical baseline
-to compare against.
+First run 2026-07-27 on the verified `d07bce7` build: **2357.6 mW** total (436.6 static / 1921.0 dynamic), fabric only. Full breakdown and caveats in `docs/ARCHITECTURE.md` §10.1a. That is the only historical point so far, so build-to-build deltas start from it.
 
 ---
 

@@ -321,7 +321,7 @@ via:
 ```bash
 bash mpfs/host/run_stage_timing.sh
 ```
-Two further engine-select knobs exist as environment variables to `run_m3_iso.sh` for A/B testing
+**Seven** engine knobs exist as environment variables to `run_m3_iso.sh` (see [`docs/GLOSSARY.md`](GLOSSARY.md) §6 for the full table with addresses and shipping values). For A/B testing
 (`GATHMODE` — fuse the azimuth-resample gather into the FFT-1 feeder; `DETMODE` — fuse detect into
 the FFT-2 unloader; `OVLMODE` — overlap the second corner-turn with FFT-2); consult
 `mpfs/host/run_m3_iso.sh` for their current defaults before relying on a specific combination.

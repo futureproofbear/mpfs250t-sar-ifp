@@ -143,6 +143,47 @@ bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000     # ELOD: eMMC -> DDR, ~81
 **Success marker:** the result record at `0xB005E000` reads magic `0xE3C0FF30`, `verdict 0`,
 `nseg = 10`, and `sig_crc_exp == sig_crc_got`.
 
+#### Selecting a scene — the eMMC holds up to 64
+
+The **`.base` argument is the scene index**, not a spare zero. Every example in this guide passes
+`0`, which is the Centerfield bring-up scene:
+
+```bash
+bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000     # scene 0
+bash run_m3_iso.sh 0x454C4F44 1 0 120000 0xB005E000     # scene 1
+```
+
+`emmc_pack.py` takes repeatable `--stage` directories and writes one self-describing blob per
+scene behind a TOC (`EMMC_MAX_SCENES = 64`, 88-byte entries), and `sar_emmc_load()` bounds-checks
+the index — an out-of-range scene fails with `ERR_MAGIC` rather than loading garbage.
+
+> **Provisioning rewrites the whole INPUT region.** `emmc_pack.py` builds the image as a unit, so
+> adding a scene re-writes the ones already there. It is not an incremental append.
+
+### 4.1a Recovering a staged scene — do this BEFORE reprovisioning
+
+**The staged scene directories are git-ignored and the eMMC copy is not a backup.** On 2026-07-28
+the Centerfield scene existed *only* on the card: `jtag_stage_deci1/` was absent, `jtag_full/`
+retained `layout.json` but none of its ten `.bin` blobs, and no Centerfield CPHD was on disk.
+Reprovisioning would have destroyed the scene that produces crop CRC `0x319037b2` — the correctness
+anchor for every optimisation in `docs/SAR_IMPLEMENTATION_RECORD.md`.
+
+Both scenes are public Umbra open data, so a scene is recoverable from source. The Centerfield key
+is the default in `src/form_image_pfa.py`:
+
+```bash
+curl -C - --retry 5 -o data/centerfield_20231010/2023-10-10-16-57-44_UMBRA-04_CPHD.cphd   "https://umbra-open-data-catalog.s3.us-west-2.amazonaws.com/sar-data/tasks/Centerfield%2C%20Utah/c0dbd830-e863-42c5-97d0-2cfd291bcb2a/2023-10-10-16-57-44_UMBRA-04/2023-10-10-16-57-44_UMBRA-04_CPHD.cphd"
+
+python mpfs/host/serialize_inputs.py --in <that file> --out mpfs/host/jtag_stage_deci1 --grid 8192
+```
+
+**Verify before trusting it**: `jtag_stage_deci1/layout.json` must report `crc32.sig = 0x89fa12dc`,
+the same value every `ELOD` prints. Confirmed byte-identical on 2026-07-28 (196,358,384 B CPHD,
+5634x4319 -> 8192 grid, deci 1/1, geometry self-check `corr = 1.000068`).
+
+That re-stage is also the proof that **`--grid 8192` is load-bearing** (§5.0): without it the
+per-scene next-pow2 path produces different tables and a different CRC.
+
 ### 4.2 Path B — host-JTAG bulk load (fallback, ~2.7 hr for a full scene)
 Use this only when the eMMC is not yet provisioned. Stage the scene on the host, then load each
 blob over JTAG:

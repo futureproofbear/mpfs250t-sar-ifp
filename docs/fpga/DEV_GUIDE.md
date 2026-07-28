@@ -1034,6 +1034,41 @@ single FlashPro6 owner):
 
 ### 4.9 Methodology lessons (apply these first)
 
+**A gate nobody runs protects nothing — check the gate is GREEN before trusting it.**
+`tb/check_sartop_wiring.tcl` asserts the exact HDL+ core name of every instance. When
+`corner_turn_v_top` replaced the SmartHLS `corner_turn_top` on 2026-07-27 the expectation was not
+updated, so the gate went red that day and stayed red, unnoticed, until 2026-07-28 — because
+nothing ran it. It was still reporting the corner-turn violation when the resample swap added a
+second one.
+
+That is the same failure as a bench that cannot fail, one step further out: the check existed, was
+correct in principle, and was worthless because its result was never looked at. Two habits follow:
+
+- Run the structural gates **before** a 50-minute build, not after. They cost seconds and this one
+  would have caught a wrong instance name immediately.
+- When a gate legitimately needs its expectation changed, change it **in the same commit** as the
+  design change. An exact-name check is deliberate: swapping a datapath kernel should require an
+  edit there, and a gate that has to be edited is a gate that gets read.
+
+**`run_build_safe.sh` needs the prep argument when the PROJECT changes.** Registering a new HDL+
+core or editing `sartop_assembly.tcl` only takes effect through `create_fresh_project_ffv.tcl`:
+
+    bash mpfs/host/run_build_safe.sh "$(pwd)/mpfs/fpga/create_fresh_project_ffv.tcl"
+
+Without it the script rebuilds the EXISTING project, so the swap is not in the netlist and the
+build measures the old design — a ~50-minute null result that looks like a successful build. The
+script warns about this in its own output. Pass an ABSOLUTE path; a relative one resolves against
+the caller's directory, not the script's. And if a previous Libero was killed, wait for it to clear
+before starting: a stale lock makes project creation exit without producing
+`component/work/SAR_TOP/SAR_TOP.v`, and the lint gate then aborts with "netlist not found" — which
+is the firebreak working, not a new fault.
+
+**Verify the swap landed in the NETLIST, not just in the tcl.** After any core swap:
+
+    grep -c "sar_resample_v_top" libero_ffv/component/work/SAR_TOP/SAR_TOP.v   # want >= 1
+    grep -c "resample_top"       libero_ffv/component/work/SAR_TOP/SAR_TOP.v   # want 0
+
+
 **EVERY kernel testbench MUST re-arm the SAME instance at least twice, with NO reset between.**
 This is now the single highest-yield gate for hand-written RTL on this project, because the firmware
 always drives a kernel repeatedly between power cycles (CT#1 in resample, then CT#2 once per strip

@@ -127,6 +127,19 @@ unknown until E4 says how much of the 7.267 s resample stage is coefficient-boun
 fabric-bound. The 2026-07 measurement (99.6% coeff-gen / 0.25% kernel wait) PREDATES the fabric
 coeffgen and cannot be carried forward.
 
+## 6a. SUPERSEDED 2026-07-28 — read this before building on section 4
+
+`sar_resample_v.v` generates pass-1 coefficients **inside the resample kernel itself** (MODE 0,
+closed form) and never puts `idx`/`wq` in DDR at all. That is option (c) of section 4, built: the
+consumer this document says pass-1 coeffgen needs already exists, with its own bench at 16/16.
+
+So the pass-1 mode in `sar_coeffgen` — fixed and silicon-verified on 2026-07-28 after an unreset
+control register was root-caused — is now the **fallback**, not the path. `sar_coeffgen`'s pass-2
+mode is untouched and remains essential: it feeds the FFT-1 feeder's fused azimuth gather, which is
+shipping.
+
+Status and remaining work: `mpfs/fpga/resample_v_status.md`.
+
 ## 7. Post-mortem of the reverted attempt (2026-07-27)
 
 Commit `7191894` implemented this and regressed **pass 2** on silicon; it was reverted in `e1ed702`.

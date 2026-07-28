@@ -372,6 +372,20 @@ module sar_coeffgen #(
             tan_we <= 1'b0; itan_we <= 1'b0; kc_we <= 1'b0;
             tan_waddr <= 0; itan_waddr <= 0; kc_waddr <= 0; tab_wdata <= 32'd0;
             err_fmt <= 1'b0;
+            /* PASS-1 control MUST reset. These four are written ONLY over AXI4-Lite, and the
+             * firmware never writes them (there is no knob), so without a reset they hold whatever
+             * the fabric powers up with. Measured on silicon 2026-07-28, straight after power-up:
+             *   MODE=0x00000001  X0=0xddb6da39  INV=0xbaf16c7e  TMAX=0x5f3f7be3
+             * -- i.e. pass-1 mode ACTIVE with garbage row scalars, while every reset register in
+             * the same block read clean zero. The generator then ran pass-1 maths during a pass-2
+             * frame: every coefficient out-of-range, so the feeder zero-filled, the image was wrong
+             * (crop CRC 0x8d89877e, not 0x319037b2) and the frame ran 1.4 s FASTER because
+             * zero-fill skips the DDR gather read.
+             * coeffgen1_design.md 3 required exactly this ("Keep MODE = 0 out of reset so the
+             * bitstream is behaviour-neutral until firmware opts in") and the RTL did not do it.
+             * tb_sar_coeffgen.v cannot catch it: it writes 0x020 explicitly for every case, so
+             * simulation always has a defined mode. */
+            p1_mode <= 1'b0; p1_x0 <= 32'd0; p1_inv <= 32'd0; p1_tmax <= 32'd0;
         end else begin
             start_pulse <= 1'b0;
             tan_we <= 1'b0; itan_we <= 1'b0; kc_we <= 1'b0;

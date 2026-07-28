@@ -191,6 +191,24 @@ module tb_sar_coeffgen;
         resetn = 1;
         repeat (4) @(posedge clk);
 
+        // ---- POWER-UP STATE: the bitstream must be behaviour-neutral out of reset ----------
+        // Every case below writes MODE (0x020) explicitly, so none of them can observe what the
+        // module does when firmware NEVER writes it -- which is the real deployment, since there
+        // is no firmware knob for pass-1. That blind spot shipped: measured on silicon 2026-07-28
+        // straight after power-up, MODE=0x00000001 with X0/INV/TMAX full of garbage, so the
+        // generator ran pass-1 maths through a pass-2 frame and produced a wrong image.
+        // coeffgen1_design.md 3 requires MODE = 0 out of reset. Check it before anything is armed.
+        if (dut.p1_mode !== 1'b0) begin
+            $display("  POWER-UP: p1_mode = %b, expected 0 -- bitstream is NOT behaviour-neutral",
+                     dut.p1_mode);
+            nbad = nbad + 1;
+        end
+        if (dut.p1_x0 !== 32'd0 || dut.p1_inv !== 32'd0 || dut.p1_tmax !== 32'd0) begin
+            $display("  POWER-UP: pass-1 row scalars not zeroed (x0=%08x inv=%08x tmax=%08x)",
+                     dut.p1_x0, dut.p1_inv, dut.p1_tmax);
+            nbad = nbad + 1;
+        end
+
         check_fp_primitives;
 
         for (c = 0; c < `NCASES; c = c + 1) begin

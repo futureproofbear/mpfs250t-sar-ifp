@@ -5,8 +5,12 @@ description: >-
   correlation, build a bit-accurate fixed-point emulator that equals the float golden, watch for the
   golden-ORIENTATION artifact, and use board-free phase-exact (complex-ratio) checks. Load before
   claiming a stage is correct/broken or before debugging a "it doesn't match golden" symptom.
+  ALSO: before trusting any testbench result, confirm the bench instantiates the SAME parameters
+  synthesis builds (§6, `mpfs/fpga/tb/check_tb_params.py`) — a passing bench on the wrong
+  parameterisation proves nothing and has already cost a full board bring-up.
   Triggers: "verify the FFT/pipeline", "compare to golden", "correlation is low", "phase test",
-  "emulator / silicon mirror", "orientation / transpose mismatch", "is this a real bug".
+  "emulator / silicon mirror", "orientation / transpose mismatch", "is this a real bug",
+  "the bench passes but silicon is wrong", "testbench parameters".
 ---
 
 # SAR verification methodology
@@ -70,6 +74,50 @@ divergence.** These are target-neutral; the current tools live under `mpfs/host/
   fallback with no rebuild. A correct-signed CPU detect confirmed the detect bug end-to-end and shipped.
 - **A/B two hardware configs** on the same input (e.g. CPU-FFT SIG vs fabric-FFT SIG scored 0.9999 →
   proved the fabric FFT was NOT the bug).
+
+## 6. The bench must instantiate what SYNTHESIS builds — run `check_tb_params.py` FIRST
+
+**The most expensive failure on this project to date (2026-07-29).** `sar_resample_v` passed 16/16
+functional cases, a re-arm pass and a power-up pass, every one mutation-verified non-vacuous — then
+produced a completely wrong image on silicon (corr **−0.04** against the known-good crop, peak 76 vs
+3069). The bench was not weak. It was testing **a different module**:
+
+| parameter | bench | silicon | what it sizes |
+|---|---|---|---|
+| `TAB_AW` | 14 | **13** | on-chip table depth (16384 vs 8192) |
+| `BUF_AW` | 6 | **12** | source buffer (128 vs 8192 samples) |
+| `MAX_BURST` | 4 | **64** | AXI beats per burst |
+| `WF_AW` | 4 | **8** | write FIFO depth |
+
+Those parameters size the exact structures the gather indexes into. Zero of the passing runs said
+anything about the bitstream.
+
+**The divergence was documented and still not caught.** `tb_sar_resample.v`'s own header records that
+`TAB_AW=14` was *forced* because the module would not elaborate at its default 13 (vsim-8607,
+negative replication multiplier). A later fix removed that obstruction — `sar_resample_v_top` now
+elaborates clean at 13 — but the forced override was never revisited. **A comment is not a gate.**
+
+Rules:
+- **Run `python mpfs/fpga/tb/check_tb_params.py` before believing ANY bench result**, and before any
+  build. It text-parses the module defaults, the synthesis wrapper's overrides and the TB's
+  instantiation, and fails on any divergence — no simulator, milliseconds, no excuse to skip.
+- **Register every hand-written core in its `REGISTRY`.** A core with no row is ungated, which is
+  precisely the state `sar_resample_v` was in.
+- If an override is genuinely unavoidable (runtime — a 8192-tile frame at full size is hours of
+  simulation), then **add a second run at the silicon values** covering at least one full-scale line,
+  and state in the commit which properties the small run can and cannot establish. `corner_turn_v`
+  has the same gap (`GRID` 16 vs 8192, `T_LOG2` 2 vs 7) — its risk was retired by an end-to-end
+  bit-exact silicon result, *not* by the bench. Know which of the two you have.
+- **Mutation testing does not close this.** It proves the bench is non-vacuous for the cases it has.
+  It is silent about the space it does not cover. Do not report "mutation-verified" as if it were
+  coverage.
+- **Scale is part of the parameterisation.** Bench `SN≤64`/`QN≤32` vs silicon `SN=4319`/`QN=8192` is
+  ~128×. Anything that only appears past a few hundred samples cannot manifest.
+
+Corollary — **never REPLACE a working kernel when you can add beside it.** `sar_resample_v` took the
+SmartHLS resample's CIC target instead of a new one, so there is no A/B on the same bitstream and no
+fallback: the first end-to-end evidence that existed anywhere was the final image. Keep the incumbent
+reachable until the replacement is silicon-proven.
 
 See also: `sar-pipeline-design` (the contracts being verified), `mpfs-platform-gotchas` →
 `references/silicon-debug-methodology.md` (the platform-specific value-test entry points and JTAG

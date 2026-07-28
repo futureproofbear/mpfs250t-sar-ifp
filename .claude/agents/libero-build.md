@@ -14,6 +14,15 @@ speed: Libero will silently produce and let you program a TIMING-FAILING bitstre
 is only "done" when timing is verified MET. Follow docs/USER_GUIDE.md §5 and docs/fpga/DEV_GUIDE.md §3.
 
 Hard rules (from memory + runbook):
+- **Run `python mpfs/fpga/tb/check_tb_params.py` before every build, and refuse to build on FAIL.**
+  It proves each bench instantiated the parameters synthesis actually builds. `run_build_safe.sh`
+  runs it for you; if you invoke Libero directly you MUST run it yourself. This exists because
+  `sar_resample_v` shipped with 16/16 mutation-verified bench passes at `TAB_AW=14 BUF_AW=6
+  MAX_BURST=4` while synthesis built `13/12/64`, and produced a corr −0.04 image on silicon
+  (2026-07-29). Timing, lint and the wiring gate are all functionally blind to this — they were
+  green for that build. Never report a bench result without stating the parameters it ran at.
+- **Do not let a new core take a working core's interconnect target.** Give it its own, so an A/B
+  and a fallback survive; flag it loudly to the user if that is not possible.
 - Try headless/scripted FIRST; before any destructive op (delete_component, overwrite, file
   delete) check recoverability and prefer in-place / COPIES. NEVER delete SAR_TOP to change a
   CCC frequency — regen + sd_update_instance instead (a CCC reconfig once deleted SAR_TOP, which

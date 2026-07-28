@@ -74,6 +74,18 @@ Project-specific rules earned on this SAR-on-silicon work. They complement the g
   operating mode + handshake) AND the golden testbench BEFORE committing to a design or a fix — not
   after it fails on hardware. Check what the golden TB does NOT exercise. (Cost real time on the FFT
   integration: the golden TB only ran one transform, never the re-arm path.)
+- **A bench must instantiate what SYNTHESIS builds — run `mpfs/fpga/tb/check_tb_params.py` first.**
+  Before believing any testbench result, and before any build. `sar_resample_v` passed 16/16 cases,
+  re-arm, power-up, all mutation-verified, then produced a wrong image on silicon (corr −0.04)
+  because the bench ran `TAB_AW=14 BUF_AW=6 MAX_BURST=4 WF_AW=4` while synthesis built
+  `13/12/64/8` — a different module. The divergence was even written in the bench's own header and
+  still missed: **a comment is not a gate.** Scale counts too (bench `SN≤64` vs silicon `SN=4319`).
+  Mutation testing does NOT close this — it proves non-vacuity for the cases present and is silent
+  about the space omitted; never report it as coverage. Register every hand-written core in the
+  script's `REGISTRY`; an unregistered core is ungated.
+- **Never REPLACE a working kernel when you can add beside it.** Taking the incumbent's interconnect
+  target leaves no A/B on the same bitstream and no fallback, so the first end-to-end evidence is
+  the final image. Keep the incumbent reachable until the replacement is silicon-proven.
 - **Verify timing MET before functional silicon debug.** Confirm setup AND hold closed in place-and-route
   before treating any on-silicon misbehaviour as a logic/firmware bug — timing violations mimic
   functional bugs perfectly, and the toolchain will program a timing-failing bitstream silently.

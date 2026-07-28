@@ -37,6 +37,22 @@ echo ">>> [2/3] LINT GATE (pre-synth firebreak)"
 # (build_full_prog_ffv.tcl, libero_ffv/export/...), so point it at the netlist this build just
 # generated. Without it the gate aborts on "netlist not found" -- and worse, if a stale
 # libero_sar/ netlist ever exists it would gate the WRONG file and pass vacuously.
+# PARAMETERISATION GATE -- runs BEFORE the netlist lint because it is the cheaper of the two and
+# catches a failure neither lint nor timing can see: a bench that validated a DIFFERENT module than
+# synthesis builds. sar_resample_v shipped 16/16 mutation-verified cases at TAB_AW=14/BUF_AW=6/
+# MAX_BURST=4 while silicon built 13/12/64, and produced a corr -0.04 image (2026-07-29). Not
+# advisory: a green bench on the wrong parameters is worse than no bench, because it is believed.
+if ! "$SAR_PYTHON" "$FPGA/tb/check_tb_params.py"; then
+    echo ">>> ========================================================"
+    echo ">>> BUILD ABORTED by testbench-parameter gate."
+    echo ">>> A bench that ran different parameters than synthesis"
+    echo ">>> proves NOTHING about the bitstream. Fix the bench, or"
+    echo ">>> add a full-scale run and record what the small one"
+    echo ">>> can and cannot establish."
+    echo ">>> ========================================================"
+    exit 1
+fi
+
 NETLIST="$FPGA/libero_ffv/component/work/SAR_TOP/SAR_TOP.v"
 if ! bash "$FPGA/lint_netlist.sh" "$NETLIST"; then
     echo ">>> ========================================================"

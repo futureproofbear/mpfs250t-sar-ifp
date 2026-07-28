@@ -13,7 +13,7 @@ sd_instantiate_component -sd_name $sd -component_name {COREFFT_C0}   -instance_n
 ## AXI4 write master. Replaces the deadlocking CoreAXI4DMAController (AXIDMA_C0) S2MM stream target.
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_unloader_top}          -instance_name {UNLD}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corner_turn_v_top}        -instance_name {CT}
-sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {resample_top}             -instance_name {RES}
+sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_resample_v_top}      -instance_name {RES}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {fft_feeder_top}           -instance_name {FEED}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {corefft_stream64_adapter} -instance_name {GBX}
 sd_instantiate_hdl_core  -sd_name $sd -hdl_core_name {sar_axi_idconv}           -instance_name {ID_FIX}

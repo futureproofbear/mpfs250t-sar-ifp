@@ -82,6 +82,12 @@ source "$here/unloader_v_core.tcl"
 # Hand-written corner-turn replacing the SmartHLS corner_turn (E4: 22.7% port active,
 # 41.5% idle, and half-width beats). Same bus interfaces, so the assembly only swaps the name.
 source "$here/corner_turn_v_core.tcl"
+# Hand-written resample replacing the SmartHLS resample, with COEFFICIENT GENERATION FUSED
+# IN: it computes (idx, wq) on-chip from the affine/scan maths instead of reading 32 KB idx
+# + 16 KB wq per line back over FIC_0. Same bus interfaces, so the assembly only swaps the
+# name. hls_resample stays registered-but-uninstantiated, the same harmless precedent as
+# hls_detect above.
+source "$here/sar_resample_v_core.tcl"
 ## axi4_regslice: ONE core, TWO instances (DIC/CIC link timing fix, see axi4_regslice_core.tcl).
 ## sar_fic0s_mon: FIC_0_AXI4_S transaction monitor, NEW 7th CIC target (see sar_fic0s_mon_core.tcl).
 source "$here/axi4_regslice_core.tcl"

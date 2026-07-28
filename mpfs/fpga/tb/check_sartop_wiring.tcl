@@ -100,7 +100,12 @@ foreach {i want} {FFT COREFFT_C0  FFT_B COREFFT_C0
                   UNLD fft_unloader_top UNLD_B fft_unloader_top
                   GBX corefft_stream64_adapter GBX_B corefft_stream64_adapter
                   COEFG sar_coeffgen COEFG_B sar_coeffgen
-                  CT corner_turn_top RES resample_top} {
+                  CT corner_turn_v_top RES sar_resample_v_top} {
+    # Both were SmartHLS cores and are now hand-written Verilog. corner_turn_v_top shipped
+    # 2026-07-27 (silicon-verified, CRC 0x319037b2) and this expectation was NOT updated with
+    # it -- the gate has been red ever since, which is how it stayed unnoticed. Kept as an
+    # exact-name check on purpose: swapping a datapath kernel should require a deliberate
+    # edit here, not pass silently.
     if {![dict exists $::INST $i]} { fail "instance $i missing" ; continue }
     if {[dict get $::INST $i] ne $want} { fail "instance $i is [dict get $::INST $i], want $want" }
 }

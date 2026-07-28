@@ -822,8 +822,8 @@ RTL):
 | Kernel | Base | Signature | ARGs |
 |---|---|---|---|
 | `corner_turn` (`CT`) | `0x6000_0000` | `corner_turn(src, dst)` | 0=src 1=dst |
-| `window` (`WIN`) | `0x6000_1000` | `window(in, hamr, hamc, out)` | 0=in 1=hamr 2=hamc 3=out — **instantiated but never armed** (§2.3 fusion) |
-| `detect` (`DET`) | `0x6000_2000` | `detect(in, out)`, uint16 mag | 0=in 1=out — **instantiated but never armed** (§2.5 fusion) |
+| `fft_feeder_B` (`FEED_B`) | `0x6000_1000` | 2nd chain feeder — **was `K_WINDOW`** | same as `FEED` |
+| `fft_unloader_B` (`UNLD_B`) | `0x6000_2000` | 2nd chain unloader — **was `K_RESAMPLE2`** | same as `UNLD` |
 | `resample` (`RES`) | `0x6000_3000` | `resample(in, idx, wq, out)`, per line | 0=in 1=idx 2=wq 3=out |
 | `fft_feeder` (`FEED`) | `0x6000_4000` | `fft_feeder(src, &stream, nbeats)` | 0=src 1=nbeats |
 | `fft_unloader` (`UNLD`) | `0x6000_5000` | AXI4-Stream slave → AXI4 write master; drains CoreFFT output to DDR | dst + nbeats (no descriptors/TLAST) |
@@ -881,11 +881,11 @@ wiring source: `mpfs/fpga/build_full_prog_ffv.tcl`.
 | `CCC` | PF_CCC_C0 (PLL) | — | `OUT0_FABCLK_0` = fabric clock; `OUT1_FABCLK_0` = fabric/8 for CoreFFT SLOWCLK — see §9.3 for the current value |
 | `RST` | CORERESET_C0 | — | Synchronous `FABRIC_RESET_N` (active-low), gated on PLL lock + MSS reset |
 | `DIC` | AXIIC_C0 (CoreAXI4Interconnect) | 3.0.130 | **Data plane** — 6 initiators → 1 target (DDR) |
-| `CIC` | AXIIC_CTRL (CoreAXI4Interconnect) | 3.0.130 | **Control plane** — 1 initiator (MSS) → 6 targets |
+| `CIC` | AXIIC_CTRL (CoreAXI4Interconnect) | 3.0.130 | **Control plane** — 1 initiator (MSS) → **9** targets |
 | `FFT` | COREFFT_C0 (CoreFFT) | 8.1.100 | Range/azimuth FFT |
 | `GBX` | corefft_stream64_adapter | (HDL) | Gearbox: AXI4-Stream ↔ CoreFFT native handshake, + 64-deep output skid FIFO |
 | `CT/RES` | HLS kernels (corner_turn / resample) | (HLS) | mem→mem, active in the shipping datapath |
-| `WIN/DET` | HLS kernels (window / detect) | (HLS) | still instantiated (ctrl target + data initiator each), never armed — fused into `FEED`/`UNLD` instead (§2.3, §2.5, §8.1) |
+| `FEED_B/UNLD_B` | 2nd CoreFFT chain feeder / unloader | hand-written Verilog | occupy the two control windows that `WIN`/`DET` used to hold — those kernels were REMOVED, not renumbered |
 | `FEED/UNLD` | fft_feeder / fft_unloader | (hand-written Verilog) | DDR↔stream bridges around CoreFFT; SmartHLS mem↔stream kernels synthesize to dead RTL on this toolchain, so both are Verilog, not HLS |
 | `ID_FIX` | sar_axi_idconv / sar_id_restore | (HDL) | AXI ID stash/restore on DIC→FIC data path (§9.6) |
 
@@ -915,8 +915,8 @@ wiring source: `mpfs/fpga/build_full_prog_ffv.tcl`.
 | DIC initiator | Master | DIC target | → |
 |---|---|---|---|
 | 0 | `CT:axi4initiator` | 0 | `ID_FIX:S_AXI` → `ID_FIX:M_AXI` → `MSS:FIC_0_AXI4_S` → **DDR** `0x8000_0000`–`0xBFFF_FFFF` |
-| 1 | `WIN:axi4initiator` | | (never armed — §9.2) |
-| 2 | `DET:axi4initiator` | | (never armed — §9.2) |
+| 1 | `FEED_B:axi4initiator` | | 2nd chain feeder (was `WIN`) |
+| 2 | `UNLD_B:axi4initiator` | | 2nd chain unloader (was `DET`) |
 | 3 | `RES:axi4initiator` | | |
 | 4 | `FEED:axi4initiator` | | |
 | 5 | `UNLD:AXI4InitiatorDMA_IF`-equivalent (fft_unloader's write master) | | |
@@ -933,14 +933,14 @@ in the high bits — `RES` is `0x300`, a seventh initiator would be `0x600`.
 
 ### 9.5 Control plane — CIC (`AXIIC_CTRL`)
 
-1 initiator (`MSS:FIC_0_AXI4_INITIATOR`) → 6 targets. The bare-metal sequencer on a U54 configures
+1 initiator (`MSS:FIC_0_AXI4_INITIATOR`) → **9** targets. The bare-metal sequencer on a U54 configures
 and starts each block through its register window. Per-target 4 KB; address-decoded by the CIC.
 
 | CIC target | Block | Base addr | Protocol (`TYPE`) | Notes |
 |---|---|---|---|---|
 | 0 | `CT:axi4target` | `0x6000_0000` | AXI4 (0) | HLS AXI4-Lite-style control |
-| 1 | `WIN:axi4target` | `0x6000_1000` | AXI4 (0) | never armed |
-| 2 | `DET:axi4target` | `0x6000_2000` | AXI4 (0) | never armed |
+| 1 | `FEED_B:axi4target` | `0x6000_1000` | AXI4 (0) | 2nd chain feeder (was `WIN`) |
+| 2 | `UNLD_B:axi4target` | `0x6000_2000` | AXI4 (0) | 2nd chain unloader (was `DET`) |
 | 3 | `RES:axi4target` | `0x6000_3000` | AXI4 (0) | |
 | 4 | `FEED:axi4target` | `0x6000_4000` | AXI4 (0) | |
 | 5 | `UNLD:axi4target` (fft_unloader control, was `DMA` control) | `0x6000_5000` | **AXI4-Lite (1)** | 32-bit + 64→32 DWC; addr `[10:0]` sliced. See §9.8. |
@@ -1019,7 +1019,7 @@ topology-oriented table:
 | TABLES | `0xB000_0000` | — | `KR 0xB000_0000`, `KC …0010000`, `TANPHI …0020000`, `WIN …0030000`, `JOB …0040000` |
 | GEOM | `0xB010_0000` | — | `F0/DF/PR/TANS/INVORDER …0100000–…0120000`; `KRGRID …0128000`, `KCGRID …0130000`; `HAMR …0138000`, `HAMC …0140000` |
 | COEF banks | `0xB014_8000` | — | per-bank resample `IDX` (int32) + `WQ` (int16) |
-| CIC control windows | `0x6000_0000`–`0x6000_5FFF` | 4 KB each | `CT`(0) `WIN`(1) `DET`(2) `RES`(3) `FEED`(4) `UNLD`(5, AXI4-Lite) |
+| CIC control windows | `0x6000_0000`–`0x6000_8FFF` | 4 KB each | `CT`(0) `FEED_B`(1) `UNLD_B`(2) `RES`(3) `FEED`(4) `UNLD`(5) `FIC0MON`(6) `COEFG`(7) `COEFG_B`(8) |
 
 ### 9.11 The five data flows
 
@@ -1108,35 +1108,46 @@ during the FFT passes while the fabric is near-idle during the CPU renormalize e
 average hides the peak. And it is **fabric only** — it excludes the four U54s, the DDR controller
 and the PHY. For a whole-board figure, read the Icicle Kit's on-board current sense over I2C.
 
-**Per-stage / block breakdown** (aggregated from `SAR_TOP_compile_netlist_hier_resources.csv`,
-same 2026-07-21 build):
+**Per-block breakdown**, aggregated from `SAR_TOP_compile_netlist_hier_resources.csv`. LUT/DFF are
+from the build in the tree at the time of writing (`7b6fbbc`, the pass-1 coeffgen build, which adds
+~1.2k LUT over the `d07bce7` baseline); **LSRAM, µSRAM and MACC are identical in both**, because
+pass-1 reuses the existing coefficient table.
 
-| Block | 4LUT | DFF | LSRAM | µSRAM | Math | Notes |
+| Block | 4LUT | DFF | LSRAM | µSRAM | MACC | Notes |
 |---|---:|---:|---:|---:|---:|---|
-| CoreFFT (`FFT`) | 4,093 | 1,061 | 21 | 0 | 4 | twiddle ROM + butterfly datapath |
-| Detect (`DET`) | 3,809 | 2,959 | 0 | 25 | 2 | standalone kernel — **instantiated but never armed**; detect runs fused into the FFT unloader instead; ~3.8k LUT reclaimable if stripped |
-| Window (`WIN`) | 3,361 | 2,098 | 16 | 23 | 6 | standalone kernel — **instantiated but never armed** since the window-fusion build itself (this row is dead weight in the same build it's measured in) |
-| Resample (`RES`) | 3,125 | 1,834 | 32 | 25 | 6 | linear-interp gather (2 MACC/output) |
-| Gearbox (`GBX`) | 3,083 | 4,144 | 0 | 0 | 0 | CoreFFT stream rate-match; register-based elastic FIFO |
-| Data interconnect (`DIC`) | 2,966 | 3,961 | 0 | 2 | 0 | CoreAXI4Interconnect (kernel masters → FIC0) |
-| Control interconnect (`CIC`) | 2,719 | 3,323 | 0 | 12 | 0 | AXI4-Lite fanout (1 master → 6 slaves) |
-| Corner-turn (`CT`) | 2,229 | 1,216 | 9 | 14 | 0 | LSRAM-tiled transpose |
-| Unloader (`UNLD`) | 1,935 | 1,147 | 3 | 10 | 0 | CoreFFT stream → DDR |
-| Feeder (`FEED`) | 364 | 298 | 2 | 0 | 0 | DDR → CoreFFT stream (hand-written Verilog) |
+| `COEFG` / `COEFG_B` | 13,763 ea | 8,402 ea | 32 ea | 396 ea | 12 ea | on-fabric coefficient generators — the µSRAM story of this design |
+| `CIC` | 11,548 | 7,762 | 0 | 55 | 2 | AXI4-Lite fanout, 1 master → **9** slaves |
+| `RES` | 6,541 | 5,379 | 66 | 14 | 4 | linear-interp gather — the last SmartHLS block in the datapath |
+| `CT` | 5,562 | 4,987 | **128** | 3 | 0 | hand-written `corner_turn_v.v`, double-buffered full-width tiles |
+| `FFT` / `FFT_B` | ~4,990 ea | ~1,958 ea | 21 ea | 0 | 4 ea | CoreFFT twiddle ROM + butterfly datapath |
+| `FEED` / `FEED_B` | ~4,082 ea | 3,641 ea | 54 ea | 0 | 11 ea | DDR → CoreFFT stream, with the gather and window taper fused in |
+| `GBX` / `GBX_B` | ~3,118 ea | 4,144 ea | 0 | 0 | 0 | CoreFFT stream rate-match; register-based elastic FIFO, not LSRAM |
+| `UNLD` / `UNLD_B` | 2,690 ea | 2,061 ea | 2 ea | 0 | 4 ea | CoreFFT stream → DDR, with detect fused in |
+| `DIC` | 2,682 | 3,307 | 0 | 2 | 0 | CoreAXI4Interconnect, kernel masters → FIC_0 |
+| `FIC0MON` | 1,187 | 627 | 0 | 0 | 0 | FIC_0 bus monitor (the E4 telemetry source) |
 
-*(Remainder is RST/CCC/MSS-interface glue.)* The design is logic-light and MACC-light — the FFT
-runs on CoreFFT's own butterfly, not a MACC farm, so only ~19–25 of 784 Math blocks are used.
-LSRAM is the next-tightest resource at ~16%, spread across resample/window scratch, corner-turn
-tiles, and AXI burst FIFOs. The two interconnects (DIC + CIC) alone account for ~5,700 LUT
-(~17% of the design's LUT total) — AXI4 crossbars carry per-channel FIFOs, arbitration, and
-address decode, so the plumbing rivals the compute kernels in footprint. `WIN` and `DET` together
-are ~7.2k LUT / ~5k DFF / 16 LSRAM / 48 µSRAM / 8 Math of dead weight in the shipping bitstream —
-reclaimable by stripping them, not yet done.
+*(Remainder is RST/CCC/MSS-interface glue and the two register slices.)*
+
+Four things this table says that are worth reading off it:
+
+- **The coefficient generators dominate µSRAM**, at 396 blocks each — 792 of the 866 total. They are
+  also the largest LUT consumers. That is the cost of keeping coefficient generation off the CPU.
+- **`CT` is the largest LSRAM consumer at 128 blocks**, roughly 3× the SmartHLS kernel it replaced.
+  That memory buys the double-buffering that took its bus idle from 41.5% to 2.0%.
+- **The two interconnects are not free**: `DIC` + `CIC` together are ~14.2k LUT, comparable to a
+  compute kernel. AXI4 crossbars carry per-channel FIFOs, arbitration and address decode.
+- **MACC is nearly untouched** — 68 of 784. The FFT runs on CoreFFT's own butterfly, not a MACC
+  farm, so arithmetic density is not the constraint here; memory and DDR bandwidth are.
+
+There is no longer any dead weight to strip. The standalone `WIN` and `DET` kernels that earlier
+versions of this table listed as "instantiated but never armed" were **removed** — window is fused
+into the feeder and detect into the unloader, and their two CIC windows were reused in place by the
+second FFT chain.
 
 **Realized-vs-classic datapath note:** the design
 does not use one central DMA + one big corner-turn FIFO. Instead, each kernel is its own
-AXI-initiator master (`max_burst_len(64)`), the corner-turn is a mem→mem HLS **tiled transpose**
-using LSRAM tiles (9 LSRAM) rather than one monolithic FIFO, and the one true streaming FIFO is the
+AXI-initiator master (`max_burst_len(64)`), the corner-turn is a **hand-written tiled transpose**
+(`corner_turn_v.v`, 128 LSRAM of double-buffered full-width tiles) rather than one monolithic FIFO, and the one true streaming FIFO is the
 CoreFFT gearbox (register-based elastic FIFO, not LSRAM). These substitutions were forced by two
 silicon realities: `CoreAXI4DMAController`'s back-to-back-stream deadlock (§9.1) and SmartHLS's
 dead mem↔stream RTL (§9.2).

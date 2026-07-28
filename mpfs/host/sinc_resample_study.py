@@ -108,9 +108,13 @@ def part_A():
 
 
 # --------------------------------------------------------------------------- B. keystone delays
-def part_B(deci):
+def part_B(deci, cphd_override=None):
     print("\n=== B. KEYSTONE FRACTIONAL-DELAY DISTRIBUTION + BANDWIDTH OCCUPANCY (ship) ===")
-    cphd = ROOT / SHIP
+    # --cphd added 2026-07-28: part B DECIDES whether a better interpolator is worth
+    # building, and it was silently skipping because the hardcoded ship scene is not
+    # in this checkout. Any staged CPHD answers it; the scene only sets the geometry.
+    cphd = Path(cphd_override) if cphd_override else (ROOT / SHIP)
+    print(f'  scene: {cphd.name}')
     if not cphd.exists():
         print(f"  MISSING CPHD: {cphd}  (skipping B)"); return None
     reader = ref.open_phase_history(str(cphd))
@@ -217,10 +221,11 @@ def part_C():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--deci", type=int, default=8)
+    ap.add_argument("--cphd", default=None, help="CPHD to take the geometry from (default: the ship scene)")
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     A = part_A()
-    B = part_B(a.deci)
+    B = part_B(a.deci, a.cphd)
     C = part_C()
     print("\n=== VERDICT INPUTS ===")
     if B is not None:

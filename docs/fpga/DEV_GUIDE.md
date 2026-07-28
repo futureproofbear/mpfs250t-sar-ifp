@@ -1046,15 +1046,34 @@ each one and therefore *cannot* see stale state.
 | 2026-07-27 | `corner_turn_v` | 3/3 cases bit-exact | instant-done, then hang | re-arm |
 | 2026-07-26 | `sar_coeffgen` pass-1 | 12/12 + 4/4 mutants | pass-2 regressed | **NOT re-arm** — see below |
 
-Checked 2026-07-27 and recorded so nobody re-runs the search: the `sar_coeffgen` pass-1 regression
-is **not** an instance of this bug. Its `busy` is set in `C_IDLE` and cleared in `C_DRAIN` — mutually
-exclusive FSM states, so no same-cycle override is possible — the pass-2 pipeline taps were correctly
-re-timed with the added stages (`asc_d[7]/frac_d2` → `asc_d[9]/frac_d4`), `OF_LIM` is derived from
-`EMIT_LAT` so the output FIFO auto-scaled, and `tb_sar_coeffgen.v` already re-arms per case. The
-leading hypothesis is now TIMING: that commit took `EMIT_LAT` 11 → 13 and added `f2i_floor`
-(variable shift) plus `i2f_small` (14-iteration priority encoder) to a module in the 100 MHz domain,
-which has only **+0.182 ns** setup slack. Pipeline those two functions and check the timing report
-before retrying. See `mpfs/fpga/coeffgen1_design.md` §7.
+RESOLVED 2026-07-28. The `sar_coeffgen` pass-1 regression was **an unreset control register**, and
+six hypotheses died before it: re-arm, timing, a bundled WORK-buffer change, the two pass-1 logic
+bugs, and output-FIFO overflow. Each was killed by evidence, not argument.
+
+`p1_mode`, `p1_x0`, `p1_inv` and `p1_tmax` are written ONLY over AXI4-Lite and the firmware never
+writes them (there is no knob), yet they appeared in no reset branch. Read straight after power-up
+on silicon:
+
+| register | before fix | after fix |
+|---|---|---|
+| `0x60007020` MODE | `0x00000001` | `0x00000000` |
+| `0x60007024` X0 | `0xddb6da39` | `0x00000000` |
+| `0x60007028` INV | `0xbaf16c7e` | `0x00000000` |
+| `0x6000702c` TMAX | `0x5f3f7be3` | `0x00000000` |
+
+Every register WITH a reset read clean zero in the same dump; only the unreset ones held junk. The
+generator therefore powered up in pass-1 mode with garbage row scalars and ran pass-1 maths through
+a pass-2 frame: every coefficient out of range, the feeder zero-filled, crop CRC `0x8d89877e`, and
+the frame **1.4 s FASTER** because zero-fill skips the DDR gather read. That speedup is the tell no
+other hypothesis explained — a wrong result that is also quicker means work is being skipped, not
+miscomputed.
+
+**Two rules out of this.** First: an AXI-Lite control register that firmware never writes MUST be
+reset — its power-up value IS its operating value. `coeffgen1_design.md` §3 required exactly that
+and the RTL did not implement it. Second: **a bench that always writes a register can never observe
+its power-up state.** `tb_sar_coeffgen.v` wrote `0x020` on every case, so simulation always had a
+defined mode. It now asserts behaviour-neutrality after reset and before anything is armed, and is
+mutation-verified — strip the reset line and it reports `p1_mode = x` and fails.
 
 The other hand-written modules were swept at the same time and are clean by construction:
 `fft_feeder_v.v`, `fft_unloader_v.v` and `sar_fic0s_mon.v` re-initialise each register in its own

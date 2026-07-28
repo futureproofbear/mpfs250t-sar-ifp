@@ -79,6 +79,71 @@ def coeffs_mode0(kri, a, sh, b, sn):
     return idx, wq, oor
 
 
+def pick_sh_double(unit_d):
+    """pick_sh as the FIRMWARE does it: float64 throughout, not Fraction. Mirrors
+    sar_rsv_scalars() in sar_resample_v.c."""
+    for sh in range(SH_REQ, -1, -1):
+        scaled = unit_d * float(1 << sh)
+        if scaled > 9.0e18 or scaled < -9.0e18:
+            continue
+        a = math.floor(scaled + 0.5)
+        if a != 0 and fits32(a):
+            return sh, a
+    raise SystemExit("double path found no SH")
+
+
+def check_double_path(KR, kr_off, kr_scale, kri, f0, df, pr, nlines):
+    """THE QUESTION THIS ANSWERS: the firmware cannot use Fractions -- it computes A, SH, B and the
+    query table in float64 on the U54. Everything above is exact rational arithmetic. If the two
+    ever round to different integers the firmware silently programs a different affine map than the
+    one this script pins, and the board-side SAR_RSVDBG readback would then be 'correct' against the
+    wrong reference. So compare them directly, and report the MARGIN -- how close the worst case got
+    to a rounding boundary -- because a pass with no margin is luck, not a result."""
+    # rebuild kr_scale in double exactly the way the C does: 2^30 / span
+    kr_scale_d = 1073741824.0 / float(F(1 << 30) / kr_scale)
+
+    INT32_MAX, INT32_MIN = (1 << 31) - 1, -(1 << 31)
+    tab_diff, tab_margin = 0, 1.0
+    for i, k in enumerate(KR):
+        exact = F(F(float(k)) - F(kr_off)) * kr_scale
+        d = (float(k) - kr_off) * kr_scale_d
+        td = math.floor(d + 0.5)
+        if td > INT32_MAX:
+            td = INT32_MAX
+        elif td < INT32_MIN:
+            td = INT32_MIN
+        tab_margin = min(tab_margin, abs(float(exact + F(1, 2)) - math.floor(float(exact) + 0.5)))
+        if td != kri[i]:
+            tab_diff += 1
+
+    a_diff = sh_diff = b_diff = 0
+    a_margin = b_margin = 1.0
+    for i in range(nlines):
+        ag = 2.0 * pr[i] / C_LIGHT
+        x0, dx = ag * f0[i], ag * df[i]
+        sh_e, A_e = pick_sh(F(1 << 24) / (kr_scale * F(dx)))
+        B_e = iround((F(kr_off) - F(x0)) * F(1 << 24) / F(dx))
+        sh_d, A_d = pick_sh_double(16777216.0 / (kr_scale_d * dx))
+        B_d = math.floor((kr_off - x0) * 16777216.0 / dx + 0.5)
+        if sh_d != sh_e: sh_diff += 1
+        if A_d != A_e:   a_diff += 1
+        if B_d != B_e:   b_diff += 1
+        # distance from the .5 boundary, in ULP-of-the-integer terms
+        ae = float(F(1 << 24) / (kr_scale * F(dx)) * (1 << sh_e))
+        a_margin = min(a_margin, abs(ae - math.floor(ae) - 0.5))
+        be = float((F(kr_off) - F(x0)) * F(1 << 24) / F(dx))
+        b_margin = min(b_margin, abs(be - math.floor(be) - 0.5))
+
+    print(f"  FIRMWARE float64 vs exact rational, over {nlines} lines and {len(KR)} table entries:")
+    print(f"    query table : {tab_diff} differ   (worst distance to a .5 boundary {tab_margin:.3e})")
+    print(f"    SH          : {sh_diff} differ")
+    print(f"    A           : {a_diff} differ    (worst distance to a .5 boundary {a_margin:.3e})")
+    print(f"    B           : {b_diff} differ    (worst distance to a .5 boundary {b_margin:.3e})")
+    ok = (tab_diff == 0 and sh_diff == 0 and a_diff == 0 and b_diff == 0)
+    print(f"    -> {'IDENTICAL' if ok else 'DIVERGES -- the firmware would program a different map'}")
+    return ok
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--stage", default="jtag_stage_deci1")
@@ -156,7 +221,8 @@ def main():
     print(f"    SH values used: {dict(sorted(shs.items()))}")
     print(f"    out-of-range taps: {oor_tot} of {nlines * len(kri)} "
           f"({100.0 * oor_tot / (nlines * len(kri)):.1f}%)")
-    ok = not bad and not bad_a and not bad_b
+    dbl_ok = check_double_path(KR, kr_off, kr_scale, kri, f0, df, pr, nlines)
+    ok = not bad and not bad_a and not bad_b and dbl_ok
     print(f"\n  {'PASS' if ok else 'FAIL'} -- scalars are representable for the real geometry")
     print("  NOTE: this pins the EXPECTED values. It does not validate the firmware C, which "
           "cannot be\n        compiled or run on this host (no gcc, no spike/qemu).")

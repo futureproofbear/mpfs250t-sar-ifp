@@ -21,6 +21,7 @@
 #include "ddr_sar_layout.h"
 #include "sar_resample_coeffs.h"
 #include "sar_coeff_workers.h"    /* spread coefficient generation over the idle U54 harts */
+#include "sar_resample_v.h"       /* pass-1 gather with coefficient generation fused into fabric */
 #include "sar_accel_driver.h"     /* sar_job_t, sar_job_load (M, N from the host job) */
 #include "sar_fft.h"              /* sar_cpu_fft -- CPU FFT (HLS K_FFT butterfly broken on silicon) */
 
@@ -1031,9 +1032,23 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     uint32_t cwrk_nw = *(volatile uint32_t *)(uintptr_t)SAR_CWRK_NW_ADDR;
     if (cwrk_nw < 2u || cwrk_nw > SAR_CWRK_MAXW) cwrk_nw = 1u;
     sar_cwrk_init();
+    /* SAR_RSVMODE: hand pass 1 to sar_resample_v, which generates its own coefficients, so none of
+     * the per-line CPU coefficient work below runs at all. PASS 1 ONLY -- pass 2 is already fused
+     * into the FFT-1 feeder and keeps sar_coeffgen. OFF unless the knob holds exactly 'RSV1'.
+     * NOT bit-exact against CRC 0x319037b2 by design; see sar_resample_v.h. */
+    sar_rsv_scene_t rsv;
+    int rsv_on = sar_rsv_enabled();
+    if (rsv_on) {
+        /* the query table is loaded ONCE per scene; a failure here falls back rather than
+         * arming the kernel against a table that was never pushed */
+        uint32_t n_real = (g->N < Np) ? g->N : Np;
+        if (sar_rsv_load_kr(g->KR, n_real, Np, &rsv) != 0) rsv_on = 0;
+    }
     /* PASS 1 (range) */
-    sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
-                                (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
+    if (!rsv_on) {
+        sar_coeffs_pass1(g, 0, f32, (int32_t *)(uintptr_t)SAR_COEF_IDX(0),
+                                    (int16_t *)(uintptr_t)SAR_COEF_WQ(0));
+    }
     for (int k = 0; k < 16; k++) RPROF[k] = 0;          /* profile accumulators ([14]/[15] = IPC) */
     /* KERNEL-ONLY PROBE. The main loop overlaps coefficient generation with the kernel, so
      * `wait` only proves the kernel finished FIRST -- it does not reveal how long the kernel
@@ -1045,8 +1060,10 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     /* OFF by default: the probe re-runs line 0 and so inflates the stage total, which would
      * silently corrupt any performance baseline taken from this build. Enable over JTAG by
      * writing the iteration count to SAR_RPROF_PROBE_ADDR before PIPE. */
+    /* NOT under RSVMODE: the probe pokes HLS_ARG0..3, which on sar_resample_v are IN_BASE /
+     * OUT_BASE / STATUS2 / DIMS. It would silently rewrite the geometry, not re-run line 0. */
     const uint32_t PROBE = *(volatile uint32_t *)(uintptr_t)SAR_RPROF_PROBE_ADDR;
-    if (PROBE != 0u && PROBE <= 4096u) {
+    if (!rsv_on && PROBE != 0u && PROBE <= 4096u) {
         sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + 0u);
         sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(0));
         sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(0));
@@ -1074,19 +1091,47 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
      * The multi-hart coefficient dispatcher (sar_cwrk_line, silicon-proven bit-exact) is KEPT:
      * it publishes every slice itself, so there is no separate per-bank flush in the loop, and
      * with cwrk_nw <= 1 it degrades to exactly the old single-hart compute+flush. */
-    flush_coef_bank_to_ddr(0, Np);                 /* the prologue pass1() above does not publish */
+    if (!rsv_on) flush_coef_bank_to_ddr(0, Np);    /* the prologue pass1() above does not publish */
     for (uint32_t i = 0; i < g->M; i++) {
         SAR_PROG(1u, i, g->M);
+        /* RSV arms and starts in one call, so the counter clear has to happen before the arm.
+         * The register writes it then includes are a handful of CIC beats, not FIC_0 traffic. */
+        if (rsv_on && i == 0u) ficmon_clear();
         { RP_T0(t);
-          sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);            /* in  (N-wide) */
-          sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
-          sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
-          sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+          if (rsv_on) {
+              /* the kernel's whole per-line CPU cost: three scalars, in double (U54 is RV64GC).
+               * kr[i,j] = 2*pr[i]/C * (f0[i] + j*df[i]) = x0 + j*dx -- the same uniform mapping
+               * sar_coeffs_pass1() uses, kept in double here because A/B are exact integers. */
+              double ag = 2.0 * (double)g->pr[i] / (double)SAR_C_LIGHT;
+              double x0 = ag * (double)g->f0[i], dx = ag * (double)g->df[i];
+              if (i == 0u) {
+                  /* publish line 0's scalars so the first board run CHECKS this arithmetic against
+                   * check_resample_v_scalars.py rather than assuming it -- the C cannot be run on
+                   * the development host. See SAR_RSVDBG_ADDR in sar_resample_v.h. */
+                  volatile uint32_t *d = (volatile uint32_t *)(uintptr_t)SAR_RSVDBG_ADDR;
+                  int32_t a_dbg; uint32_t sh_dbg; int64_t b_dbg;
+                  sar_rsv_scalars(&rsv, x0, dx, &a_dbg, &sh_dbg, &b_dbg);
+                  d[0] = sh_dbg;
+                  d[1] = (uint32_t)a_dbg;
+                  d[2] = (uint32_t)((uint64_t)b_dbg & 0xFFFFFFFFu);
+                  d[3] = (uint32_t)(((uint64_t)b_dbg >> 32) & 0xFFFFFFFFu);
+              }
+              sar_rsv_arm_line(&rsv, x0, dx, g->N,
+                               BUF_SIG + i * g->N * 4u,
+                               BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+          } else {
+              sar_reg_w(K_RESAMPLE, HLS_ARG0, BUF_SIG + i * g->N * 4u);        /* in  (N-wide) */
+              sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(b));
+              sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(b));
+              sar_reg_w(K_RESAMPLE, HLS_ARG3, BUF_SCRATCH + (uint32_t)invord[i] * Np * 4u);
+          }
           RP_ACC(0, t); }
-        if (i == 0u) ficmon_clear();               /* FIC_0 behaviour of range gather line 0 */
-        sar_k_start(K_RESAMPLE);
+        if (!rsv_on) {
+            if (i == 0u) ficmon_clear();           /* FIC_0 behaviour of range gather line 0 */
+            sar_k_start(K_RESAMPLE);
+        }
         /* overlap: compute the NEXT line's coeffs into the other bank while this line gathers */
-        if (i + 1u < g->M) {
+        if (!rsv_on && i + 1u < g->M) {
             RP_T0(t);
             uint64_t r0 = read_csr(minstret), c0 = read_csr(mcycle);
             sar_cwrk_line(g, 1u, i + 1u, (int32_t *)(uintptr_t)SAR_COEF_IDX(b ^ 1),
@@ -1114,6 +1159,11 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         b ^= 1;
     }
     RPROF[5] = readmtime() - sar_resample_ts[0];
+    if (rsv_on) {
+        /* sticky and frame-level -- it cannot say WHICH line, only that one of them tripped */
+        *(volatile uint32_t *)(uintptr_t)SAR_RSVSTAT_ADDR =
+            SAR_RSVSTAT_TAG | (sar_reg_r(K_RESAMPLE, RSV_STATUS2) & 0xFFFFu);
+    }
     /* zero padded pulse rows (M..Mp-1) for clean FFT zero-padding (CPU clear; a
      * candidate for a fabric memset if this dominates runtime) */
     {

@@ -481,14 +481,22 @@ module sar_resample_v #(
     // cycle is right whether or not that cycle also advances. No combinational loop: m1_adv
     // depends only on registers (ts_k1, k, vD), never on ts_addr.
     wire [IDX_W-1:0] k_next = (r_mode & m1_adv) ? (k + 1'b1) : k;
+    // D1 FIX: TRUNCATE k to the table width; do not zero-extend it. k is IDX_W(14) bits so it can
+    // hold k+1/k+2 without wrapping, while the tables are TAB_AW(13) deep. The old
+    // {{(TAB_AW-IDX_W){1'b0}}, k} is a NEGATIVE replication count whenever TAB_AW < IDX_W, so the
+    // module would not elaborate at its OWN default TAB_AW=13 (vsim-8607; vlog passes, which is why
+    // it went unnoticed). The bench sidesteps it by forcing TAB_AW=14, so this bench cannot see the
+    // defect -- it is caught by the elaboration check in the gate script instead.
+    // Truncation is safe: the scan only ever addresses k+2 while (k+2) < SN <= 2^TAB_AW.
+    wire [TAB_AW-1:0] k_addr = k_next[TAB_AW-1:0];
     wire prep_sel = (state == T_PREP) && (prep_cnt != 2'd3);
-    assign ts_addr  = !prep_sel ? ({{(TAB_AW-IDX_W){1'b0}}, k_next} + {{(TAB_AW-2){1'b0}}, 2'd2}) :
+    assign ts_addr  = !prep_sel ? (k_addr + {{(TAB_AW-2){1'b0}}, 2'd2}) :
                       (prep_cnt == 2'd0) ? {TAB_AW{1'b0}} :
                       (prep_cnt == 2'd1) ? {{(TAB_AW-1){1'b0}}, 1'b1}
                                          : sn_m1[TAB_AW-1:0];
     assign inv_addr = (prep_sel && prep_cnt == 2'd0)
                           ? {TAB_AW{1'b0}}
-                          : ({{(TAB_AW-IDX_W){1'b0}}, k_next} + {{(TAB_AW-1){1'b0}}, 1'b1});
+                          : (k_addr + {{(TAB_AW-1){1'b0}}, 1'b1});
 
     // table RAMs (write from the AXI4-Lite loader, synchronous read)
     always @(posedge clk) begin

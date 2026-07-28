@@ -115,6 +115,29 @@ Why hardware breaks the usual agent loop, and what to build instead
 
 ---
 
+## Proposed "AI framework" 
+
+A **directory of plain text, version-controlled next to the RTL**. Four kinds of thing, all of which the agent loads on demand:
+
+| ingredient | what it is | count here |
+|---|---|---|
+| **Agents** | A specialised worker with its own tools, prompt and evidence bar. Returns a conclusion, not a transcript | 15 |
+| **Skills** | A named procedure — the exact steps, addresses and gotchas for one recurring job | 31 |
+| **Commands** | A shortcut that runs a fixed workflow | 2 |
+| **Memory** | Rules (`CLAUDE.md`), runbooks, and durable facts that survive the session | 3 files |
+
+It lives in two places, and the split is deliberate:
+
+- **`ai-framework/`** — packaged as **installable plugins**, layered by how far the knowledge
+  travels (method → toolchain → one silicon revision). Reusable on the next project.
+- **`.claude/`** — this project's own agents and skills: its scene, its addresses, its history.
+
+**Why bother.** An agent that must be *told* the JTAG hygiene every session will eventually not
+be told. And writing a lesson down forces the question *how specific is this actually?* — a design
+review in itself. It is all Markdown: a new engineer can open it, disagree, and edit.
+
+---
+
 ## Subagents — and what they are really for
 
 | agent | job |

@@ -240,51 +240,48 @@ def fig_loop(out):
 
 
 def fig_orchestration(out):
-    """The orchestration model: main loop, subagents, skills, memory, gates."""
-    d = Diagram(1020, 560, "Orchestration model",
-                draw_title=False)
-    d.box("user", 40, 40, 150, 50, "engineer", "host", bold=True)
-    d.box("main", 40, 130, 150, 70, "main agent\n(plans, decides,\nreports)", "ai", bold=True)
+    """The orchestration model: main loop, subagents, skills, memory, gates.
+
+    ROUTING NOTE: do NOT draw one edge per subagent. The renderer joins box borders with a straight
+    segment, so a fan-out to eight boxes passes BEHIND the intermediate ones and only the gaps show
+    -- which reads as `agent -> agent -> agent`, a pipeline. The subagents are independent and each
+    returns to the main agent, so that reading is exactly backwards. One arrow into the group box
+    says "any of these" without implying an order."""
+    d = Diagram(1020, 560, "Orchestration model", draw_title=False)
+    d.box("user", 30, 40, 160, 50, "engineer", "host", bold=True)
+    d.box("main", 30, 128, 160, 74, "main agent\n(plans, decides,\nreports)", "ai", bold=True)
     d.edge("user", "main", "intent", double=True)
 
-    d.box("mem", 40, 250, 150, 90, "MEMORY\nCLAUDE.md rules\nrunbooks\nMEMORY.md facts", "mem")
-    d.edge("main", "mem", "read + write", double=True)
+    # Container first (paints behind). MEMORY and SKILLS are both things the main agent draws on --
+    # a mem -> sk arrow would claim skills come FROM memory, which is not the relationship.
+    d.box("res", 22, 240, 176, 232, "", "plain", dashed=True)
+    d.box("mem", 34, 262, 152, 92, "MEMORY\nCLAUDE.md rules\nrunbooks\nMEMORY.md facts", "mem")
+    d.box("sk", 34, 380, 152, 76, "SKILLS\npackaged\nprocedures", "gate")
+    d.edge("main", "res", "uses", double=True)
 
-    d.box("sk", 40, 380, 150, 70, "SKILLS\npackaged\nprocedures", "gate")
-    d.edge("main", "sk", "invoke")
+    # Container FIRST so it paints behind the agent boxes it encloses.
+    d.box("pool", 250, 60, 740, 160, "", "plain", dashed=True)
+    d.note("ca", 250, 26, 740, 30,
+           "SUBAGENTS  —  each with its own tools, prompt and evidence bar. The sub-agents\n"
+           "focus on specific tasks, and each returns a recommendation / conclusion.", fs=12)
+    names = [("fpga-ref-\nverifier", 0, 0), ("architectural-\ncritic", 1, 0),
+             ("ingestion-\ntriage", 2, 0), ("smartdebug-\nplanner", 3, 0),
+             ("synthesis-\nrepair", 0, 1), ("libero-build", 1, 1),
+             ("silicon-test-\nrunner", 2, 1), ("doc-accuracy", 3, 1)]
+    for i, (nm, cx, cy) in enumerate(names):
+        d.box(f"a{i}", 268 + cx * 182, 78 + cy * 82, 164, 64, nm, "ai")
+    # ONE edge, into the group -- see the routing note above.
+    d.edge("main", "pool", "invoke", dashed=True, color="#7A96B8", double=True)
 
-    # subagents
-    d.note("sa", 260, 40, 720, 22, "SUBAGENTS  —  each with its own tools, prompt and evidence bar", fs=13)
-    d.box("a1", 260, 74, 160, 62, "fpga-ref-\nverifier", "ai")
-    d.box("a2", 440, 74, 160, 62, "architectural-\ncritic", "ai")
-    d.box("a3", 620, 74, 160, 62, "ingestion-\ntriage", "ai")
-    d.box("a4", 800, 74, 180, 62, "smartdebug-\nplanner", "ai")
-    d.box("a5", 260, 154, 160, 62, "synthesis-\nrepair", "ai")
-    d.box("a6", 440, 154, 160, 62, "libero-build", "ai")
-    d.box("a7", 620, 154, 160, 62, "silicon-test-\nrunner", "ai")
-    d.box("a8", 800, 154, 180, 62, "doc-accuracy", "ai")
-    for a in ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"]:
-        d.edge("main", a, "", dashed=True, color="#9AB")
-
-    # gates
-    d.note("gl", 260, 250, 720, 22, "GATES  —  nothing advances without passing the one before it", fs=13)
-    d.box("g1", 260, 284, 150, 58, "model gate\nbit-exact\nvs C", "gate")
-    d.box("g2", 430, 284, 150, 58, "testbench\n+ mutation", "gate")
-    d.box("g3", 600, 284, 150, 58, "timing gate\nsetup AND\nhold MET", "gate")
-    d.box("g4", 770, 284, 210, 58, "silicon CRC\n0x319037b2\nbit-exact", "gate")
+    d.note("gl", 250, 250, 740, 22, "GATES  —  nothing advances without passing the one before it", fs=12)
+    d.box("g1", 250, 282, 168, 62, "model gate\nbit-exact\nvs C", "gate")
+    d.box("g2", 442, 282, 168, 62, "testbench\n+ mutation", "gate")
+    d.box("g3", 634, 282, 168, 62, "timing gate\nsetup AND\nhold MET", "gate")
+    d.box("g4", 826, 282, 164, 62, "silicon CRC\n0x319037b2\nbit-exact", "gate")
     d.edge("g1", "g2"); d.edge("g2", "g3"); d.edge("g3", "g4")
 
-    d.box("hw", 770, 400, 210, 60, "the board\n(scarce, serial,\nhuman-gated)", "bad", bold=True)
+    d.box("hw", 826, 400, 164, 66, "the board\n(scarce, serial,\nhuman-gated)", "bad", bold=True)
     d.edge("g4", "hw")
-    d.edge("a7", "hw", "", dashed=True, color="#9AB")
-
-    d.note("cap", 260, 400, 480, 70,
-           "The subagents exist to keep the main context clean: each returns a CONCLUSION,\n"
-           "not the files it read. The gates exist because the model's confidence is\n"
-           "uncorrelated with correctness — only the gate output counts.", fs=12)
-    d.note("leg", 260, 490, 720, 50,
-           "Memory is what survives the session. A lesson not written into CLAUDE.md or a runbook\n"
-           "in the same session it was learned is a lesson the next session will pay for again.", fs=12)
     return d.write(out / "fig-orchestration.drawio.svg")
 
 

@@ -340,7 +340,8 @@ module tb_sar_resample;
     endtask
 
     // ================= test =================
-    integer c, k, i, errors, ci, nhung;
+    integer c, k, i, errors, ci, nhung, rep;
+    reg [31:0] st2_acc;   // expected STATUS2, ACCUMULATED since the last reset (latches are sticky)
     integer beat_i, half;
     reg [1:0] sel;
     reg [31:0] st2, got, want;
@@ -360,8 +361,17 @@ module tb_sar_resample;
         w_lo = 0; w_hi = 32'hffff_ffff;
         repeat (8) @(posedge clk);
 
+        // REP 0 resets before every case, as this bench always did. REP 1 runs the SAME eight
+        // cases again with NO reset between any of them, so each one RE-ARMS an instance that has
+        // already completed a line. Firmware drives this kernel once per line, thousands of times
+        // per frame, and never resets between lines -- so rep 0 alone was testing a machine that
+        // does not exist. Two bugs reached silicon this way on this project (corner_turn_v's
+        // instant-done, sar_coeffgen's power-up mode), which is why it is worth the extra pass.
+        // The output window is poisoned before EVERY arm: without it a re-armed run that wrote
+        // nothing would "pass" on the previous run's correct data.
+        for (rep = 0; rep < 2; rep = rep + 1)
         for (c = 0; c < `NCASES; c = c + 1) begin
-            do_reset;
+            if (rep == 0) begin do_reset; st2_acc = 32'd0; end
             ci    = c * `CFGW;
             md    = cfg[ci + 0];
             qn    = cfg[ci + 1];
@@ -395,6 +405,10 @@ module tb_sar_resample;
             lite_w(12'h010, cfg[ci + 9]);                           // OUT_BASE
 
             inject_arm = cfg[ci + 10][0];
+
+            // poison the destination so a stale-but-correct result cannot masquerade as a pass
+            for (k = 0; k < ((qn + 1) >> 1); k = k + 1)
+                mem[(cfg[ci + 9] >> 3) + k] = 64'hDEAD_BEEF_DEAD_BEEF;
 
             lite_w(12'h008, 32'd1);                                 // START
             wait_done;
@@ -445,15 +459,21 @@ module tb_sar_resample;
             end
 
             // ---- sticky error latches ----
+            // STATUS2 is set-only and cleared ONLY by reset (sar_resample_v.v: no write-1-to-clear,
+            // no clear-on-start), so across a re-arm run it is CUMULATIVE by design. Compare against
+            // the running OR since the last reset, not the per-case value -- otherwise every rep-1
+            // case inherits m0-affine-sat's saturation bit and reports a phantom failure.
+            st2_acc = st2_acc | cfg[ci + 11];
             lite_r(12'h014, st2);
-            if (st2 !== cfg[ci + 11]) begin
+            if (st2 !== st2_acc) begin
                 $display("  %0s: STATUS2 = %02x, expected %02x [0=extra 1=rlast 2=bresp 3=align 4=sat]",
-                         names[c], st2, cfg[ci + 11]);
+                         names[c], st2, st2_acc);
                 errors = errors + 1;
             end
 
-            $display("[case %0d] %0s mode%0d SN=%0d QN=%0d SH=%0d : %0d/%0d words %0s%0s",
-                     c, names[c], md, sn, qn, shv, qn - (errors > qn ? qn : errors), qn,
+            $display("[%0s %0d] %0s mode%0d SN=%0d QN=%0d SH=%0d : %0d/%0d words %0s%0s",
+                     rep ? "REARM" : "case ", c, names[c], md, sn, qn, shv,
+                     qn - (errors > qn ? qn : errors), qn,
                      errors ? "FAIL" : "ok", hung ? "  (DEADLOCK, recovered by reset)" : "");
             total_errors = total_errors + errors;
         end

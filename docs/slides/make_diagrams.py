@@ -39,8 +39,12 @@ FONT = "Helvetica,Arial,sans-serif"
 class Diagram:
     """Minimal box-and-arrow builder. Emits mxGraphModel XML and matching SVG geometry."""
 
-    def __init__(self, width, height, title=None):
+    def __init__(self, width, height, title=None, draw_title=True):
+        """`title` always names the draw.io diagram. `draw_title=False` keeps that name but stops
+        rendering it into the SVG -- use it wherever the slide heading already says the same thing,
+        so the figure does not repeat it under the heading."""
         self.w, self.h, self.title = width, height, title
+        self.draw_title = draw_title
         self.nodes = {}          # id -> dict
         self.edges = []
         self._n = 0
@@ -83,7 +87,7 @@ class Diagram:
                    'orient="auto" markerUnits="strokeWidth">'
                    '<path d="M10,0 L0,4 L10,8 z" fill="#444444"/></marker>'
                    '</defs>')
-        if self.title:
+        if self.title and self.draw_title:
             out.append(f'<text x="{self.w/2}" y="26" text-anchor="middle" font-family="{FONT}" '
                        f'font-size="17" font-weight="600" fill="#222">{html.escape(self.title)}</text>')
         # edges first so boxes sit on top
@@ -180,7 +184,8 @@ class Diagram:
 
 def fig_loop(out):
     """Why hardware/firmware breaks the usual agent loop: the feedback times."""
-    d = Diagram(980, 430, "Feedback loops: software vs this FPGA/firmware project")
+    d = Diagram(980, 400, "Feedback loops: software vs this FPGA/firmware project",
+                draw_title=False)   # the slide heading already says this
     d.box("s1", 40, 70, 170, 54, "edit source", "ai")
     d.box("s2", 250, 70, 170, 54, "compile\nseconds", "gate")
     d.box("s3", 460, 70, 170, 54, "test\nseconds", "gate")
@@ -208,7 +213,8 @@ def fig_loop(out):
 
 def fig_orchestration(out):
     """The orchestration model: main loop, subagents, skills, memory, gates."""
-    d = Diagram(1020, 560, "Orchestration model")
+    d = Diagram(1020, 560, "Orchestration model",
+                draw_title=False)
     d.box("user", 40, 40, 150, 50, "engineer", "host", bold=True)
     d.box("main", 40, 130, 150, 70, "main agent\n(plans, decides,\nreports)", "ai", bold=True)
     d.edge("user", "main", "intent", double=True)
@@ -256,7 +262,8 @@ def fig_orchestration(out):
 
 def fig_gates(out):
     """The board-free-first ladder, with what each rung actually caught."""
-    d = Diagram(1000, 520, "The gate ladder — and what each rung really caught")
+    d = Diagram(1000, 520, "The gate ladder — and what each rung really caught",
+                draw_title=False)
     rows = [
         ("Python model vs C, bit-exact", "gate",
          "caught: pass-1 arithmetic before any RTL existed"),
@@ -289,7 +296,8 @@ def fig_gates(out):
 
 def fig_pfa(out):
     """The SAR signal-processing chain (algorithm level)."""
-    d = Diagram(1020, 400, "Polar Format Algorithm — the processing chain")
+    d = Diagram(1020, 400, "Polar Format Algorithm — the processing chain",
+                draw_title=False)
     d.box("in", 30, 120, 140, 70, "CPHD\nphase history\n(pulses x samples)", "host")
     d.box("s1", 200, 120, 150, 70, "1. Keystone\nresample\n(2-D interp)", "fab")
     d.box("s2", 380, 120, 140, 70, "2. Window\nHamming taper\n(fused)", "fab", dashed=True)
@@ -313,7 +321,8 @@ def fig_pfa(out):
 
 def fig_fabric(out):
     """Fabric block diagram: what is actually instantiated and how it is wired."""
-    d = Diagram(1060, 560, "Fabric implementation — SAR_TOP")
+    d = Diagram(1060, 560, "Fabric implementation — SAR_TOP",
+                draw_title=False)
     d.box("mss", 30, 56, 190, 78, "MSS\n4x U54 @ 600 MHz\ndispatcher + 3 workers", "mss", bold=True)
     d.box("cic", 30, 168, 190, 50, "CIC\ncontrol interconnect", "ip")
     d.edge("mss", "cic", "AXI4-Lite")
@@ -361,7 +370,8 @@ def fig_fabric(out):
 
 def fig_dataflow(out):
     """DDR buffer flow per frame + where the on-chip memory actually goes."""
-    d = Diagram(1040, 620, "Data movement — DDR buffers and on-chip memory")
+    d = Diagram(1040, 620, "Data movement — DDR buffers and on-chip memory",
+                draw_title=False)
     d.note("h1", 40, 34, 960, 20, "Every stage is a DDR-to-DDR streaming pass. The frame never fits on-chip.", fs=13)
     d.box("sig", 60, 70, 150, 60, "SIG\nraw signal", "mem", bold=True)
     d.box("scr", 300, 70, 150, 60, "SCRATCH", "mem", bold=True)
@@ -400,7 +410,8 @@ def fig_dataflow(out):
 
 def fig_timing(out):
     """Where the frame time goes, and where it went."""
-    d = Diagram(1000, 560, "Timing — 110.8 s to 18.45 s, every step measured on silicon")
+    d = Diagram(1000, 560, "Timing — 110.8 s to 18.45 s, every step measured on silicon",
+                draw_title=False)
     d.note("h1", 40, 40, 920, 20, "Frame time, bit-exact at CRC 0x319037b2 throughout", fs=13)
     steps = [("110.8 s", 620, "first working pipeline", "bad"),
              ("37.72 s", 320, "fabric FFT + fusion", "hls"),
@@ -429,7 +440,8 @@ def fig_timing(out):
 
 def fig_bug(out):
     """The re-arm bug: the deck's concrete example of why the gates are shaped this way."""
-    d = Diagram(1000, 500, "One bug, and why every gate above silicon missed it")
+    d = Diagram(1000, 500, "One bug, and why every gate above silicon missed it",
+                draw_title=False)
     d.box("rtl", 40, 70, 300, 130,
           "corner_turn_v.v\n\nbusy <= 1'b1;  fill_done <= 1'b0;\n...\nif (fill_done && ...) busy <= 1'b0;",
           "bad")
@@ -460,7 +472,8 @@ def fig_arch_pipeline(out):
     Replaces a hand-authored SVG that drifted a full generation behind its own caption (it showed
     37.72 s and the 62.5 MHz stage split while the caption said 18.45 s). Generated so the next
     baseline change is a one-line edit here rather than SVG surgery."""
-    d = Diagram(1080, 380, "Figure 1 — SAR pipeline dataflow (18.45 s baseline, CRC 0x319037b2)")
+    d = Diagram(1080, 380, "Figure 1 — SAR pipeline dataflow (18.45 s baseline, CRC 0x319037b2)",
+                draw_title=False)
     d.box("sig", 30, 96, 120, 62, "SIG\nraw signal", "mem", bold=True)
     d.box("s1", 175, 96, 150, 62, "1. Resample\nrange gather\n5.212 s", "fab")
     d.box("ct1", 350, 96, 140, 62, "CT#1\ntranspose\n2.064 s", "fab")

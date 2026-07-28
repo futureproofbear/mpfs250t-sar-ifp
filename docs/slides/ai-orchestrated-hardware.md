@@ -122,8 +122,8 @@ A **directory of plain text, version-controlled next to the RTL**. Four kinds of
 
 | ingredient | what it is | count here |
 |---|---|---|
-| **Agents** | A specialised worker with its own tools, prompt and evidence bar. Returns a conclusion, not a transcript | 15 |
-| **Skills** | A named procedure — the exact steps, addresses and gotchas for one recurring job | 31 |
+| **Agents** | A specialised worker with its own tools, prompt and evidence bar. Returns a conclusion, not a transcript | 8 |
+| **Skills** | A named procedure — the exact steps, addresses and gotchas for one recurring job | 26 |
 | **Commands** | A shortcut that runs a fixed workflow | 2 |
 | **Memory** | Rules (`CLAUDE.md`), runbooks, and durable facts that survive the session | 3 files |
 
@@ -139,18 +139,23 @@ review in itself. It is all Markdown: a new engineer can open it, disagree, and 
 
 ---
 
-## Subagents — and what they are really for
+## Subagents — one per stage of the design flow
 
-| agent | job |
-|---|---|
-| `fpga-ref-verifier` | Check an IP integration against the vendor guide **before** committing to it |
-| `architectural-critic` | Red-team a design; assume every correctness claim is false until the handshake is shown |
-| `ingestion-triage` | Turn raw JTAG/register hex into a labelled state map |
-| `smartdebug-planner` | Resolve probe net names from the *programmed* netlist |
-| `synthesis-repair` | Minimal, compilable fix within stated constraints |
-| `libero-build` | Headless build that refuses to return a bitstream unless timing is MET |
-| `silicon-test-runner` | Drive a JTAG test with consideration of the project's constraints |
-| `doc-accuracy` | Audit docs against source; report only provable drift |
+Each has its own tools, its own prompt, and its own evidence bar.
+
+| flow stage | agent | what it is for |
+|---|---|---|
+| **Architecture** | `fpga-ref-verifier` | Check the IP integration against the vendor guide **before** committing to a design |
+| **Architecture** | `architectural-critic` | Red-team it — assume every correctness claim is false until the handshake is shown |
+| **Logical design** | `synthesis-repair` | Minimal, compilable RTL/firmware fix within stated constraints |
+| **Physical design** | `libero-build` | Headless synth → P&R → timing; refuses a bitstream unless setup **and** hold are MET |
+| **Bring-up** | `silicon-test-runner` | Drive a JTAG test with the project's hygiene baked in |
+| **Bring-up** | `ingestion-triage` | Turn raw JTAG/register hex into a labelled state map |
+| **Bring-up** | `smartdebug-planner` | Resolve probe net names from the *programmed* netlist |
+| **Documentation** | `doc-accuracy` | Audit docs against source; report only provable drift |
+
+**There is deliberately no "verification" agent.** Verification is not delegated to a model — it is
+mechanised as the gate ladder that follows. An agent may propose; only a gate may accept.
 
 ---
 
@@ -214,6 +219,31 @@ a build.
 
 > A command is the end state of the promotion path: something done so often, and so identically,
 > that no decision is left in it.
+
+---
+
+## What can be driven headless
+
+An agent can only run what has a command-line form. On this toolchain, **the whole flow does** —
+Libero exposes each stage as a Tcl `run_tool`, so `libero.exe SCRIPT:build.tcl` covers it all.
+
+| stage | headless invocation |
+|---|---|
+| Create project, import IP / MSS, register HDL+ cores | `open_project`, `import_mss_component`, `create_hdl_core`, `build_design_hierarchy` |
+| Synthesis | `run_tool {SYNTHESIZE}` |
+| Compile / netlist | `run_tool {COMPILE}` |
+| Place & route | `run_tool {PLACEROUTE}` |
+| Static timing | `run_tool {VERIFYTIMING}` → parse the report, **gate on it** |
+| Power estimate | `run_tool {VERIFYPOWER}` |
+| Bitstream + programming file | `run_tool {GENERATEPROGRAMMINGDATA}`, `{GENERATEPROGRAMMINGFILE}`, `export_prog_job` |
+| Program the device | `run_tool {PROGRAMDEVICE}` (FlashPro6) |
+
+The rest is scriptable too: `pfsoc_mss.exe` (MSS config), `shls sw`/`shls hw` (SmartHLS),
+`vsim -c` (ModelSim), `mpfsBootmodeProgrammer` (eNVM), OpenOCD + GDB (the board).
+
+> A GUI step is one an agent cannot take, cannot gate, and cannot repeat identically. Because
+> timing is a `run_tool` whose report is a file, the build can **refuse to return a bitstream that
+> failed timing** — mechanical, not a human remembering to look.
 
 ---
 
@@ -304,11 +334,33 @@ Signal processing, fabric, memory, timing — and the measured result
 
 ---
 
-## The problem
+## Why do this on-board at all
 
-**Synthetic Aperture Radar** synthesises a large virtual antenna from a moving
-platform's pulses. The raw data is *phase history*, not an image — forming the
-image is the compute problem.
+Today a radar satellite downlinks **raw phase history** — enormous, unfocused, useless until a
+ground station processes it. The image, and any decision from it, arrives hours later.
+
+Forming the image **on the spacecraft** changes what can be sent and when:
+
+| | |
+|---|---|
+| **Shorter sense-to-action** | Detection happens where the data is captured, not a downlink and a ground pass later |
+| **Far less to downlink** | A target chip and its coordinates instead of a full raw dataset |
+| **Direct to the platform** | The result can go straight to whoever needs it, bypassing the ground station |
+| **Capability in a small satellite** | Makes SAR viable on a bus that cannot carry a large processing payload |
+
+This is the enabling step for **automatic target detection with edge AI**: an on-board classifier
+needs a focused image to run on, and that image has to be produced within the same power and mass
+budget.
+
+> The processing is the bottleneck, not the radar. Which is why it has to fit in a part that a
+> small satellite can actually fly.
+
+---
+
+## The problem, concretely
+
+**Synthetic Aperture Radar** synthesises a large virtual antenna from a moving platform's pulses.
+The raw data is *phase history*, not an image — forming the image is the compute problem.
 
 | | |
 |---|---|
@@ -318,9 +370,9 @@ image is the compute problem.
 | Hardware | PolarFire SoC MPFS250T — 4× U54 RISC-V @ 600 MHz + FPGA fabric |
 | Data path | 2 GiB DDR4; fabric reaches it through one 64-bit port |
 
-The device is a **mid-range SoC FPGA**, not a datacentre part. Everything that
-follows is shaped by that: the frame never fits on chip, so every stage is a
-DDR-to-DDR streaming pass.
+**The real difficulty is not the arithmetic.** It is routing, storing and transposing a
+**giant 2-D dataset** inside tight fabric and memory limits: the frame never fits on chip, so every
+stage is a DDR-to-DDR streaming pass through a single 64-bit port.
 
 ---
 
@@ -345,31 +397,31 @@ about **moving data**: burst shape, DDR read latency, and one 64-bit port shared
 
 ---
 
-## What this implementation is — and is not
+## What this implementation is
 
-Stated plainly, because SAR pipelines vary enormously and the differences change what the numbers mean.
+**Polar Format Algorithm**, end to end on one chip:
 
-**It is:** the **Polar Format Algorithm** — keystone resample, 2-D taper, two 8192-point FFTs with a
-corner-turn between them, magnitude detect. Bare-metal on the RISC-V cores, no OS.
-
-**It is not:**
-
-| not this | what we actually do |
+| stage | where it runs |
 |---|---|
-| Range-Doppler / Chirp Scaling | PFA — no RCMC, no matched-filter range compression |
-| Motion compensation on the CPU | The CPHD input is *already* motion-compensated — that is what the "C" means |
-| Real-time ingest over SerDes / PCIe | A stored scene, loaded from the board's own eMMC |
-| Single-Look Complex output | Detected **uint16 magnitude** — detect is fused into the FFT-2 unloader |
-| Linux or an RTOS | Bare-metal sequencer on one hart, three worker harts |
+| Keystone resample (range gather + transpose) | fabric kernel, coefficients generated on fabric |
+| 2-D Hamming taper | fused into the FFT-1 feeder — no separate pass |
+| Two 8192-point FFTs, one per axis | CoreFFT hard IP, two chains in parallel |
+| Corner-turn between them | hand-written Verilog, double-buffered full-width tiles |
+| Magnitude detect | fused into the FFT-2 unloader — no separate pass |
 
-So this is **on-board offline focusing of a stored scene**, not a real-time front-end. The 18.45 s
-is time-to-image for one 8192² frame, not a streaming throughput figure.
+**Scene in, image out, entirely on the board.** The 8192² scene is loaded from the board's own
+eMMC, focused in **18.45 s**, and written back as a uint16 image — no host involvement in the
+datapath. Orchestration is a bare-metal sequencer on one RISC-V hart, with three more harts doing
+the coefficient and renormalisation work in parallel.
+
+Input is **CPHD** — phase history that already carries its motion compensation, which is what the
+"C" stands for. The pipeline takes it from there.
 
 ---
 
 ## The signal processing chain
 
-![w:960](diagrams/fig-pfa.drawio.svg)
+![w:1200](diagrams/fig-pfa.drawio.svg)
 
 ---
 
@@ -395,30 +447,9 @@ were columns. Pure data movement, and a DDR access-pattern problem.
 
 ---
 
-## The naming trap
-
-This one is load-bearing and has misled readers repeatedly:
-
-| field name | which pass | what it actually transforms |
-|---|---|---|
-| `rangeFFT` | FFT-1 | the **AZIMUTH** axis |
-| `azFFT` | FFT-2 | the **RANGE** axis |
-
-The names are historical and **inverted** with respect to the physics.
-
-Every table in this deck and in the project's architecture document uses the
-**physical meaning**. The field names are not authoritative — they are just what
-the identifiers happen to be called.
-
-<span class="small">This is the kind of detail that costs an afternoon when an
-optimisation is applied to the wrong axis, which is why it is called out at every
-appearance rather than fixed by a rename.</span>
-
----
-
 ## Fabric implementation
 
-![w:950](diagrams/fig-fabric.drawio.svg)
+![w:1200](diagrams/fig-fabric.drawio.svg)
 
 ---
 

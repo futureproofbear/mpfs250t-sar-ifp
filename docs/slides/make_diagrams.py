@@ -332,10 +332,6 @@ def fig_pfa(out):
     for a, b in [("in", "s1"), ("s1", "s2"), ("s2", "s3"), ("s3", "s4")]:
         d.edge(a, b)
     d.edge("s4", "s5"); d.edge("s5", "s6"); d.edge("s6", "out")
-    d.note("trap", 30, 320, 960, 60,
-           "NAMING TRAP, load-bearing: the field names are inverted. `rangeFFT` IS FFT-1 and performs the "
-           "AZIMUTH transform;\n`azFFT` IS FFT-2 and performs the RANGE transform. Every table in this deck "
-           "uses the physical meaning, not the field name.", fs=12)
     d.note("fu", 30, 40, 960, 44,
            "Dashed = no kernel of its own. Window is fused into the FFT-1 feeder and detect into the FFT-2 "
            "unloader,\nso two of the six stages cost zero time and zero DDR passes.", fs=12)

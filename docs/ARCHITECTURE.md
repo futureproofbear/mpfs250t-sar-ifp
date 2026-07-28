@@ -1,5 +1,7 @@
 # SAR image former — architecture reference
 
+> **New here?** Every acronym, magic value and stage nickname in this project is defined in [`docs/GLOSSARY.md`](GLOSSARY.md).
+
 A document describing the baseline reference design for a spotlight-mode SAR image-formation
 processor on PolarFire SoC MPFS250T_ES: pipeline dataflow, memory map, fixed-point/BFP contracts,
 control interface and register map, AMBA/AXI interconnect topology, and fabric resource usage /

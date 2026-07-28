@@ -1,5 +1,7 @@
 # mpfs250t-sar-ifp
 
+> **New here?** Every acronym, magic value and stage nickname in this project is defined in [`docs/GLOSSARY.md`](docs/GLOSSARY.md).
+
 SAR (synthetic aperture radar) image formation from **Umbra CPHD** (compensated phase history
 data), in two implementations:
 

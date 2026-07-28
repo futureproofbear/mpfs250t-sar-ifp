@@ -1,5 +1,7 @@
 # SAR Guide — algorithm and the software-to-fabric journey
 
+> **New here?** Every acronym, magic value and stage nickname in this project is defined in [`docs/GLOSSARY.md`](GLOSSARY.md).
+
 This is the SAR-specific companion to `docs/USER_GUIDE.md`. That document covers board bring-up,
 build, run and verify procedures. This document covers a different question: **what** the processor
 computes, and **how** it got from a laptop Python script to a PolarFire SoC fabric datapath — so an

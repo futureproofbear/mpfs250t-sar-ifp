@@ -1,5 +1,7 @@
 # SAR PolarFire SoC — User Guide / Application Note
 
+> **New here?** Every acronym, magic value and stage nickname in this project is defined in [`docs/GLOSSARY.md`](GLOSSARY.md).
+
 Operator's runbook for going from a fresh checkout of this repo to a focused SAR image on a
 physical **Icicle Kit (MPFS250T_ES / FCVG484)** board. Procedure-only: for *why* a step exists,
 follow the links out to the design docs. This document does not need to be read start-to-finish —
@@ -21,6 +23,11 @@ only **how to run it** on real hardware.
 
 This repository (`mpfs250t-sar-ifp`) is self-contained: firmware, host tooling, and the Libero fabric
 build all live here. You do not need any sibling repository to complete anything in this guide.
+
+One caveat, so it does not surprise you: **running** the board works from a clean clone, but
+**rebuilding the fabric from scratch does not** — two large generated trees (the MSS component and
+the SmartHLS output) are git-ignored and must be regenerated once on a new machine. See §5.0. If you
+only need to run the board, use an archived bitstream and skip §5.
 
 ---
 
@@ -175,6 +182,36 @@ Full details, gotchas, and the complete script table: read
 [`docs/fpga/DEV_GUIDE.md`](fpga/DEV_GUIDE.md) §3. This section is the
 current canonical path through it — the `SAR_TOP` build with the hand-written Verilog feeder
 (`_ffv` scripts), which is the shipping entrypoint.
+
+### 5.0 First build on a FRESH CLONE — read this before you run anything
+
+**The fabric build does not work from a clean clone.** `create_fresh_project_ffv.tcl` imports two
+trees that are deliberately git-ignored because they are large generated output:
+
+| needed by | path | ignored at |
+|---|---|---|
+| `import_mss_component` (line 60) | `mpfs/fpga/mss_nodll/out/ICICLE_MSS.cxz` | `.gitignore:74` |
+| `create_hdl_plus` (line 76) | `mpfs/fpga/hls_*/hls_output/scripts/libero/…` | `.gitignore:147` |
+
+On a machine that has never generated them, the Libero run fails on a missing file. That failure is
+**not** a broken repo and not a bad script — those artefacts have to be regenerated once:
+
+1. **MSS component** — regenerate the `.cxz` with Libero's MSS Configurator, headless:
+   `<Libero>/Designer/bin64/pfsoc_mss.exe`. See `docs/fpga/DEV_GUIDE.md` §3.6 for the exact
+   invocation and the FIC-DLL-bypass configuration this design needs. Editing the `.cfg` inside the
+   archive by hand does **not** work — the importer regenerates HDL from it, so the `.cxz` must
+   already contain the correct HDL.
+2. **SmartHLS output** — run `shls hw` in each `mpfs/fpga/hls_*/` directory that the assembly still
+   instantiates. As of 2026-07-28 the datapath is down to **one** SmartHLS kernel (`resample`); the
+   others are retained as scripts only.
+
+Everything else in this guide — programming a pre-built `.job`, loading a scene, running the
+pipeline, dumping and verifying the image — works from a clean clone with no regeneration, provided
+you have a bitstream. The archived, silicon-verified bitstreams under
+`mpfs/fpga/bitstreams/<stamp>_<commit>/` are the fast path; `mpfs/host/restore_bitstream.sh` puts
+one back in place in one command.
+
+> If you only need to *run* the board, skip §5 entirely and go to §6.
 
 ### 5.1 Headless fabric build (Libero, no GUI)
 All scripts live in `mpfs/fpga/` and resolve their own paths via `mpfs/fpga/lib/sar_env.tcl`

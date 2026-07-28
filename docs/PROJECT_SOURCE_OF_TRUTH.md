@@ -1,5 +1,7 @@
 # PROJECT SOURCE OF TRUTH — SAR-on-PolarFire-SoC
 
+> **New here?** Every acronym, magic value and stage nickname in this project is defined in [`docs/GLOSSARY.md`](GLOSSARY.md).
+
 > **Purpose.** Authoritative index for an LLM working on this project. This repo,
 > **`mpfs250t-sar-ifp`** (made **standalone** on 2026-07-14 — see the status block below), is the
 > **canonical home** for the algorithm, FPGA design, host tooling, **and** the board

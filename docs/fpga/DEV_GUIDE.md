@@ -1,5 +1,7 @@
 # Fabric Development Guide — Extending & Debugging the SAR Fabric Design
 
+> **New here?** Every acronym, magic value and stage nickname in this project is defined in [`docs/GLOSSARY.md`](../GLOSSARY.md).
+
 This document is for someone actively **developing or extending** this fabric design: writing a new
 SmartHLS kernel, changing the SmartDesign interconnect, or debugging a silicon issue. It is not:
 

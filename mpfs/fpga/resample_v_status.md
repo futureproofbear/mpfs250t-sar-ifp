@@ -40,11 +40,50 @@ non-vacuous by mutation:
 - **power-up** — removing `mode` from the reset list (literally `sar_coeffgen`'s defect) passes all
   16 functional cases, because every one writes `mode` before arming, and is caught only here.
 
-## NOT DONE — this cannot go to silicon yet
+## Ready for silicon (2026-07-29) — bitstream and firmware both built
 
-**The firmware still arms `RES` the SmartHLS way.** It writes four `HLS_ARG` registers (`in`, `idx`,
-`wq`, `out`) and supplies CPU-computed coefficients in DDR. This core implements a different
-contract entirely:
+| artifact | state |
+|---|---|
+| Bitstream `libero_ffv/export/SAR_TOP_ffv.job` | exported 2026-07-28 22:46 |
+| Timing, multi-corner post-layout | setup **and** hold report `No Path`; constraint coverage 100% |
+| `RES` in the built netlist | `sar_resample_v_top` |
+| Firmware `mpfs-hal-ddr-demo.elf` | builds clean, no warnings on the new files; `cppcheck` clean |
+| Per-line scalars vs the Python reference | float64 path **identical** to exact rational over all 5634 lines |
+
+The firmware now hands the kernel three scalars per line (`sar_resample_v.c`): the affine `A`/`SH`
+derived from `unit = 2^24/(kr_scale·dx)`, and `B = round((kr_off − x0)·2^24/dx)`, with the int32
+query table pushed once per scene. `tb/gen_resample_vectors.py`'s `pick_sh()` remains the reference,
+and `mpfs/host/check_resample_v_scalars.py` now runs that derivation **both** ways — exact rational
+and the float64 the U54 actually uses — and diffs them. Over 5634 lines and all 8192 table entries:
+zero differences, worst distance to a rounding boundary 1.07e−5 against a double error near 1e−7.
+
+### The knob is INVERTED, and that is deliberate
+
+`SAR_RSVMODE` (`0xB0059148`) is **on by default**. Every other runtime knob on this project is
+opt-in, because its predecessor is still in the bitstream. That is not true here — the built netlist
+contains `sar_resample_v` and *no* SmartHLS resample, because the new core took the same CIC target
+rather than being added beside it. There is nothing to fall back to.
+
+An opt-in knob would therefore have made the default case the dangerous one. The legacy path writes
+`HLS_ARG0..3` at `0x0c`/`0x10`/`0x14`/`0x18`, which on this core are `IN_BASE` / `OUT_BASE` /
+`STATUS2` / `DIMS`: the `idx` pointer would land in `OUT_BASE` and the output pointer would be read
+as `{SN,QN}`, so the kernel would gather with garbage geometry directly into the coefficient buffer.
+Only the exact word `'RSV0'` (`0x52535630`) forces the legacy path, and that is correct **only** when
+this ELF is deliberately paired with a pre-2026-07-28 bitstream.
+
+### First board run — read these before judging the image
+
+Because there is no gcc and no spike/qemu on the development host, this C has never been executed.
+Two words are published so the first run checks it instead of assuming it:
+
+| address | contents |
+|---|---|
+| `0xB0059150` | line-0 `SH`, `A`, `B` lo, `B` hi — expect `0x00000018 0x4FE68946 0xE464BAAC 0xFFFFFFFC` |
+| `0xB005914C` | `STATUS2`, tagged `0x5253` so a cold-boot word cannot read as a clean frame |
+
+A mismatch at `0xB0059150` explains a wrong image completely; a match rules the CPU side out.
+
+The register contract the firmware now targets:
 
 | register | meaning |
 |---|---|
@@ -53,13 +92,6 @@ contract entirely:
 | `0x1c` `LCFG` | `[5:0]` SH, `[13:8]` FSH, `[16]` MODE |
 | `0x20`/`0x24`/`0x28` | `COEF_A`, `COEF_BLO`, `COEF_BHI` — the affine scalars |
 | `0x2c`/`0x30` | `TAB_CTRL` / `TAB_DATA` — on-chip table load |
-
-Programming a bitstream containing this core, with today's firmware, **produces a wrong image**.
-
-The firmware work is the substantial remainder: per line the CPU stops computing 8192 coefficients
-and instead computes two fixed-point scalars, `A = 1/dx` and `B = -x0/dx`, with a shift `SH` chosen
-so `A` fits in `int32`. That arithmetic has to match the RTL bit-exactly;
-`tb/gen_resample_vectors.py`'s `pick_sh()` is the validated reference for deriving it.
 
 ## Known limitations, recorded rather than discovered later
 

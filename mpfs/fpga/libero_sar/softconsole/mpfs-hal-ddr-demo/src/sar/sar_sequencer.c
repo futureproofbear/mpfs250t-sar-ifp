@@ -1034,15 +1034,18 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
     sar_cwrk_init();
     /* SAR_RSVMODE: hand pass 1 to sar_resample_v, which generates its own coefficients, so none of
      * the per-line CPU coefficient work below runs at all. PASS 1 ONLY -- pass 2 is already fused
-     * into the FFT-1 feeder and keeps sar_coeffgen. OFF unless the knob holds exactly 'RSV1'.
+     * into the FFT-1 feeder and keeps sar_coeffgen. ON unless the knob holds exactly 'RSV0': this
+     * core REPLACED the SmartHLS resample in the fabric, so there is no fallback path (the header
+     * explains why that inverts the usual opt-in discipline).
      * NOT bit-exact against CRC 0x319037b2 by design; see sar_resample_v.h. */
     sar_rsv_scene_t rsv;
     int rsv_on = sar_rsv_enabled();
     if (rsv_on) {
-        /* the query table is loaded ONCE per scene; a failure here falls back rather than
-         * arming the kernel against a table that was never pushed */
+        /* Loaded ONCE per scene. FAIL HARD if it does not build -- silently dropping to the
+         * legacy arming path would send idx/out pointers into OUT_BASE/DIMS and gather garbage
+         * into the coefficient buffer, which is worse than reporting failure. */
         uint32_t n_real = (g->N < Np) ? g->N : Np;
-        if (sar_rsv_load_kr(g->KR, n_real, Np, &rsv) != 0) rsv_on = 0;
+        if (sar_rsv_load_kr(g->KR, n_real, Np, &rsv) != 0) return 0;
     }
     /* PASS 1 (range) */
     if (!rsv_on) {

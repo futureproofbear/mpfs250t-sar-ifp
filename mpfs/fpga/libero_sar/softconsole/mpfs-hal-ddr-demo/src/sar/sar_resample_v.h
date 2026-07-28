@@ -17,20 +17,31 @@
  * ~1.0 with the golden, but **crop CRC 0x319037b2 WILL NOT MATCH**. Validate a first run by
  * correlation against the golden and by eye; adopt the new CRC as the baseline only after that.
  *
- * FAIL-SAFE. Everything here is inert unless SAR_RSVMODE_ADDR holds SAR_RSVMODE_ENABLE, the same
- * discipline as SAR_CGENMODE / SAR_DUALFFT / SAR_RWRK_NW. A cold-boot DDR word means OFF, so the
- * shipping SmartHLS path is what runs until the knob is deliberately set.
+ * *** THE KNOB IS INVERTED RELATIVE TO EVERY OTHER ONE ON THIS PROJECT. ON BY DEFAULT. ***
+ * SAR_CGENMODE / SAR_DUALFFT / SAR_RWRK_NW are all opt-in because their fabric predecessor is still
+ * in the bitstream and a cold-boot zero has to mean "run the proven path". That is NOT true here.
+ * Verified in the built netlist (libero_ffv/synthesis/SAR_TOP.vm, build of 2026-07-28): the only
+ * resample module present is sar_resample_v -- the SmartHLS kernel was REPLACED at the same CIC
+ * target, not added alongside it. There is nothing to fall back TO.
+ *
+ * An opt-in knob would therefore make the DEFAULT case the dangerous one: the legacy path writes
+ * HLS_ARG0..3 at 0x0c/0x10/0x14/0x18, which on this core are IN_BASE / OUT_BASE / STATUS2 / DIMS.
+ * The idx pointer would land in OUT_BASE and the output pointer would be read as {SN,QN}, so the
+ * kernel would gather with garbage geometry straight into the coefficient buffer. So: a cold-boot
+ * zero means ON, and only the exact word SAR_RSVMODE_LEGACY forces the old path -- which is correct
+ * ONLY if this ELF is deliberately paired with a pre-2026-07-28 bitstream.
  */
 #ifndef SAR_RESAMPLE_V_H
 #define SAR_RESAMPLE_V_H
 
 #include <stdint.h>
 
-/* Runtime knob. 'RSV1' -- the ONLY accepted value; anything else (including a cold-boot 0) keeps
- * the SmartHLS pass-1 path. Address chosen in the same debug-word block as the other knobs;
- * 0xB0059148 is the first free word after SAR_WORKBUF (0xB0059144). */
+/* Runtime knob. 'RSV0' is the ONLY value that turns this OFF; anything else -- including a
+ * cold-boot 0 -- runs sar_resample_v, because that is the only resample core in the bitstream.
+ * Address chosen in the same debug-word block as the other knobs; 0xB0059148 is the first free
+ * word after SAR_WORKBUF (0xB0059144). */
 #define SAR_RSVMODE_ADDR    0xB0059148u
-#define SAR_RSVMODE_ENABLE  0x52535631u   /* 'RSV1' */
+#define SAR_RSVMODE_LEGACY  0x52535630u   /* 'RSV0' -- force the SmartHLS arming path */
 
 /* Firmware WRITES this after the pass-1 loop; JTAG reads it. Frame-level, because STATUS2 is
  * sticky with no software clear (see resample_v_status.md) -- it says "something went wrong
@@ -72,7 +83,7 @@ typedef struct {
     uint32_t _pad;        /* explicit: the build runs -Wpadded */
 } sar_rsv_scene_t;
 
-/* True when the knob is armed. */
+/* True unless the knob explicitly forces the legacy path. See the inversion note above. */
 int  sar_rsv_enabled(void);
 
 /* Build the int32 query table from the staged float32 KR grid and push it into the kernel.

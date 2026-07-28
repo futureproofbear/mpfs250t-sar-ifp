@@ -35,7 +35,9 @@ static int64_t iround_d(double x)
 
 int sar_rsv_enabled(void)
 {
-    return *(volatile uint32_t *)(uintptr_t)SAR_RSVMODE_ADDR == SAR_RSVMODE_ENABLE;
+    /* INVERTED on purpose -- see the header. Only an explicit 'RSV0' opts out, because the
+     * SmartHLS resample is not in the bitstream to fall back to. */
+    return *(volatile uint32_t *)(uintptr_t)SAR_RSVMODE_ADDR != SAR_RSVMODE_LEGACY;
 }
 
 void sar_rsv_scalars(const sar_rsv_scene_t *sc, double x0, double dx,

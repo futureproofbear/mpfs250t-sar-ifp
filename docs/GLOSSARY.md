@@ -108,8 +108,9 @@ Done marker is `status = 0xC0FFEE03`. Verdict 0 = pass.
 
 ## 6. Runtime knobs
 
-DDR words read at run time. **All fail-safe: an unset or cold-boot word means OFF**, so the
-shipping binary is behaviour-neutral until switched. **A power-cycle clears every one of them.**
+DDR words read at run time. **Fail-safe: an unset or cold-boot word means OFF**, so the shipping
+binary is behaviour-neutral until switched — with one deliberate exception, `RSVMODE`, marked below.
+**A power-cycle clears every one of them.**
 
 | knob | address | shipping value | effect |
 |---|---|---|---|
@@ -121,9 +122,18 @@ shipping binary is behaviour-neutral until switched. **A power-cycle clears ever
 | `RWRKNW` | `0xB005912C` | `0x52575204` (`'RWR'`\|4) | renormalize split over 4 harts |
 | `FFTBLK` | `0xB0059140` | `64` | rows a chain takes before handover |
 | `WORKBUF` | `0xB0059144` | *(disabled)* | would route corner-turns via WORK |
+| `RSVMODE` | `0xB0059148` | *(leave unset)* | **INVERTED — on by default.** Range gather via `sar_resample_v`, coefficients generated on fabric |
 
 Each magic value is **the only accepted value** — anything else means off. Passed as environment
 variables to `run_m3_iso.sh`.
+
+> **`RSVMODE` is the exception to the fail-safe rule, on purpose.** From the 2026-07-28 bitstream
+> onward the built netlist contains `sar_resample_v` and *no* SmartHLS resample — the new core took
+> the same CIC target rather than sitting beside it, so there is nothing to fall back to. An opt-in
+> knob would have made the default case the dangerous one, arming the new core through the old
+> register map (`idx` into `OUT_BASE`, the output pointer read as `{SN,QN}`). Only the exact word
+> `0x52535630` (`'RSV0'`) forces the legacy path, and that is correct **only** when pairing this
+> firmware with a pre-2026-07-28 bitstream. Full reasoning: `mpfs/fpga/resample_v_status.md`.
 
 > A bare `run_m3_iso.sh ... PIPE` with no knobs gives an **unfused single-chain run**, several
 > seconds slower and not the configuration any documented baseline was measured with.

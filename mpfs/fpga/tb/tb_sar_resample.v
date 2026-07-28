@@ -81,15 +81,24 @@ module tb_sar_resample;
     localparam integer AXI_ADDR_W = 32;
     localparam integer AXI_DATA_W = 64;
     localparam integer AXI_ID_W   = 4;
-    localparam integer MAX_BURST  = 4;    // small, so every line is several bursts
-    // TAB_AW=14 is FORCED, not chosen: sar_resample_v.v zero-extends the 14-bit `k` with
-    // {{(TAB_AW-IDX_W){1'b0}}, k} (lines 470/476), so any TAB_AW < IDX_W=14 -- INCLUDING the
-    // module's own default of 13 -- is a negative replication multiplier and fails to elaborate
-    // (vsim-8607). Only the first `MAXTAB entries of each table are loaded here.
-    localparam integer TAB_AW     = 14;
-    localparam integer BUF_AW     = 6;    // 64 per bank x2 = 128 source samples (SN <= 64)
-    localparam integer WF_AW      = 4;    // 16-beat write FIFO, WF_CAP=8 > MAX_BURST -> wf_full
-                                          // is actually reached, so `gen` backpressure is live
+    // *** THESE MUST EQUAL WHAT SYNTHESIS BUILDS. Gated by tb/check_tb_params.py. ***
+    // They previously did not, and it cost a full board bring-up: this bench passed 16/16
+    // mutation-verified at TAB_AW=14 / BUF_AW=6 / MAX_BURST=4 / WF_AW=4 while sar_resample_v_top
+    // synthesised 13 / 12 / 64 / 8, and silicon produced a corr -0.04 image (2026-07-29). These
+    // parameters size the on-chip tables, the source buffer, the burst length and the write FIFO
+    // -- i.e. exactly the structures the gather indexes into -- so the old runs said nothing
+    // about the bitstream. Do not "shrink them for speed" again; add a SECOND run instead.
+    //
+    // Historical note, kept because it is why the override existed: TAB_AW=14 used to be FORCED,
+    // as sar_resample_v.v zero-extended the 14-bit `k` with {{(TAB_AW-IDX_W){1'b0}}, k}, making
+    // any TAB_AW < IDX_W=14 a negative replication multiplier that would not elaborate
+    // (vsim-8607). The D1 fix replaced that with a truncation, so the module now elaborates
+    // clean at its default 13 -- verified 2026-07-29 on sar_resample_v_top. The obstruction was
+    // gone; the workaround outlived it. A stale comment is not a gate.
+    localparam integer MAX_BURST  = 64;
+    localparam integer TAB_AW     = 13;   // 8192-entry tables, as on silicon
+    localparam integer BUF_AW     = 12;   // 4096 per bank x2 = 8192 source samples
+    localparam integer WF_AW      = 8;    // 256-beat write FIFO
 
     reg clk = 0, resetn = 0;
     always #8 clk = ~clk;                 // 62.5 MHz, the fabric clock
@@ -324,7 +333,12 @@ module tb_sar_resample;
         while (st[0] !== 1'b0 && !hung) begin
             lite_r(12'h008, st);
             guard = guard + 1;
-            if (guard > 4000) begin
+            // Scale with the WORK, not a constant. A fixed 4000 polls was sized for QN=32; at the
+            // silicon QN=8192 it expired with g_left=390 and the pipeline still advancing, which
+            // reads exactly like a deadlock and cost real debugging time on 2026-07-29. The
+            // per-output cost is a few cycles plus write backpressure, so budget generously --
+            // a real hang still terminates, just later.
+            if (guard > (4000 + dut.r_qn * 32)) begin
                 hung = 1'b1;
                 $display("  TIMEOUT: busy stuck state=%0d rstate=%0d wstate=%0d emit=%0d gl=%0d",
                          dut.state, dut.rstate, dut.wstate, dut.emit_cnt, dut.g_left);
@@ -520,4 +534,29 @@ module tb_sar_resample;
         $display("==== fused resample gather: FAIL (timeout -- handshake stalled) ====");
         $fatal(1, "timeout");
     end
+// Write-channel trace, opt-in with +define+RSDBG. Prints every AW the DUT issues plus the
+// counters that decide it, so an address/length fault is read off directly instead of inferred.
+// TB-side only: it hierarchically observes the DUT and drives nothing.
+`ifdef RSDBG
+    integer aw_n = 0;
+    integer wf_n = 0, gw_n = 0, dbg_t = 0;
+    always @(posedge clk) begin
+        if (dut.w_fire)   wf_n = wf_n + 1;
+        if (dut.g_word_v) gw_n = gw_n + 1;
+        dbg_t = dbg_t + 1;
+        if (dbg_t % 20000 == 0)
+            $display("  t=%0d state=%0d wstate=%0d g_left=%0d emit_cnt=%0d gi=%0d beats_left=%0d  g_words=%0d w_beats=%0d aw=%0d",
+                     dbg_t, dut.state, dut.wstate, dut.g_left, dut.emit_cnt, dut.gi,
+                     dut.wr_beats_left, gw_n, wf_n, aw_n);
+    end
+    always @(posedge clk) begin
+        if (dut.m_awvalid && dut.m_awready) begin
+            aw_n = aw_n + 1;
+            $display("  AW#%0d addr=%h len=%0d(+1) wr_addr=%h beats_left=%0d cur_len=%0d w_blk4k=%0d w_cap=%0d w_len=%0d wf_avail=%0d",
+                     aw_n, dut.m_awaddr, dut.m_awlen, dut.wr_addr, dut.wr_beats_left,
+                     dut.wr_cur_len, dut.w_blk4k, dut.w_cap, dut.w_len, dut.wf_avail);
+        end
+    end
+`endif
+
 endmodule

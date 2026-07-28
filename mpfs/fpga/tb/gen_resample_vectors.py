@@ -226,6 +226,54 @@ def build_mode0(name, sn, qn, x0, dx, t0, tstep, in_odd=False, inject=False,
     return c
 
 
+def build_real(name, stage, line=0, in_odd=False, note=""):
+    """ONE case at the REAL silicon scale, from the staged scene geometry.
+
+    WHY: every other case here is SN<=64 / QN<=32, while silicon runs SN=4319 / QN=8192 -- about
+    128x. On 2026-07-29 the small suite passed 16/16 (and passes at the silicon parameterisation
+    too) while the actual scene produced a corr -0.04 image, so scale is a dimension the suite
+    could not reach. This mirrors what the FIRMWARE does, not a synthetic analogue:
+    sar_resample_v.c's derivation, including the padding CLAMP that the small cases never need
+    because a synthetic case has no out-of-range filler."""
+    import numpy as np
+    st = pathlib.Path(stage)
+    lay = __import__("json").loads((st / "layout.json").read_text())
+    n, np_grid = lay["dims"]["N"], lay["fft_len"]["R"]
+    f0 = np.fromfile(st / "f0.bin", dtype=np.float32).astype(np.float64)
+    df = np.fromfile(st / "df.bin", dtype=np.float32).astype(np.float64)
+    pr = np.fromfile(st / "pr.bin", dtype=np.float32).astype(np.float64)
+    KR = np.fromfile(st / "krgrid.bin", dtype=np.float32).astype(np.float64)
+
+    ag = F(2) * F(float(pr[line])) / F(299792458)
+    x0, dx = ag * F(float(f0[line])), ag * F(float(df[line]))
+
+    real = KR[:n] if n < np_grid else KR
+    kr_off = F(float(real.min()))
+    kr_scale = F(1 << 30) / F(float(np.abs(real - float(kr_off)).max()))
+    kri, nclamp = [], 0
+    for k in KR:
+        t = iround((F(float(k)) - kr_off) * kr_scale)
+        if not fits32(t):                       # the deliberate out-of-range padding
+            t = (1 << 31) - 1 if t > 0 else -(1 << 31)
+            nclamp += 1
+        kri.append(t)
+
+    sh, a = pick_sh(F(1 << 24) / (kr_scale * dx), name)
+    b = iround((kr_off - x0) * F(1 << 24) / dx)
+    assert fits48(b), "B overflows 48 bits"
+    idx, wq, sat = coeffs_mode0(kri, a, sh, b, n)
+    inr = sum(1 for i in idx if i >= 0)
+    assert inr > 1000, (f"real case has only {inr} in-range queries -- too close to vacuous to "
+                       f"be worth running")
+    c = add_case(name, 0, n, np_grid, sh, a, b, 0, kri, [], [], idx, wq, in_odd, False, note)
+    c["sat"] = any(sat)
+    c["nsat"] = sum(sat)
+    c["real"] = True
+    print(f"  real case: SN={n} QN={np_grid} SH={sh} A={a} B={b} "
+          f"in-range={inr} clamped-padding={nclamp}")
+    return c
+
+
 def build_mode1(name, sn, qn, kr_line, in_odd=False, inject=False, note=""):
     # source: tan_s ascending and deliberately NON-uniform, so INV_i varies bracket to bracket
     tan = [F(-0.35) + F(7, 10) * k / (sn - 1) + F(9, 10000) * F(math.sin(1.7 * k))
@@ -282,7 +330,38 @@ def build_mode1(name, sn, qn, kr_line, in_odd=False, inject=False, note=""):
 
 
 def main():
+    global MAXTAB, MAXQ, MEM_BEATS, MEM_WORDS, IN_WORDS_PER_CASE, OUT_WORD_BASE, OUT_WORDS_PER_CASE
     here = pathlib.Path(__file__).resolve().parent
+
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--real", metavar="STAGE", nargs="?", const="../../host/jtag_stage_deci1",
+                    help="emit ONE full-scale case from a staged scene instead of the small "
+                         "suite (SN=4319, QN=8192 -- the geometry silicon actually runs)")
+    ap.add_argument("--line", type=int, default=0, help="which pulse, with --real")
+    a = ap.parse_args()
+
+    if a.real:
+        # Full scale needs the arrays to fit the real dims; the small suite's 64-entry tables and
+        # 1 KB source slot cannot hold a 4319-sample line or an 8192-entry query grid.
+        MAXTAB = MAXQ = 8192
+        IN_WORDS_PER_CASE = OUT_WORDS_PER_CASE = 8192
+        OUT_WORD_BASE = 2 * IN_WORDS_PER_CASE
+        # +16 words of GUARD past the output region. finish() checks for writes past the line;
+        # without room for it the TB reads outside its own array and reports 8 phantom 'wrote
+        # past the line (xxxxxxxx)' failures that look like a DUT overrun. Cost real debugging
+        # time on 2026-07-29 -- the guard must EXIST for the guard check to mean anything.
+        MEM_WORDS = OUT_WORD_BASE + 2 * (OUT_WORDS_PER_CASE + 16)
+        MEM_BEATS = MEM_WORDS // 2
+        stage = here / a.real if not pathlib.Path(a.real).is_absolute() else pathlib.Path(a.real)
+        # BOTH IN_BASE parities. On silicon a pulse row is N*4 = 17276 bytes, and 17276 mod 8 = 4,
+        # so every ODD pulse starts 4 bytes into a 64-bit beat and takes the rd_odd path. Testing
+        # only the aligned one would cover half the real frame.
+        build_real("real-even", stage, a.line, in_odd=False,
+                   note="REAL geometry, silicon scale, 8-byte-aligned IN_BASE")
+        build_real("real-odd", stage, a.line, in_odd=True,
+                   note="REAL geometry, silicon scale, 4-byte-offset IN_BASE (odd pulses)")
+        return finish(here)
 
     # (a) MODE=0 ascending (dx>0) -- queries walk from below the grid to past its end, so the
     #     idx=-1 zero fill is exercised at BOTH ends (mandatory case c).
@@ -312,6 +391,11 @@ def main():
     assert 0 < sat["nsat"] < sat["qn"], "saturation case must be a MIX of sat/non-sat"
     assert all(k < 0 for k in sat["idx"]), "saturated samples must be forced out of range"
 
+    return finish(here)
+
+
+
+def finish(here):
     ncases = len(CASES)
 
     # ---- memory image ----
@@ -320,9 +404,13 @@ def main():
         base = c * IN_WORDS_PER_CASE + (1 if cs["in_odd"] else 0)
         for j, w in enumerate(cs["src"]):
             words[base + j] = w
-        obase = OUT_WORD_BASE + c * OUT_WORDS_PER_CASE
-        for j in range(OUT_WORDS_PER_CASE):
-            words[obase + j] = POISON_OUT
+        obase = OUT_WORD_BASE + c * (OUT_WORDS_PER_CASE + 16)
+        # +16: the "wrote past the line" guard compares against POISON_OUT, so the guard words
+        # themselves must carry it. Leaving them at POISON_IN makes an untouched buffer read as
+        # a DUT overrun.
+        for j in range(OUT_WORDS_PER_CASE + 16):
+            if obase + j < MEM_WORDS:
+                words[obase + j] = POISON_OUT
         cs["in_base"] = base * 4
         cs["out_base"] = obase * 4
         assert cs["in_base"] % 4 == 0 and cs["out_base"] % 8 == 0
@@ -401,6 +489,13 @@ def main():
         if "fine" in cs["name"]:
             assert cs["maxrun"] <= 1, f"{cs['name']} is not single-advance"
     for cs in CASES[:6]:
+        if cs.get("real"):
+            # The >50% rule is a vacuity guard tuned to SYNTHETIC cases, where the query grid is
+            # constructed to straddle the source. A real scene legitimately zero-fills more than
+            # half: serialize_inputs pads the 8192-entry query grid past the 4319 real samples
+            # with out-of-range filler (3873 entries here), so ~55% zero fill is the CORRECT
+            # answer, not a degenerate case. build_real() asserts its own floor instead.
+            continue
         # mandatory case (c): the query grid must fall off the source at BOTH ends
         assert cs["idx"][0] < 0 and cs["idx"][-1] < 0, f"{cs['name']} must zero fill at both ends"
         assert sum(1 for k in cs["idx"] if k >= 0) > cs["qn"] // 2, \

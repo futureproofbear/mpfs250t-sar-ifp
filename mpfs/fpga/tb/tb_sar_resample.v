@@ -361,6 +361,31 @@ module tb_sar_resample;
         w_lo = 0; w_hi = 32'hffff_ffff;
         repeat (8) @(posedge clk);
 
+        // ---- POWER-UP STATE: the bitstream must be behaviour-neutral out of reset ------------
+        // Every case below writes the full control set before arming, so none of them can observe
+        // what the module looks like when firmware has NOT written a register. That blind spot put
+        // a bug on silicon in sar_coeffgen on 2026-07-28: p1_mode/p1_x0/p1_inv/p1_tmax had no
+        // reset, powered up as 0x1 plus garbage, and the generator ran the wrong pass through a
+        // whole frame. Its bench could not see it for exactly this reason -- it always wrote MODE.
+        // sar_resample_v resets all 16 of its control registers today; this makes that a CHECKED
+        // property rather than an accident, so a future edit that adds an unreset register fails
+        // here instead of on the board.
+        do_reset;
+        if (dut.mode !== 1'b0 || dut.qn !== 16'd0 || dut.sn !== 16'd0 ||
+            dut.sh !== 6'd0 || dut.fsh !== 6'd0 ||
+            dut.coef_a !== 32'd0 || dut.coef_blo !== 32'd0 || dut.coef_bhi !== 32'd0 ||
+            dut.in_base !== 32'd0 || dut.out_base !== 32'd0) begin
+            $display("  POWER-UP: control registers are not zero out of reset");
+            $display("    mode=%b qn=%0d sn=%0d sh=%0d fsh=%0d a=%08x blo=%08x bhi=%08x in=%08x out=%08x",
+                     dut.mode, dut.qn, dut.sn, dut.sh, dut.fsh, dut.coef_a,
+                     dut.coef_blo, dut.coef_bhi, dut.in_base, dut.out_base);
+            total_errors = total_errors + 1;
+        end
+        if (dut.busy !== 1'b0) begin
+            $display("  POWER-UP: busy is %b out of reset, expected 0", dut.busy);
+            total_errors = total_errors + 1;
+        end
+
         // REP 0 resets before every case, as this bench always did. REP 1 runs the SAME eight
         // cases again with NO reset between any of them, so each one RE-ARMS an instance that has
         // already completed a line. Firmware drives this kernel once per line, thousands of times

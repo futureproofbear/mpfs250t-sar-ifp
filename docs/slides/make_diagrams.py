@@ -16,7 +16,27 @@ Usage:  python make_diagrams.py [--out diagrams]
 import argparse
 import html
 import pathlib
+import subprocess
 import xml.etree.ElementTree as ET
+
+FORCE = False        # set by --force; see _dirty_in_git
+
+
+def _dirty_in_git(path):
+    """True if `path` is tracked AND differs from HEAD, i.e. somebody edited it by hand.
+
+    Untracked files are NOT treated as dirty: a brand-new figure has nothing to lose. If git is
+    unavailable we return True and skip -- refusing to write is the safe failure here, because the
+    thing being protected (a hand-drawn layout) cannot be reconstructed."""
+    try:
+        r = subprocess.run(["git", "status", "--porcelain", "--", str(path)],
+                           capture_output=True, text=True, cwd=str(pathlib.Path(path).parent))
+        if r.returncode != 0:
+            return True
+        line = r.stdout.strip()
+        return bool(line) and not line.startswith("??")
+    except Exception:
+        return True
 
 # ---------------------------------------------------------------- palette ----
 # Deliberately few colours, each with a fixed meaning across every figure, so the reader learns
@@ -176,7 +196,15 @@ class Diagram:
                f'content="{content}">\n'
                f'<rect width="100%" height="100%" fill="#FFFFFF"/>\n'
                f'{self._svg_body()}\n</svg>\n')
-        pathlib.Path(path).write_text(svg, encoding="utf-8")
+        p = pathlib.Path(path)
+        # REFUSE to clobber a figure the user has edited. These files open in draw.io as shapes and
+        # get hand-tweaked there; an unconditional regenerate destroys that silently and the edit is
+        # unrecoverable unless it was committed. A file that differs from HEAD is the user's.
+        if p.exists() and _dirty_in_git(p) and not FORCE:
+            print(f"  SKIPPED  {p.name}  (locally modified -- your edit is safe)")
+            return path
+        p.write_text(svg, encoding="utf-8")
+        print(f"  wrote    {p.name}")
         return path
 
 
@@ -499,17 +527,22 @@ def fig_arch_pipeline(out):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
+    ap.add_argument("--force", action="store_true",
+                    help="overwrite figures that have uncommitted local edits (DESTRUCTIVE -- "
+                         "those edits are the user's and are not recoverable)")
     a = ap.parse_args()
+    global FORCE
+    FORCE = a.force
     here = pathlib.Path(__file__).resolve().parent
     out = here / a.out
     out.mkdir(parents=True, exist_ok=True)
     for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa,
                fig_fabric, fig_dataflow, fig_timing, fig_bug):
-        print("wrote", fn(out))
+        fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()
     img.mkdir(parents=True, exist_ok=True)
-    print("wrote", fig_arch_pipeline(img))
+    fig_arch_pipeline(img)
 
 
 if __name__ == "__main__":

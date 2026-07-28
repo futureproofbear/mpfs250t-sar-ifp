@@ -24,9 +24,19 @@ Each `.drawio.svg` is **one file serving two purposes**:
 
 Open any of them in draw.io (**File → Open**) and you get shapes, not a picture.
 
-> Re-running `make_diagrams.py` **overwrites manual edits**. Either edit the spec in the script, or
-> stop regenerating that figure. The generator exists so the visual and the editable XML cannot
-> drift apart — drawing them separately guarantees they will.
+> **Your hand edits are protected.** `make_diagrams.py` checks `git status` per file and REFUSES to
+> overwrite any figure with uncommitted local changes:
+>
+> ```
+>   SKIPPED  fig-loop.drawio.svg  (locally modified -- your edit is safe)
+> ```
+>
+> So you can open a figure in draw.io, tweak it, and regenerating the others will not touch yours.
+> To fold a tweak back into the generator, edit the spec in the script and commit; to deliberately
+> discard local edits and regenerate, pass `--force`.
+>
+> The generator exists so the visual and the embedded draw.io XML cannot drift apart — drawing them
+> separately guarantees they will.
 
 ## Rendering
 

@@ -101,5 +101,15 @@ Project-specific rules earned on this SAR-on-silicon work. They complement the g
   -specific admin-rights and IT-policy restrictions (what's GPO-blocked, portable-tool-install
   workarounds, etc.) belong in the git-ignored `CLAUDE.local.md`, not here — verify fresh on a new
   machine rather than assuming this repo's committed guidance covers your local policy.
+- **NEVER regenerate or overwrite a diagram the user may have edited.** `.drawio`, `.svg` and
+  `.drawio.svg` files are user-editable artefacts — `docs/slides/diagrams/*.drawio.svg` and
+  `docs/img/*.drawio.svg` open in draw.io as shapes, and the user edits them there. Running
+  `docs/slides/make_diagrams.py` **overwrites every figure it knows about, unconditionally**, so a
+  hand-tweaked layout is destroyed silently and is not recoverable unless it was committed.
+  Therefore: do not run the generator, and do not edit these files, unless the user has asked for
+  that specific figure to change. If a figure looks wrong, SAY SO and ask — do not fix it
+  unprompted. When a change IS requested, prefer editing the generator spec (so the SVG and the
+  embedded draw.io XML stay in agreement) but check `git status` first: if the target file has
+  uncommitted modifications, they are the user's, and regenerating would discard them.
 - **Prose style:** use **bold** sparingly — reserve it for a few key labels or the single headline
   result per document; keep body prose and equations plain.

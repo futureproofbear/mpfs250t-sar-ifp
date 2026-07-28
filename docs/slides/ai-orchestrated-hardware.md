@@ -3,7 +3,7 @@ marp: true
 theme: default
 paginate: true
 size: 16:9
-title: AI-Orchestrated Hardware & Firmware Development
+title: System-on-Chip & Firmware Development using AI Agents
 description: Agents, skills and verification gates for FPGA/firmware work, with a SAR image-formation processor on PolarFire SoC as the worked example.
 style: |
   section {
@@ -37,37 +37,57 @@ style: |
     border-left: 5px solid #B8860B; background: #FFFDE7;
     padding: 10px 18px; font-size: 21px;
   }
-  footer { font-size: 14px; color: #888; }
+  footer { font-size: 10px; color: #888; }
 ---
 
 <!-- _class: lead -->
 
-# AI-Orchestrated Hardware & Firmware Development
+# System-on-Chip & Firmware Development using AI Agents
 
-## Agents, skills and verification gates — and what happens when the feedback loop is 50 minutes long
+## Agents, skills and verification gates
 
 **Worked example:** a Synthetic Aperture Radar image-formation processor
 on a Microchip PolarFire SoC MPFS250T
 
-<span class="tiny">All figures are editable draw.io documents — <code>docs/slides/diagrams/*.drawio.svg</code></span>
+<span class="tiny">28 July 2026</code></span>
 
 ---
 
 ## What this deck is
 
-Two halves, and the second is the evidence for the first.
+> **Transforming the way we work.** AI tools can be adopted to speed-up the development process by bridging system-side applications / algorithms with fabric / firmware implementations.
 
-**Part 1 — the method.** How an AI agent is orchestrated to do FPGA and firmware
-work: what the subagents are for, what the skills and memory do, and why the
+**Part 1 — AI-based Approach.** How an AI agent is orchestrated to do FPGA and firmware
+work for sophisticated algorithms: what the subagents are for, what the skills and memory do, and why the
 verification gates are shaped the way they are.
 
-**Part 2 — the artefact.** A real SAR image-formation pipeline built this way:
-the signal processing, the fabric implementation, the data movement, the memory,
-the timing, and the measured result.
+**Part 2 — On-Chip SAR Processor.** Design and Implementation of SAR image-formation pipeline:
+signal processing, fabric implementation, data movement, memory,
+timing, and measured result.
 
-> The claim being tested is not "AI writes RTL". It is that a *disciplined*
-> agent loop can do real hardware work — provided the discipline is designed
-> around the fact that hardware punishes guessing.
+
+---
+
+## The example, in one slide
+
+Everything in Part 1 is illustrated with **one real project**, so the method is judged
+against something that actually shipped rather than in the abstract.
+
+| | |
+|---|---|
+| **Goal** | Turn raw radar pulses into a focused image, entirely on one chip |
+| **Input** | 5,634 pulses x 4,319 samples of SAR phase history — not a picture |
+| **Output** | 8,192 x 8,192 image |
+| **Hardware** | PolarFire SoC MPFS250T: 4x RISC-V @ 600 MHz + FPGA fabric, one 64-bit port to DDR |
+| **Result** | **110.8 s → 18.45 s** per image, output **bit-identical** throughout |
+
+Two things about this hardware drive every decision in Part 1:
+
+- **A rebuild takes ~50 minutes**, and a test needs a human to power-cycle the board. Being
+  wrong is expensive, so the agent must be cheap to *disprove*, not fast to answer.
+- **Correctness is checkable exactly.** A checksum of the output image either matches
+  `0x319037b2` or it does not. No judgement, no partial credit — which is what makes the
+  verification gates in Part 1 possible at all.
 
 ---
 
@@ -81,43 +101,21 @@ Why hardware breaks the usual agent loop, and what to build instead
 
 ---
 
-## Software and hardware are not the same problem
+## Software and fabric / firmware are not the same problem
 
-![w:960](diagrams/fig-loop.drawio.svg)
+![w:1000](diagrams/fig-loop.drawio.svg)
 
----
-
-## The consequence
-
-In software, a wrong guess costs seconds. **Guessing is a legitimate strategy** —
-try it, see it fail, try again. Most agent tooling is built on that assumption.
-
-Here, one wrong guess costs:
-
-| step | cost |
-|---|---|
-| Synthesis + place & route | ~50 min |
-| Program fabric + re-flash eNVM | ~5 min |
-| Power-cycle | **a human must be present** |
-| Reload the scene into DDR | 81 s from eMMC (was ~3 h over JTAG) |
-| Run + verify | ~30 s |
-
-Plus: **DDR is volatile.** A power-cycle wipes the scene *and* every runtime knob.
-
-So the loop is not "iterate quickly". It is **earn each board trip with a
-board-free proof, and instrument every trip to answer more than one question.**
+> **Consequence:** the agent has to be **thorough** — referencing design documents and reasoning implementation. Every board iteration must undergo a **board-free verification first, and each iteration must be instrumented to answer multiple questions**.
 
 ---
 
 ## The orchestration model
 
-![w:930](diagrams/fig-orchestration.drawio.svg)
+![w:1200](diagrams/fig-orchestration.drawio.svg)
 
 ---
 
 ## Subagents — and what they are really for
-
-Each has its own tools, its own system prompt, and its own evidence bar.
 
 | agent | job |
 |---|---|
@@ -127,33 +125,47 @@ Each has its own tools, its own system prompt, and its own evidence bar.
 | `smartdebug-planner` | Resolve probe net names from the *programmed* netlist |
 | `synthesis-repair` | Minimal, compilable fix within stated constraints |
 | `libero-build` | Headless build that refuses to return a bitstream unless timing is MET |
-| `silicon-test-runner` | Drive a JTAG test with the project's hygiene baked in |
+| `silicon-test-runner` | Drive a JTAG test with consideration of the project's constraints |
 | `doc-accuracy` | Audit docs against source; report only provable drift |
-
-**The real reason they exist:** each returns a *conclusion*, not the files it
-read. The main context stays clean enough to keep reasoning.
 
 ---
 
-## Skills and memory — what survives
+## Skills — packaged procedures, layered by how portable they are
 
-**Skills** are packaged procedures: the eMMC provisioning flow, project
-orientation. Invoked by name, they load the exact steps, addresses and gotchas
-for one recurring job.
+A **skill** is a named procedure the agent loads on demand: the exact steps, addresses,
+commands and gotchas for one recurring job. `ai-framework/` splits them by **how far the
+knowledge travels**, so the reusable part is not trapped inside the project that produced it.
 
-**Memory** is the part people underestimate.
+| layer | what it holds | size | example skill |
+|---|---|---|---|
+| `generic-fpga-soc` | vendor-agnostic **method** — reference-first design, distrust of HLS output, value-level verification, concurrency critique | 9 skills · 4 agents | `hls-output-distrust`, `kernel-isolation-testing` |
+| `microchip-fpga-soc` | **toolchain** — Libero headless flows, SmartHLS authoring, SmartDebug probes, FlashPro6/OpenOCD hygiene | 5 skills · 3 agents | `flashpro6-jtag-recovery`, `smarthls-kernel-authoring` |
+| `mpfs250t` | **one silicon revision** — ES engineering-sample errata, MPU disabled, eNVM limits | 1 skill | `mpfs250t-es-errata` |
+| `.claude/skills/` | **this project** — its scene, its addresses, its history | 16 skills | `emmc-onboard-pipeline`, `silicon-iso-test` |
+
+The layering is the point: the bottom row is disposable the day the chip changes, and the
+top row moves to **any** FPGA project unchanged. Writing a lesson down forces the question
+*how specific is this actually?* — which is a design review in itself.
+
+---
+
+## Memory — what survives the session
+
+Skills are what the agent *does*. Memory is what stops it relearning.
 
 - `CLAUDE.md` — behavioural rules, earned the hard way, checked into the repo
-- runbooks (`DEV_GUIDE.md`) — proven procedures with exact commands and the failure each avoids
-- `MEMORY.md` — durable project facts across sessions
+- runbooks (`DEV_GUIDE.md`) — proven procedures, each with the exact command and the failure it avoids
+- `MEMORY.md` — durable project facts carried across sessions
 
-> A lesson not written down **in the same session it was learned** is a lesson
-> the next session pays for again. On this project that rule was itself learned
-> by paying twice.
+> A lesson not written down **in the same session it was learned** is a lesson the next
+> session pays for again. On this project that rule was itself learned by paying twice.
 
 ---
 
 ## The gate ladder
+
+Each rung is cheap to run and can reject the change. Nothing reaches the board
+until everything above it has passed.
 
 ![w:900](diagrams/fig-gates.drawio.svg)
 
@@ -254,6 +266,49 @@ image is the compute problem.
 The device is a **mid-range SoC FPGA**, not a datacentre part. Everything that
 follows is shaped by that: the frame never fits on chip, so every stage is a
 DDR-to-DDR streaming pass.
+
+---
+
+## Why this chip
+
+A SAR image former on-board rather than on the ground is a **SWaP-C** problem — size, weight,
+power and cost — which is what puts it on a CubeSat, a UAV or a small satellite.
+
+| PolarFire SoC property | why it matters here |
+|---|---|
+| **Flash configuration**, not SRAM | The bitstream is non-volatile: configuration survives power-off, and flash config cells are inherently immune to single-event upsets — the usual argument for LEO |
+| **Low static power** | Measured **436.6 mW static** of 2357.6 mW total (fabric only, vectorless estimate) |
+| **Heterogeneous** — 4× RV64GC + fabric | Streaming, regular work on fabric; irregular and control work on the CPUs |
+| **784 MACC blocks** | The expected constraint for a DSP pipeline — see below |
+
+**The expected constraint was not the real one.** This design uses **68 of 784 MACC (8.7%)** and
+**412 of 812 LSRAM (50.7%)**. It is not arithmetic-bound. Every optimisation that mattered was
+about **moving data**: burst shape, DDR read latency, and one 64-bit port shared by every kernel.
+
+> A generic reading of the datasheet would have predicted a multiplier-limited design and budgeted
+> effort accordingly. Measurement said otherwise, and measurement won.
+
+---
+
+## What this implementation is — and is not
+
+Stated plainly, because SAR pipelines vary enormously and the differences change what the numbers mean.
+
+**It is:** the **Polar Format Algorithm** — keystone resample, 2-D taper, two 8192-point FFTs with a
+corner-turn between them, magnitude detect. Bare-metal on the RISC-V cores, no OS.
+
+**It is not:**
+
+| not this | what we actually do |
+|---|---|
+| Range-Doppler / Chirp Scaling | PFA — no RCMC, no matched-filter range compression |
+| Motion compensation on the CPU | The CPHD input is *already* motion-compensated — that is what the "C" means |
+| Real-time ingest over SerDes / PCIe | A stored scene, loaded from the board's own eMMC |
+| Single-Look Complex output | Detected **uint16 magnitude** — detect is fused into the FFT-2 unloader |
+| Linux or an RTOS | Bare-metal sequencer on one hart, three worker harts |
+
+So this is **on-board offline focusing of a stored scene**, not a real-time front-end. The 18.45 s
+is time-to-image for one 8192² frame, not a streaming throughput figure.
 
 ---
 

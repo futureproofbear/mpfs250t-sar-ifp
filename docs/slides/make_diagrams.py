@@ -19,7 +19,7 @@ import pathlib
 import subprocess
 import xml.etree.ElementTree as ET
 
-FORCE = False        # set by --force; see _dirty_in_git
+FORCE = set()        # basenames allowed to be overwritten; see --force
 
 
 def _dirty_in_git(path):
@@ -200,7 +200,8 @@ class Diagram:
         # REFUSE to clobber a figure the user has edited. These files open in draw.io as shapes and
         # get hand-tweaked there; an unconditional regenerate destroys that silently and the edit is
         # unrecoverable unless it was committed. A file that differs from HEAD is the user's.
-        if p.exists() and _dirty_in_git(p) and not FORCE:
+        forced = p.name in FORCE or p.name.split(".")[0] in FORCE
+        if p.exists() and _dirty_in_git(p) and not forced:
             print(f"  SKIPPED  {p.name}  (locally modified -- your edit is safe)")
             return path
         p.write_text(svg, encoding="utf-8")
@@ -219,9 +220,9 @@ def fig_loop(out):
     d.box("s3", 460, 70, 170, 54, "test\nseconds", "gate")
     d.box("s4", 670, 70, 250, 54, "result\nsame minute", "fab", bold=True)
     d.edge("s1", "s2"); d.edge("s2", "s3"); d.edge("s3", "s4")
-    d.note("sl", 40, 20, 880, 24, "SOFTWARE  —  a wrong guess costs seconds, so guessing is cheap", fs=13)
+    d.note("sl", 40, 20, 880, 24, "SOFTWARE  —  a wrong implementation costs seconds, so guessing is cheap", fs=13)
 
-    d.note("hl", 40, 150, 880, 24, "THIS PROJECT  —  a wrong guess costs most of a day", fs=13)
+    d.note("hl", 40, 150, 880, 24, "FABRIC / FIRMWARE  —  a wrong implementation costs most of a day", fs=13)
     d.box("h1", 40, 195, 150, 58, "edit RTL", "ai")
     d.box("h2", 215, 195, 150, 58, "synth + P&R\n~50 min", "gate")
     d.box("h3", 390, 195, 150, 58, "program +\neNVM  ~5 min", "gate")
@@ -233,9 +234,6 @@ def fig_loop(out):
     d.box("h7", 40, 290, 660, 52,
           "and DDR is volatile: a power-cycle wipes both the scene AND every runtime knob", "bad")
     d.edge("h6", "h7")
-    d.note("cap", 40, 360, 880, 46,
-           "Consequence: the agent cannot brute-force. Every board trip must be earned by a "
-           "board-free proof first,\nand each trip must be instrumented to answer more than one question.", fs=12)
     return d.write(out / "fig-loop.drawio.svg")
 
 
@@ -524,12 +522,14 @@ def fig_arch_pipeline(out):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
-    ap.add_argument("--force", action="store_true",
-                    help="overwrite figures that have uncommitted local edits (DESTRUCTIVE -- "
-                         "those edits are the user's and are not recoverable)")
+    ap.add_argument("--force", nargs="+", metavar="FIG", default=[],
+                    help="overwrite ONLY these figures despite uncommitted local edits, by "
+                         "basename (e.g. --force fig-orchestration). There is deliberately no "
+                         "blanket form: a global override once clobbered an unrelated figure the "
+                         "user had edited.")
     a = ap.parse_args()
     global FORCE
-    FORCE = a.force
+    FORCE = set(a.force)
     here = pathlib.Path(__file__).resolve().parent
     out = here / a.out
     out.mkdir(parents=True, exist_ok=True)

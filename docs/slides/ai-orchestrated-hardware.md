@@ -38,6 +38,7 @@ style: |
     padding: 10px 18px; font-size: 21px;
   }
   footer { font-size: 10px; color: #888; }
+
 ---
 
 <!-- _class: lead -->
@@ -171,7 +172,6 @@ top row moves to **any** FPGA project unchanged. Writing a lesson down forces th
 *how specific is this actually?* — which is a design review in itself.
 
 ---
-
 ## Memory — what survives the session
 
 Skills are what the agent *does*. Memory is what stops it relearning.
@@ -181,7 +181,39 @@ Skills are what the agent *does*. Memory is what stops it relearning.
 - `MEMORY.md` — durable project facts carried across sessions
 
 > A lesson not written down **in the same session it was learned** is a lesson the next
-> session pays for again. On this project that rule was itself learned by paying twice.
+> session pays for again.
+
+**Memory is a staging area, not the destination.** Notes land there first because that is the
+cheapest place to put them mid-task. They are then **promoted**, periodically and deliberately:
+
+`observation → CLAUDE.md / runbook → skill → agent or command`
+
+A recurring note becomes a skill; a repeated judgement becomes an agent; a fixed sequence becomes
+a command. Most notes are never promoted, which is the right outcome.
+
+---
+
+## Commands — the most crystallised form
+
+When a sequence stops needing judgement, it becomes a **command**: one name, a fixed workflow.
+This project has one set, `opsx` — a spec-driven change workflow used before touching RTL.
+
+| command | what it does |
+|---|---|
+| `/opsx:explore` | Think, investigate, clarify. **Explicitly forbidden from implementing** |
+| `/opsx:propose` | Create the change: `proposal.md` (what & why), `design.md` (how), `tasks.md` (steps) |
+| `/opsx:apply` | Implement the tasks from that change |
+| `/opsx:sync` | Merge the change's delta specs into the main specs |
+| `/opsx:archive` | Close it out once shipped |
+
+The separation that matters is the first row. **Explore mode cannot write code** — it is a stance,
+not a step, and it exists because the expensive mistakes on this project were committed early,
+while the problem was still being understood. Forcing "what & why" and "how" into files *before*
+implementation is the same discipline as proving a design board-free before spending 50 minutes on
+a build.
+
+> A command is the end state of the promotion path: something done so often, and so identically,
+> that no decision is left in it.
 
 ---
 

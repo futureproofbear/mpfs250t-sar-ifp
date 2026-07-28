@@ -485,6 +485,43 @@ def fig_bug(out):
     return d.write(out / "fig-bug.drawio.svg")
 
 
+def fig_python(out):
+    """The host-side Python layer: a ladder of models, each closer to the silicon.
+
+    This is what 'verification' actually means on this project -- not an agent, but a chain of
+    references where each rung can reject the one below it."""
+    d = Diagram(1060, 470, "Python-level implementation", draw_title=False)
+    d.box("cphd", 30, 92, 130, 66, "CPHD\nphase history\n(Umbra open data)", "host", bold=True)
+
+    d.box("f1", 200, 60, 165, 60, "form_image_pfa\nfloat PFA\nreference", "host")
+    d.box("f2", 200, 148, 165, 60, "form_image_pfa_fixed\n+ fixedpoint\nBFP emulation", "gate")
+    d.box("cmp", 400, 104, 130, 60, "compare_\nfloat_fixed\nGeoTIFF diff", "gate")
+    d.edge("cphd", "f1"); d.edge("cphd", "f2")
+    d.edge("f1", "cmp"); d.edge("f2", "cmp")
+
+    d.box("emu", 570, 104, 165, 60, "silicon_emulator\nBIT-ACCURATE\nmirror of the board", "fab", bold=True)
+    d.edge("f2", "emu")
+
+    d.box("ser", 200, 250, 165, 58, "serialize_inputs\nCPHD -> staged\nDDR binaries", "host")
+    d.edge("cphd", "ser")
+    d.box("pipe", 400, 250, 130, 58, "sar_pipeline\nhost-side\norchestration", "host")
+    d.box("acc", 570, 250, 165, 58, "accel  backend.focus()\nnumpy  <->  board", "mss", bold=True)
+    d.edge("ser", "pipe"); d.edge("pipe", "acc")
+
+    d.box("board", 800, 176, 175, 62, "the board\nOUT image\n+ crop CRC", "bad", bold=True)
+    d.edge("acc", "board"); d.edge("emu", "board", "predicts", dashed=True, double=True)
+
+    d.note("n1", 30, 340, 1000, 46,
+           "Each rung can REJECT the one below it. float vs fixed answers 'did quantisation break the "
+           "algorithm?';\nemulator vs board answers 'does the silicon do what we modelled?' -- and it is "
+           "bit-accurate, so the answer is yes/no, not a correlation.", fs=12)
+    d.note("n2", 30, 398, 1000, 46,
+           "accel.py is the seam: the SAME call runs on numpy or on the fabric, so the board is A/B-able "
+           "against its own model.\nThat is why a wrong image is traceable to a stage rather than to "
+           "'somewhere in the pipeline'.", fs=12)
+    return d.write(out / "fig-python.drawio.svg")
+
+
 def fig_arch_pipeline(out):
     """ARCHITECTURE.md Figure 1. Lives in docs/img/, not the deck -- the architecture doc owns it.
 
@@ -529,7 +566,7 @@ def main():
     here = pathlib.Path(__file__).resolve().parent
     out = here / a.out
     out.mkdir(parents=True, exist_ok=True)
-    for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa,
+    for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa, fig_python,
                fig_fabric, fig_dataflow, fig_timing, fig_bug):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck

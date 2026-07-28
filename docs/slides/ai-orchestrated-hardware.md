@@ -66,37 +66,11 @@ verification gates are shaped the way they are.
 signal processing, fabric implementation, data movement, memory,
 timing, and measured result.
 
-
----
-
-## The example, in one slide
-
-Everything in Part 1 is illustrated with **one real project**, so the method is judged
-against something that actually shipped rather than in the abstract.
-
-| | |
-|---|---|
-| **Goal** | Turn raw radar pulses into a focused image, entirely on one chip |
-| **Input** | 5,634 pulses x 4,319 samples of SAR phase history — not a picture |
-| **Output** | 8,192 x 8,192 image |
-| **Hardware** | PolarFire SoC MPFS250T: 4x RISC-V @ 600 MHz + FPGA fabric, one 64-bit port to DDR |
-| **Result** | **110.8 s → 18.45 s** per image, output **bit-identical** throughout |
-
-Two things about this hardware drive every decision in Part 1:
-
-- **A rebuild takes ~50 minutes**, and a test needs a human to power-cycle the board. Being
-  wrong is expensive, so the agent must be cheap to *disprove*, not fast to answer.
-- **Correctness is checkable exactly.** A checksum of the output image either matches
-  `0x319037b2` or it does not. No judgement, no partial credit — which is what makes the
-  verification gates in Part 1 possible at all.
-
 ---
 
 <!-- _class: part -->
 
-# Part 1
-
-## Orchestration
+# Part 1: AI Orchestration
 
 Why hardware breaks the usual agent loop, and what to build instead
 
@@ -154,16 +128,18 @@ Each has its own tools, its own prompt, and its own evidence bar.
 | **Bring-up** | `smartdebug-planner` | Resolve probe net names from the *programmed* netlist |
 | **Documentation** | `doc-accuracy` | Audit docs against source; report only provable drift |
 
-**There is deliberately no "verification" agent.** Verification is not delegated to a model — it is
-mechanised as the gate ladder that follows. An agent may propose; only a gate may accept.
-
+**Verification is not one of the agents — it is a chain of references, and each link can reject
+the design.** A float Python model says whether the algorithm is right; a bit-accurate fixed-point
+emulator predicts exactly what the silicon should produce; RTL testbenches with mutation batteries
+say whether the hardware matches; the timing gate says whether it can run; and a bit-exact checksum
+on the board says whether it did. An agent may propose. Only these may accept.
 ---
 
 ## Skills — packaged procedures, layered by how portable they are
 
 A **skill** is a named procedure the agent loads on demand: the exact steps, addresses,
-commands and gotchas for one recurring job. `ai-framework/` splits them by **how far the
-knowledge travels**, so the reusable part is not trapped inside the project that produced it.
+commands and gotchas for one recurring job.
+`ai-framework/` splits them by **how far the knowledge travels**, so the reusable part depends on the amount of chip selection overlap.
 
 | layer | what it holds | size | example skill |
 |---|---|---|---|
@@ -185,9 +161,6 @@ Skills are what the agent *does*. Memory is what stops it relearning.
 - runbooks (`DEV_GUIDE.md`) — proven procedures, each with the exact command and the failure it avoids
 - `MEMORY.md` — durable project facts carried across sessions
 
-> A lesson not written down **in the same session it was learned** is a lesson the next
-> session pays for again.
-
 **Memory is a staging area, not the destination.** Notes land there first because that is the
 cheapest place to put them mid-task. They are then **promoted**, periodically and deliberately:
 
@@ -198,10 +171,9 @@ a command. Most notes are never promoted, which is the right outcome.
 
 ---
 
-## Commands — the most crystallised form
+## Commands — from OpenSpecs
 
-When a sequence stops needing judgement, it becomes a **command**: one name, a fixed workflow.
-This project has one set, `opsx` — a spec-driven change workflow used before touching RTL.
+This project uses `opsx` — a spec-driven change workflow before touching RTL.
 
 | command | what it does |
 |---|---|
@@ -211,21 +183,11 @@ This project has one set, `opsx` — a spec-driven change workflow used before t
 | `/opsx:sync` | Merge the change's delta specs into the main specs |
 | `/opsx:archive` | Close it out once shipped |
 
-The separation that matters is the first row. **Explore mode cannot write code** — it is a stance,
-not a step, and it exists because the expensive mistakes on this project were committed early,
-while the problem was still being understood. Forcing "what & why" and "how" into files *before*
-implementation is the same discipline as proving a design board-free before spending 50 minutes on
-a build.
-
-> A command is the end state of the promotion path: something done so often, and so identically,
-> that no decision is left in it.
-
 ---
 
-## What can be driven headless
+## What can be driven headless with Libero SOC
 
-An agent can only run what has a command-line form. On this toolchain, **the whole flow does** —
-Libero exposes each stage as a Tcl `run_tool`, so `libero.exe SCRIPT:build.tcl` covers it all.
+On this toolchain, the whole flow can run directly with Libero, where each stage is exposes as a Tcl `run_tool`. Fully run on command line through `libero.exe SCRIPT:build.tcl`.
 
 | stage | headless invocation |
 |---|---|
@@ -241,103 +203,19 @@ Libero exposes each stage as a Tcl `run_tool`, so `libero.exe SCRIPT:build.tcl` 
 The rest is scriptable too: `pfsoc_mss.exe` (MSS config), `shls sw`/`shls hw` (SmartHLS),
 `vsim -c` (ModelSim), `mpfsBootmodeProgrammer` (eNVM), OpenOCD + GDB (the board).
 
-> A GUI step is one an agent cannot take, cannot gate, and cannot repeat identically. Because
-> timing is a `run_tool` whose report is a file, the build can **refuse to return a bitstream that
-> failed timing** — mechanical, not a human remembering to look.
-
----
-
-## The gate ladder
-
-Each rung is cheap to run and can reject the change. Nothing reaches the board
-until everything above it has passed.
-
-![w:900](diagrams/fig-gates.drawio.svg)
-
----
-
-## Why gates, and not "the model is careful"
-
-The model's confidence is **uncorrelated** with correctness. Only gate output counts.
-
-Three rules that did the heavy lifting:
-
-**1. Board-free first.** A Python model bit-exact against the C. A testbench.
-A mutation battery. Only then a build, only then silicon.
-
-**2. A test that cannot fail is worthless.** Every testbench is mutation-tested —
-deliberately break the design and require the bench to notice. One bench on this
-project was found to be hollow: it never checked the payload at all.
-
-**3. Verify timing MET before debugging function.** A timing violation mimics a
-functional bug perfectly, and the toolchain programs a failing bitstream
-*silently*.
-
----
-
-## What the ladder actually caught
-
-![w:900](diagrams/fig-bug.drawio.svg)
-
----
-
-## The lesson from that bug
-
-The fix was one guard. The finding was about the **bench**, not the RTL.
-
-```verilog
-if (starting) begin busy <= 1'b1; fill_done <= 1'b0; ... end
-...
-// NOT on the launch cycle: fill_done still reads the PREVIOUS run's 1
-if (!starting && fill_done && ...) busy <= 1'b0;
-```
-
-The testbench instantiated a fresh case per scenario — so **every case reset
-before its single run**, and "re-arm" was structurally unexpressible. It could
-not fail, so it did not.
-
-The bench now takes an `NRUNS` parameter and starts one instance three times with
-no reset. It was verified **non-vacuous**: it fails on the old RTL, passes on the fix.
-
-> Generalised into the runbook: *every kernel testbench must re-arm the same
-> instance at least twice.* Firmware drives kernels thousands of times per frame;
-> a bench that resets between runs is testing a different machine.
-
----
-
-## Honest limits
-
-Things that went wrong that no amount of prompting fixes:
-
-- **Three wrong hypotheses in a row** for one regression — re-arm, then timing,
-  then a bundled second change. Only the third survived contact with evidence.
-- **A "free" memory slot that wasn't.** An out-of-bounds instrumentation write
-  landed on a control block and silently halved a multi-hart optimisation.
-  Caught only because the frame time moved.
-- **A measurement that answered the wrong question** — two instrumentation points
-  shared a slot, so the later one had been overwriting the earlier one every run.
-- **Documentation drift.** An audit of six documents found 6 HIGH-severity
-  inaccuracies, including a register map that would hang the bus.
-
-The pattern: **the agent is good at generating plausible explanations and bad at
-knowing which one is true.** Every mechanism above exists to close that gap.
-
 ---
 
 <!-- _class: part -->
 
-# Part 2
+# Part 2: SAR Processor
 
-## The SAR processor
-
-Signal processing, fabric, memory, timing — and the measured result
+Signal processing, fabric, memory, timing — and measured result
 
 ---
 
-## Why do this on-board at all
+## Why do the SAR processing on a PolarFire SOC
 
-Today a radar satellite downlinks **raw phase history** — enormous, unfocused, useless until a
-ground station processes it. The image, and any decision from it, arrives hours later.
+Current approach is for a radar satellite to downlink its **raw phase history data** — enormous (multple GBs) to a ground station for processing. The image, and any decision from it, arrives hours later.
 
 Forming the image **on the spacecraft** changes what can be sent and when:
 
@@ -348,27 +226,26 @@ Forming the image **on the spacecraft** changes what can be sent and when:
 | **Direct to the platform** | The result can go straight to whoever needs it, bypassing the ground station |
 | **Capability in a small satellite** | Makes SAR viable on a bus that cannot carry a large processing payload |
 
-This is the enabling step for **automatic target detection with edge AI**: an on-board classifier
-needs a focused image to run on, and that image has to be produced within the same power and mass
-budget.
+<br>
 
-> The processing is the bottleneck, not the radar. Which is why it has to fit in a part that a
-> small satellite can actually fly.
+> This is an enabling step for **automatic target detection with edge AI**. An on-board target classifier needs a focused image to run on, and that image has to be produced within the same power and mass budget.
 
 ---
 
-## The problem, concretely
+## The SAR processing problem
 
-**Synthetic Aperture Radar** synthesises a large virtual antenna from a moving platform's pulses.
-The raw data is *phase history*, not an image — forming the image is the compute problem.
+**Synthetic Aperture Radar** synthesises a large virtual antenna from a moving platform's pulses. The raw data is *phase history*, not an image — forming the image is the compute problem.
 
 | | |
 |---|---|
-| Input | CPHD phase history, 5634 pulses × 4319 samples (Centerfield, Utah) |
+| **Goal** | Turn raw radar pulses into a focused image, entirely on one chip |
+| Input | Complex phase history data (CPHD), up to 8192 pulses × 8192 samples |
 | Output | 8192 × 8192 focused image, uint16 magnitude |
 | Algorithm | Polar Format Algorithm (PFA) |
 | Hardware | PolarFire SoC MPFS250T — 4× U54 RISC-V @ 600 MHz + FPGA fabric |
-| Data path | 2 GiB DDR4; fabric reaches it through one 64-bit port |
+| Data path | 2 GiB DDR4; fabric reaches it through one 64-bit port | 
+
+<br>
 
 **The real difficulty is not the arithmetic.** It is routing, storing and transposing a
 **giant 2-D dataset** inside tight fabric and memory limits: the frame never fits on chip, so every
@@ -416,6 +293,35 @@ the coefficient and renormalisation work in parallel.
 
 Input is **CPHD** — phase history that already carries its motion compensation, which is what the
 "C" stands for. The pipeline takes it from there.
+
+---
+
+## Build it in Python first — then move it, stage by stage
+
+The intent was never "write RTL". It was: **get a correct image on a laptop, then push each stage
+onto the chip without ever losing the ability to say whether it is still correct.**
+
+That ordering is what makes the hardware tractable. Every fabric kernel has a Python ancestor that
+still runs, so a wrong image is a question with an answer — *which stage diverged, and by how many
+bits* — rather than a hunt.
+
+![w:1000](diagrams/fig-python.drawio.svg)
+
+---
+
+## Why a ladder and not one model
+
+| model | question it answers |
+|---|---|
+| `form_image_pfa` (float) | Is the **algorithm** right? Compared against the scene's own reference image |
+| `form_image_pfa_fixed` + `fixedpoint` | Does it survive **quantisation** — 16-bit I/Q, block floating point? |
+| `compare_float_fixed` | What did fixed point actually **cost**, measured on the output GeoTIFFs |
+| `silicon_emulator` | **Bit-accurate.** Predicts the board's output exactly — not approximately |
+| `accel.backend.focus()` | The **seam**: same call, numpy or fabric, so the board is A/B-able against its own model |
+
+The bit-accurate rung is the one that earns its keep. Because it is exact rather than correlated, a
+mismatch is a **defect with a location**, not a quality judgement — and this project has repeatedly
+found that correlation hides real bugs that a bit-level diff exposes immediately.
 
 ---
 

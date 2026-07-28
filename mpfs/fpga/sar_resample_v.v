@@ -369,7 +369,12 @@ module sar_resample_v #(
     wire signed [31:0] qtab_q  = r_mode ? kc_q : kr_q;
     wire signed [16:0] a_hi    = {r_a[31], r_a[31:16]};      // signed high half
     wire        [15:0] a_lo    = r_a[15:0];                  // unsigned low half
-    wire signed [63:0] p_sum   = ({{16{pH[47]}}, pH} <<< 16) + {{15{1'b0}}, pL};
+    // D2 FIX: SIGN-extend pL, do not zero-extend it. A is split as a_hi<<16 + a_lo with a_lo
+    // forced non-negative, so pL = signed(qtab)*a_lo carries qtab's sign and IS negative whenever
+    // the table entry is. Zero-extending added 2^49 to every such query, i.e. v off by +2^49>>SH
+    // (measured: wq +1024 at SH=30, v +2^22 at SH=27). Sign-sensitive fixed point -- the exact
+    // class this project has been bitten by repeatedly.
+    wire signed [63:0] p_sum   = ({{16{pH[47]}}, pH} <<< 16) + {{15{pL[48]}}, pL};
     wire signed [63:0] p_shift = pC >>> r_sh;
     // loss on the shift: everything above bit 47 must be a pure sign extension of bit 47
     wire               sat_sh  = (p_shift[63:48] != {16{p_shift[47]}});
@@ -466,14 +471,24 @@ module sar_resample_v #(
 
     // PREP addresses 0,1,SN-1; from prep_cnt==3 onward the scan's k+2 / k+1 speculation takes
     // over, so that the FIRST scan cycle (k=0) has already issued TS_i[2] and INV_i[1].
+    //
+    // D3 FIX: address off k_next, NOT k. ts_q/inv_q are registered, so a value lands one cycle
+    // after its address is driven. Addressing off k made the speculation correct only for the
+    // FIRST advance of a run: on back-to-back advances k had already moved, so ts_k1 took
+    // TS_i[k+2] when it needed TS_i[k+3]. idx over-advanced by one and wq clamped to 32767 --
+    // which is why the "coarse" bench cases (3, 5) failed while the "fine" ones (2, 4) passed.
+    // k_next folds this cycle's advance decision into the address, so the value arriving next
+    // cycle is right whether or not that cycle also advances. No combinational loop: m1_adv
+    // depends only on registers (ts_k1, k, vD), never on ts_addr.
+    wire [IDX_W-1:0] k_next = (r_mode & m1_adv) ? (k + 1'b1) : k;
     wire prep_sel = (state == T_PREP) && (prep_cnt != 2'd3);
-    assign ts_addr  = !prep_sel ? ({{(TAB_AW-IDX_W){1'b0}}, k} + {{(TAB_AW-2){1'b0}}, 2'd2}) :
+    assign ts_addr  = !prep_sel ? ({{(TAB_AW-IDX_W){1'b0}}, k_next} + {{(TAB_AW-2){1'b0}}, 2'd2}) :
                       (prep_cnt == 2'd0) ? {TAB_AW{1'b0}} :
                       (prep_cnt == 2'd1) ? {{(TAB_AW-1){1'b0}}, 1'b1}
                                          : sn_m1[TAB_AW-1:0];
     assign inv_addr = (prep_sel && prep_cnt == 2'd0)
                           ? {TAB_AW{1'b0}}
-                          : ({{(TAB_AW-IDX_W){1'b0}}, k} + {{(TAB_AW-1){1'b0}}, 1'b1});
+                          : ({{(TAB_AW-IDX_W){1'b0}}, k_next} + {{(TAB_AW-1){1'b0}}, 1'b1});
 
     // table RAMs (write from the AXI4-Lite loader, synchronous read)
     always @(posedge clk) begin
@@ -740,6 +755,7 @@ module sar_resample_v #(
     reg  signed [15:0] a_hi_s, a_lo_s;
     reg  signed [32:0] mh, ml;
     reg  signed [15:0] ah2, al2;
+    reg         [15:0] g4_hi, g4_lo;   // D4: registered lerp result, aligned with g4_v/g4_val
     reg  [31:0]       g_word;
     reg               g_word_v;
     wire              gen;                // gather pipeline enable (write FIFO backpressure)
@@ -761,6 +777,7 @@ module sar_resample_v #(
             g1_idx <= 0; g1_wq <= 0; g2_wq <= 0; g3_wq <= 0;
             d_hi <= 17'sd0; d_lo <= 17'sd0; a_hi_s <= 16'sd0; a_lo_s <= 16'sd0;
             mh <= 33'sd0; ml <= 33'sd0; ah2 <= 16'sd0; al2 <= 16'sd0;
+            g4_hi <= 16'd0; g4_lo <= 16'd0;
         end else if (gen) begin
             g0_v <= (state == T_GATHER) && (g_left != 16'd0);
             // stage 1: coef word out of cf_mem
@@ -778,11 +795,20 @@ module sar_resample_v #(
             g3_v <= g2_v; g3_val <= g2_val; g3_wq <= g2_wq;
             mh <= sh_hi; ml <= sh_lo; ah2 <= a_hi_s; al2 <= a_lo_s;
             // stage 4: add + int16 truncation + pack
+            // D4 FIX. r_hi/r_lo are COMBINATIONAL from the stage-3 registers (ah2/al2, mh/ml), so
+            // they are only valid while g3_v is high. g_out used to read them while qualifying with
+            // g4_val, one cycle later -- by then ah2/mh had advanced to the NEXT query. Every output
+            // word was the next coefficient's lerp masked by the previous coefficient's valid bit:
+            // the first result was dropped and the whole line shifted by one sample. A one-sample
+            // shift survives a correlation check, which is why this bench compares VALUES.
+            // Registering the result here makes it a true stage-4 value, aligned with g4_v/g4_val,
+            // and leaves the pipeline depth (and gather_drained's accounting) unchanged.
             g4_v <= g3_v; g4_val <= g3_val;
+            g4_hi <= r_hi[15:0]; g4_lo <= r_lo[15:0];
         end
     end
 
-    wire [31:0] g_out = g4_val ? {r_hi[15:0], r_lo[15:0]} : 32'd0;   // idx<0 -> zero fill
+    wire [31:0] g_out = g4_val ? {g4_hi, g4_lo} : 32'd0;   // idx<0 -> zero fill
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin gi <= 0; g_left <= 16'd0; end
@@ -855,6 +881,11 @@ module sar_resample_v #(
 
     localparam W_IDLE = 2'd0, W_ADDR = 2'd1, W_DATA = 2'd2, W_DONE = 2'd3;
 
+    // D5 helpers: the two events that move bresp_left, plus the arming condition that zeroes it.
+    wire b_hs  = m_bvalid && m_bready;
+    wire aw_hs = (wstate == W_ADDR) && m_awvalid && m_awready;
+    wire w_arm = (wstate == W_IDLE) && (state == T_GATHER) && !wr_done;
+
     assign m_awid    = {AXI_ID_W{1'b0}};
     assign m_awsize  = 3'b011;
     assign m_awburst = 2'b01;
@@ -882,7 +913,18 @@ module sar_resample_v #(
         end else begin
             if (m_bvalid && m_bready) begin
                 if (m_bresp[1]) err_bresp <= 1'b1;         // SLVERR/DECERR
-                if (bresp_left != 16'd0) bresp_left <= bresp_left - 1'b1;
+            end
+            // D5 FIX. bresp_left was decremented HERE and incremented in W_ADDR -- two nonblocking
+            // assignments in this one always block. A B response landing in the same cycle as an AW
+            // handshake lost the decrement (the later assignment wins), so the counter never reached
+            // zero and `busy` never cleared: 4 of 8 bench cases deadlocked. Both events are resolved
+            // in ONE place now, the way corner_turn_v.v handles `nfull`, and for the same reason.
+            if (!w_arm) begin
+                case ({aw_hs, b_hs})
+                    2'b10: bresp_left <= bresp_left + 1'b1;
+                    2'b01: if (bresp_left != 16'd0) bresp_left <= bresp_left - 1'b1;
+                    default: ;              // 2'b11 nets to zero, 2'b00 no change
+                endcase
             end
             case (wstate)
               W_IDLE: begin
@@ -909,8 +951,7 @@ module sar_resample_v #(
                   end else if (m_awvalid && m_awready) begin
                       m_awvalid  <= 1'b0;
                       wbeat_rem  <= wr_cur_len[8:0];
-                      bresp_left <= bresp_left + 1'b1;
-                      wstate     <= W_DATA;
+                      wstate     <= W_DATA;   // bresp_left handled by the D5 block above
                   end
               end
               W_DATA: begin

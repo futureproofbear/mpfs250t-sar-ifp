@@ -34,6 +34,9 @@ module tb_sar_sinc32;
     reg               sw_we = 1'b0;
     reg  [13:0]       sw_idx = 14'd0;
     reg  [31:0]       sw_data = 32'd0;
+    reg               sw2_we = 1'b0;
+    reg  [13:0]       sw2_idx = 14'd0;
+    reg  [31:0]       sw2_data = 32'd0;
     reg               g_v = 1'b0, g_edge = 1'b0;
     reg               en = 1'b1;   // pipeline enable / backpressure
     reg  [13:0]       g_idx = 14'd0;
@@ -45,6 +48,7 @@ module tb_sar_sinc32;
         .clk(clk), .resetn(resetn),
         .ct_we(ct_we), .ct_data(ct_data), .ct_rewind(ct_rewind),
         .sw_we(sw_we), .sw_idx(sw_idx), .sw_data(sw_data),
+        .sw2_we(sw2_we), .sw2_idx(sw2_idx), .sw2_data(sw2_data),
         .en(en), .g_v(g_v), .g_idx(g_idx), .g_wq(g_wq), .g_edge(g_edge),
         .o_v(o_v), .o_data(o_data)
     );
@@ -108,11 +112,18 @@ module tb_sar_sinc32;
         end
         ct_we = 1'b0; @(posedge clk);
 
-        // ---- load the source line ----
-        for (i = 0; i < N; i = i + 1) begin
-            sw_we = 1'b1; sw_idx = i[13:0]; sw_data = src[i]; @(posedge clk);
+        // ---- load the source line, TWO SAMPLES PER CYCLE ----
+        // Drives both write ports the way a 64-bit FIC_0 beat will: consecutive indices, which
+        // always fall in different mod-32 banks. Loading one-at-a-time would leave the second
+        // port untested, and an untested port is how a fill bug reaches silicon.
+        for (i = 0; i < N; i = i + 2) begin
+            sw_we  = 1'b1; sw_idx  = i[13:0];        sw_data  = src[i];
+            sw2_we = (i + 1 < N);
+            sw2_idx = (i + 1)  & 14'h3FFF;
+            sw2_data = (i + 1 < N) ? src[i + 1] : 32'd0;
+            @(posedge clk);
         end
-        sw_we = 1'b0;
+        sw_we = 1'b0; sw2_we = 1'b0;
         repeat (4) @(posedge clk);
 
         // ---- issue every request; with +STALL, randomly deassert `en` mid-stream ----

@@ -65,10 +65,17 @@ module sar_sinc32_gather #(
     input  wire signed [15:0]   ct_data,
     input  wire                 ct_rewind, // reset the write pointer
 
-    // ---- source line write (from the AXI read side; one sample per strobe) ----
+    // ---- source line write, TWO ports ----
+    // A 64-bit FIC_0 beat carries TWO samples, so a single write port would halve the fill rate
+    // and make the line load the bottleneck. The two samples of a beat are at CONSECUTIVE indices,
+    // and banks are index mod 32, so they always land in DIFFERENT banks -- the two ports can
+    // never collide and no arbitration is needed.
     input  wire                 sw_we,
     input  wire [IDX_W-1:0]     sw_idx,    // sample index within the line
     input  wire [31:0]          sw_data,   // {I[31:16], Q[15:0]}
+    input  wire                 sw2_we,
+    input  wire [IDX_W-1:0]     sw2_idx,
+    input  wire [31:0]          sw2_data,
 
     // ---- gather request ----
     // Pipeline enable / BACKPRESSURE. Low freezes the whole gather -- bank reads, multiply,
@@ -109,8 +116,10 @@ module sar_sinc32_gather #(
     // bank b holds samples with index[LOG2T-1:0] == b, at address index >> LOG2T
     reg [31:0] sbank [0:TAPS-1][0:(1<<BANK_AW)-1];
 
-    wire [LOG2T-1:0]  sw_bank = sw_idx[LOG2T-1:0];
-    wire [BANK_AW-1:0] sw_addr = sw_idx[LOG2T+BANK_AW-1:LOG2T];
+    wire [LOG2T-1:0]   sw_bank  = sw_idx[LOG2T-1:0];
+    wire [BANK_AW-1:0] sw_addr  = sw_idx[LOG2T+BANK_AW-1:LOG2T];
+    wire [LOG2T-1:0]   sw2_bank = sw2_idx[LOG2T-1:0];
+    wire [BANK_AW-1:0] sw2_addr = sw2_idx[LOG2T+BANK_AW-1:LOG2T];
 
     // window base and its rotation
     wire signed [IDX_W:0] base  = {1'b0, g_idx} - HALF;
@@ -130,7 +139,8 @@ module sar_sinc32_gather #(
             always @(posedge clk) begin
                 // the source WRITE is not part of the gather pipeline: it runs while the core is
                 // idle between lines, so it is deliberately NOT gated by en.
-                if (sw_we && sw_bank == b[LOG2T-1:0]) sbank[b][sw_addr] <= sw_data;
+                if (sw_we  && sw_bank  == b[LOG2T-1:0]) sbank[b][sw_addr]  <= sw_data;
+                else if (sw2_we && sw2_bank == b[LOG2T-1:0]) sbank[b][sw2_addr] <= sw2_data;
                 if (en) sq[b] <= sbank[b][ra];
             end
         end

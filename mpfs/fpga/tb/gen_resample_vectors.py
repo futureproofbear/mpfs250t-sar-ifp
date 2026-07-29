@@ -194,6 +194,68 @@ def lagrange_taps_q15(w):
     return [iround(x * (1 << 15)) for x in c]
 
 
+SINC8_TAPS   = 8       # taps at idx-3 .. idx+4
+SINC8_PHASES = 256     # mu quantisation: 1/512 sample max delay error, about -46 dB
+
+
+def sinc8_table_q15(phases=SINC8_PHASES, taps=SINC8_TAPS):
+    """Polyphase truncated-sinc coefficients, Q15, [phase][tap].
+
+    SCENE-INDEPENDENT -- these depend only on the fractional delay, never on geometry, so unlike
+    the KR/KC query tables this is a CONSTANT: load once at init or ROM-initialise it. That is
+    what makes sinc practical on this FPGA: no coefficient arithmetic in the datapath at all
+    (Farrow would need a Horner cascade before the dot product can start), which matters when the
+    100 MHz domain has 0.255 ns of setup slack.
+
+    DC-NORMALISED per phase. Raw truncated sinc does not sum to 1, and an un-normalised table puts
+    a gain error on every output sample. Measured 2026-07-29 (mpfs/host/interp_kernel_study.py):
+    at 0.815 Nyquist an 8-tap sinc reaches about -23 dB complex error against the ideal fractional
+    delay, versus -11 dB for an 8-tap Lagrange -- same datapath, same MACs, different table.
+    """
+    lo = -(taps // 2 - 1)                                  # -3 for 8 taps
+    tab = []
+    for ph in range(phases):
+        mu = F(ph, phases)
+        c = [F(1) if (mu - (lo + k)) == 0 else
+             F(math.sin(math.pi * float(mu - (lo + k)))) / (F(math.pi) * (mu - (lo + k)))
+             for k in range(taps)]
+        s = sum(c)
+        tab.append([iround(x / s * (1 << 15)) for x in c])   # ONE rounding, after normalising
+    return tab
+
+
+def gather_sinc8(src, idx, wq, sn, tab=None):
+    """out = 8-tap polyphase sinc. Phase = wq >> 7 (top 8 bits of the Q15 fraction).
+
+    EDGE RULE, same principle as gather_cubic: 8 taps need idx-3 .. idx+4, so full width is used
+    only for 3 <= idx <= sn-5 and the line's first/last few brackets fall back to the 2-tap lerp.
+    This keeps the SET OF NON-ZERO OUTPUTS IDENTICAL to the linear path, so an A/B against the
+    shipping kernel is a like-for-like value comparison and not a support change."""
+    if tab is None:
+        tab = sinc8_table_q15()
+    lo = -(SINC8_TAPS // 2 - 1)
+    out = []
+    for k, w in zip(idx, wq):
+        if k < 0:
+            out.append(0)
+            continue
+        if k < -lo or k > sn - (SINC8_TAPS + lo) - 1:
+            a, b = src[k], src[k + 1]
+            ah, al = s16(a >> 16), s16(a & 0xFFFF)
+            bh, bl = s16(b >> 16), s16(b & 0xFFFF)
+            rh = ah + (((bh - ah) * w) >> 15)
+            rl = al + (((bl - al) * w) >> 15)
+        else:
+            c = tab[w >> 7]
+            xs = [src[k + lo + j] for j in range(SINC8_TAPS)]
+            hi = sum(ci * s16(x >> 16) for ci, x in zip(c, xs)) >> 15
+            loo = sum(ci * s16(x & 0xFFFF) for ci, x in zip(c, xs)) >> 15
+            rh = -32768 if hi < -32768 else (32767 if hi > 32767 else hi)
+            rl = -32768 if loo < -32768 else (32767 if loo > 32767 else loo)
+        out.append(((rh & 0xFFFF) << 16) | (rl & 0xFFFF))
+    return out
+
+
 def gather_cubic(src, idx, wq, sn):
     """out = 4-tap cubic Lagrange. idx<0 -> zero fill, exactly as linear.
 

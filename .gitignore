@@ -212,3 +212,4 @@ mpfs/host/component/
 *.libero.log
 mpfs/fpga/tb/s32_*.hex
 mpfs/fpga/tb/s32_dims.vh
+mpfs/fpga/trial_sinc32/

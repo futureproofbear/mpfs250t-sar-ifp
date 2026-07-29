@@ -77,6 +77,8 @@ module tb_sar_sinc32;
                 $fwrite(fh2, "sel %0d rot %0d ph %0d\n", v1_n, dut.rot1, dut.ph1);
                 for (pt = 0; pt < TAPS; pt = pt + 1)
                     $fwrite(fh2, "sq %0d %08x\n", pt, dut.sq[pt]);
+                for (pt = 0; pt < TAPS; pt = pt + 1)
+                    $fwrite(fh2, "ct %0d %0d\n", pt, $signed(dut.ctab[pt][dut.ph1]));
             end
             v1_n = v1_n + 1;
         end

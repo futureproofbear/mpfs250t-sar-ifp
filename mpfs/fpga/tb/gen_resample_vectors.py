@@ -228,9 +228,27 @@ def sinc_table_q15(phases=SINC_PHASES, taps=SINC_TAPS):
         # FORCE the sum to exactly 2^15. Rounding each tap independently leaves a residual that
         # grows with tap count -- harmless at 8 taps, but at 24 it left 17 of 256 phases more than
         # 2 LSB off unity, which is a per-phase GAIN RIPPLE, i.e. amplitude modulation across the
-        # image that no amount of downstream scaling removes. Push the residual onto the largest
-        # tap, where it is the smallest relative perturbation. Free: this is a table, not logic.
-        q[max(range(len(q)), key=lambda i: abs(q[i]))] += (1 << 15) - sum(q)
+        # image that no amount of downstream scaling removes.
+        #
+        # ...but the residual CANNOT simply go on the largest tap. Q15 unity is 32768, which is
+        # already one past the int16 rail, so near mu=0 the centre tap is at or above 32767 and
+        # adding to it WRAPS NEGATIVE. That is a real bug this code shipped with: the RTL stores
+        # signed [15:0], so phase 251 tap 16 became -32749 instead of 32787 and every query on
+        # such a phase came out with the dominant tap inverted (267 of 3621 outputs, 2026-07-29).
+        # Spread the residual instead, largest-magnitude tap first, and only as far as each tap's
+        # remaining int16 headroom allows.
+        lo_i, hi_i = -(1 << 15), (1 << 15) - 1
+        q = [min(max(v, lo_i), hi_i) for v in q]
+        resid = (1 << 15) - sum(q)
+        for i in sorted(range(len(q)), key=lambda j: -abs(q[j])):
+            if resid == 0:
+                break
+            room = (hi_i - q[i]) if resid > 0 else (lo_i - q[i])
+            step = resid if abs(resid) <= abs(room) else room
+            q[i] += step
+            resid -= step
+        assert resid == 0, "cannot reach unity gain within int16 -- the kernel needs a wider tap"
+        assert all(lo_i <= v <= hi_i for v in q), "coefficient outside int16"
         tab.append(q)
     return tab
 

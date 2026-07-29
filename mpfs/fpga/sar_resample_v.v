@@ -107,10 +107,13 @@
 //   0x14 STATUS2 (RO) sticky error latches, see below
 //   0x18 DIMS         [15:0]=QN outputs (even), [31:16]=SN source samples (>=2)
 //   0x1c LCFG         [5:0]=SH, [13:8]=FSH, [16]=MODE (0=pass1 closed form, 1=pass2 scan)
+//                     [17]=SINC (0 = 2-tap lerp, 1 = 32-tap sinc gather). Reset LOW.
 //   0x20 COEF_A       signed 32-bit affine mantissa A
 //   0x24 COEF_BLO     B[31:0]
 //   0x28 COEF_BHI     B[47:32]
-//   0x2c TAB_CTRL     [1:0]=table select (0=KR, 1=KC, 2=TS, 3=INV), [2]=rewind pointer
+//   0x2c TAB_CTRL     [1:0]+[3]=table select (0=KR 1=KC 2=TS 3=INV 4=SINC), [2]=rewind ptr
+//                     NOTE the select is SPLIT: bit 2 is rewind and predates the 5th table,
+//                     so the extra select bit is bit 3, not bit 2.
 //   0x30 TAB_DATA     table word; the shared pointer auto-increments (fft_feeder_v.v 0x1c pattern)
 // TABLE LOAD is AXI4-Lite and DELIBERATELY NOT A DMA, for the same reason the window taper is
 // not: a second mode in the read FSM would have to arbitrate for AR/R against the row feed. The
@@ -230,14 +233,19 @@ module sar_resample_v #(
     reg  [5:0]            sh;              // affine product right-shift
     reg  [5:0]            fsh;             // MODE=1 frac right-shift (= INVQ-3)
     reg                   mode;            // 0 = pass1 closed form, 1 = pass2 merge scan
+    // LCFG[17]: select the 32-tap sinc gather instead of the 2-tap lerp. Both live in the
+    // bitstream so they can be A/B'd on ONE board run -- the lesson from this core taking the
+    // SmartHLS resample's CIC target and leaving no fallback. Reset LOW, so a cold-boot or
+    // un-updated firmware gets exactly today's silicon-verified behaviour.
+    reg                   sinc_en;         // LCFG[17]: 1 = 32-tap sinc gather
     reg  signed [31:0]    coef_a;
     reg  [31:0]           coef_blo;
     reg  [15:0]           coef_bhi;
-    reg  [1:0]            tab_sel;
+    reg  [2:0]            tab_sel;         // 0=KR 1=KC 2=TS 3=INV 4=SINC coefficients
     reg  [TAB_AW-1:0]     tab_wptr;
     reg  [TAB_AW-1:0]     tab_waddr;       // captured WITH the data (tab_wptr has moved on)
     reg  [31:0]           tab_wdata;
-    reg  [3:0]            tab_we;          // one-hot per table
+    reg  [4:0]            tab_we;          // one-hot per table
 
     reg                   start_pulse;
     reg                   busy;
@@ -251,31 +259,36 @@ module sar_resample_v #(
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
             in_base <= 0; out_base <= 0; qn <= 0; sn <= 0;
-            sh <= 0; fsh <= 0; mode <= 1'b0;
+            sh <= 0; fsh <= 0; mode <= 1'b0; sinc_en <= 1'b0;
             coef_a <= 32'sd0; coef_blo <= 32'd0; coef_bhi <= 16'd0;
-            tab_sel <= 2'd0; tab_wptr <= 0; tab_waddr <= 0; tab_wdata <= 32'd0; tab_we <= 4'd0;
+            tab_sel <= 3'd0; tab_wptr <= 0; tab_waddr <= 0; tab_wdata <= 32'd0; tab_we <= 5'd0;
             s_bvalid <= 1'b0; start_pulse <= 1'b0;
         end else begin
             start_pulse <= 1'b0;
-            tab_we      <= 4'd0;
+            tab_we      <= 5'd0;
             if (s_awready) begin
                 case (s_awaddr[11:0])
                     12'h008: start_pulse <= s_wdata[0];
                     12'h00c: in_base     <= s_wdata[AXI_ADDR_W-1:0];
                     12'h010: out_base    <= s_wdata[AXI_ADDR_W-1:0];
                     12'h018: begin qn <= s_wdata[15:0]; sn <= s_wdata[31:16]; end
-                    12'h01c: begin sh <= s_wdata[5:0]; fsh <= s_wdata[13:8]; mode <= s_wdata[16]; end
+                    12'h01c: begin sh <= s_wdata[5:0]; fsh <= s_wdata[13:8]; mode <= s_wdata[16];
+                                  sinc_en <= s_wdata[17]; end
                     12'h020: coef_a      <= s_wdata;
                     12'h024: coef_blo    <= s_wdata;
                     12'h028: coef_bhi    <= s_wdata[15:0];
                     12'h02c: begin
-                        tab_sel <= s_wdata[1:0];
+                        // NOT s_wdata[2:0]: bit 2 is the REWIND flag and has been since
+                        // this register was defined. Taking [2:0] swallowed it, so every
+                        // table load addressed table 4 and the bench went 0/8192 on all
+                        // four real-geometry cases. The 5th table's select bit is bit 3.
+                        tab_sel <= {s_wdata[3], s_wdata[1:0]};
                         if (s_wdata[2]) tab_wptr <= 0;
                     end
                     12'h030: begin
                         tab_wdata <= s_wdata;
                         tab_waddr <= tab_wptr;
-                        tab_we    <= (4'd1 << tab_sel);
+                        tab_we    <= (5'd1 << tab_sel);
                         tab_wptr  <= tab_wptr + 1'b1;
                     end
                     default: ;
@@ -298,11 +311,11 @@ module sar_resample_v #(
                 12'h010: s_rdata <= out_base;
                 12'h014: s_rdata <= {27'd0, err_sat, err_align, err_bresp, err_rlast, err_extra};
                 12'h018: s_rdata <= {sn, qn};
-                12'h01c: s_rdata <= {15'd0, mode, 2'd0, fsh, 2'd0, sh};
+                12'h01c: s_rdata <= {14'd0, sinc_en, mode, 2'd0, fsh, 2'd0, sh};
                 12'h020: s_rdata <= coef_a;
                 12'h024: s_rdata <= coef_blo;
                 12'h028: s_rdata <= {16'd0, coef_bhi};
-                12'h02c: s_rdata <= {29'd0, 1'b0, tab_sel};
+                12'h02c: s_rdata <= {29'd0, tab_sel};
                 12'h030: s_rdata <= {{(32-TAB_AW){1'b0}}, tab_wptr};
                 default: s_rdata <= 32'd0;
             endcase

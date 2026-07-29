@@ -111,6 +111,8 @@ module tb_sar_resample;
     reg [31:0] eidx[0:(`NCASES*`MAXQ)-1];
     reg [31:0] ewq [0:(`NCASES*`MAXQ)-1];
     reg [8*16-1:0] names [0:`NCASES-1];
+    reg [31:0] sinctab [0:`SINC_PHASES*`SINC_TAPS-1];
+    integer use_sinc = 0, sk;
 
     // ---- DUT wires ----
     reg  [11:0] s_awaddr; reg s_awvalid; wire s_awready;
@@ -362,12 +364,17 @@ module tb_sar_resample;
     reg [31:0] qn, sn, md, shv, fshv;
 
     initial begin
+        if ($test$plusargs("SINC")) begin
+            use_sinc = 1;
+            $display("  SINC MODE: LCFG[17] set, 32-tap gather selected");
+        end
         $readmemh("rs_mem.hex", mem);
         $readmemh("rs_tab.hex", tab);
         $readmemh("rs_cfg.hex", cfg);
         $readmemh("rs_exp.hex", exp);
         $readmemh("rs_idx.hex", eidx);
         $readmemh("rs_wq.hex",  ewq);
+        if (use_sinc) $readmemh("rs_sinc.hex", sinctab);
         `CASE_NAMES
 
         s_awvalid = 0; s_wvalid = 0; s_arvalid = 0; s_awaddr = 0; s_wdata = 0; s_araddr = 0;
@@ -434,9 +441,17 @@ module tb_sar_resample;
                     lite_w(12'h030, tab[(c*4 + 3)*`MAXTAB + k]);
             end
 
+            // ---- sinc coefficient table: target 4, whose select bit is TAB_CTRL[3] ----
+            // (bit 2 is REWIND and predates the 5th table, so the select is split [1:0]+[3])
+            if (use_sinc) begin
+                lite_w(12'h02c, {28'd0, 1'b1, 1'b1, 2'd0});         // sel=4 + rewind
+                for (sk = 0; sk < `SINC_PHASES*`SINC_TAPS; sk = sk + 1)
+                    lite_w(12'h030, sinctab[sk]);
+            end
+
             // ---- per-line scalars ----
             lite_w(12'h018, {sn[15:0], qn[15:0]});                  // DIMS
-            lite_w(12'h01c, {15'd0, md[0], 2'd0, fshv[5:0], 2'd0, shv[5:0]});  // LCFG
+            lite_w(12'h01c, {14'd0, use_sinc[0], md[0], 2'd0, fshv[5:0], 2'd0, shv[5:0]});  // LCFG
             lite_w(12'h020, cfg[ci + 5]);                           // COEF_A
             lite_w(12'h024, cfg[ci + 6]);                           // COEF_BLO
             lite_w(12'h028, cfg[ci + 7]);                           // COEF_BHI

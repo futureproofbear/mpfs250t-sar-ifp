@@ -86,6 +86,7 @@ def u32(x):
 
 
 sh_notes = []
+SINC_EXPECT = False
 
 
 def pick_sh(unit, what):
@@ -268,7 +269,13 @@ def gather_sinc(src, idx, wq, sn, tab=None, taps=SINC_TAPS):
         if k < 0:
             out.append(0)
             continue
-        if k < -lo or k > sn - (taps + lo) - 1:
+        # window is [k+lo, k+lo+taps-1] = [k-15, k+16] for 32 taps, so it fits while
+        # k >= -lo AND k+lo+taps-1 <= sn-1, i.e. k <= sn-(taps+lo). The '-1' that used to be
+        # here excluded k = sn-(taps+lo) -- a window ending exactly on the last sample, which
+        # is legal. The standalone sinc bench never saw it because its vectors AND its
+        # expectations both came from this same rule; it only surfaced once sar_resample_v
+        # computed the bound independently and disagreed at exactly idx=4302.
+        if k < -lo or k > sn - (taps + lo):
             a, b = src[k], src[k + 1]
             ah, al = s16(a >> 16), s16(a & 0xFFFF)
             bh, bl = s16(b >> 16), s16(b & 0xFFFF)
@@ -341,7 +348,10 @@ def add_case(name, mode, sn, qn, sh, a, b, fsh, qtab, ts, inv, idx, wq, in_odd,
              inject, note=""):
     cid = len(CASES)
     src = source_line(cid, sn)
-    exp = gather(src, idx, wq)
+    # SINC_EXPECT is set by --sinc. The edge rule lives in gather_sinc(): windows that do not fit
+    # fall back to the 2-tap lerp, which is what the RTL does too (the sinc core stays silent and
+    # sar_resample_v selects the delayed lerp), so lerp and sinc runs stay directly comparable.
+    exp = gather_sinc(src, idx, wq, sn) if SINC_EXPECT else gather(src, idx, wq)
     CASES.append(dict(name=name, mode=mode, sn=sn, qn=qn, sh=sh, a=a, b=b, fsh=fsh,
                       qtab=qtab, ts=ts, inv=inv, idx=idx, wq=wq, src=src, exp=exp,
                       in_odd=in_odd, inject=inject, sat=False, note=note))
@@ -483,11 +493,17 @@ def main():
     ap.add_argument("--real", metavar="STAGE", nargs="?", const="../../host/jtag_stage_deci1",
                     help="emit ONE full-scale case from a staged scene instead of the small "
                          "suite (SN=4319, QN=8192 -- the geometry silicon actually runs)")
+    ap.add_argument("--sinc", action="store_true",
+                    help="expectations for the 32-TAP SINC path (LCFG[17]) instead of the 2-tap "
+                         "lerp, plus the polyphase coefficient table. Edge windows still fall back "
+                         "to the lerp, exactly as the RTL does, so the two runs are comparable.")
     ap.add_argument("--lines", default="0", help="comma-separated pulse indices, with --real. "
                     "MORE THAN ONE is the point: silicon arms 5634 DIFFERENT lines back-to-back "
                     "against ONE table load, and the bench had only ever re-armed the SAME line")
     a = ap.parse_args()
 
+    global SINC_EXPECT
+    SINC_EXPECT = a.sinc
     if a.real:
         # Full scale needs the arrays to fit the real dims; the small suite's 64-entry tables and
         # 1 KB source slot cannot hold a 4319-sample line or an 8192-entry query grid.
@@ -613,10 +629,15 @@ def finish(here):
     w("rs_idx.hex", "".join(f"{v:08x}\n" for v in eidx))
     w("rs_wq.hex", "".join(f"{v:08x}\n" for v in ewq))
     names = " \\\n".join(f'    names[{c}] = "{cs["name"]}";' for c, cs in enumerate(CASES))
+    # polyphase sinc coefficients, one 32-bit TAB_DATA word per tap (low half used)
+    st = sinc_table_q15()
+    w("rs_sinc.hex", "".join(f"{st[ph][tp] & 0xFFFF:08x}\n"
+                             for ph in range(SINC_PHASES) for tp in range(SINC_TAPS)))
     w("rs_dims.vh",
       f"`define NCASES {ncases}\n`define MAXQ {MAXQ}\n`define MAXTAB {MAXTAB}\n"
       f"`define CFGW {CFGW}\n`define MEM_BEATS {MEM_BEATS}\n"
       f"`define OUT_POISON 32'h{POISON_OUT:08x}\n"
+      f"`define SINC_TAPS {SINC_TAPS}\n`define SINC_PHASES {SINC_PHASES}\n"
       f"`define CASE_NAMES \\\n{names}\n")
 
     # ---- report ----

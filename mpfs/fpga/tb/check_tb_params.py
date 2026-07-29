@@ -48,6 +48,19 @@ REGISTRY = [
     ("sar_sinc32_gather.v", None,                 "tb/tb_sar_sinc32.v"),
 ]
 
+# WAIVERS. A core whose bench genuinely cannot run at silicon parameters, with the reason and what
+# retired the risk INSTEAD. A waiver still prints loudly on every run -- it is a visible debt, not
+# a pass. Adding one requires saying what the small run can and cannot establish; if you cannot
+# write that sentence, you do not have a waiver, you have an untested core.
+WAIVERS = {
+    "corner_turn_v":
+        "GRID 16 vs 8192 and T_LOG2 2 vs 7. A full-size frame is 8192x8192 tiles -- hours of "
+        "simulation per case, so the bench cannot run at silicon scale. Risk retired INSTEAD by an "
+        "end-to-end silicon result: 25.16 -> 18.45 s with the crop CRC bit-exact from a cold start. "
+        "What the small run establishes: tile sequencing, ragged edges, the re-arm path. What it "
+        "does NOT: anything that only appears past a few hundred tiles.",
+}
+
 # Parameters that are pure plumbing: a mismatch cannot change functional behaviour, only the
 # testbench's own convenience. Keep this list SHORT and justify every entry.
 IGNORE = {"AXI_ID_W"}
@@ -141,6 +154,14 @@ def check_one(rtl_name, wrapper_name, tb_name):
             bad.append((k, b + " (?)", s))
         elif s != b:
             bad.append((k, b, s))
+
+    if bad and module in WAIVERS:
+        print(f"  WAIVED {module}  (bench {tb_name}  vs  silicon {src})")
+        print(f"        {'parameter':<14}{'BENCH':>10}{'SILICON':>10}")
+        for k, b, s in bad:
+            print(f"        {k:<14}{b:>10}{s:>10}")
+        print(f"        reason: {WAIVERS[module]}")
+        return True
 
     if bad:
         print(f"  FAIL {module}  (bench {tb_name}  vs  silicon {src})")

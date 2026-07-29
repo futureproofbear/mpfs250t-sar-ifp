@@ -831,6 +831,62 @@ module sar_resample_v #(
 
     wire [31:0] g_out = g4_val ? {g4_hi, g4_lo} : 32'd0;   // idx<0 -> zero fill
 
+    // =============================================================================================
+    // 32-TAP SINC GATHER (LCFG[17]).  Runs BESIDE the lerp, not instead of it: both are in the
+    // bitstream so they can be A/B'd on one board run, and sinc_en resets LOW so a cold boot gets
+    // exactly today's silicon-verified behaviour.
+    //
+    // LATENCY. The sinc core is 8 cycles from g_v (v1, v2, vv[0..4], o_v); the lerp is 4 (g1..g4).
+    // EDGE queries -- window not wholly inside [0, SN-1], and idx<0 zero fills -- are NOT answered
+    // by the sinc core, so they still come from the lerp. To keep ONE output per query IN ORDER,
+    // the lerp result is delayed by 4 to meet the sinc result, and the edge flag is delayed by 8
+    // from g_v so the select lands on the right query. Get this wrong and the line comes out
+    // misordered or short, which is a hang or a truncated row rather than a wrong value.
+    // =============================================================================================
+    localparam integer S_TAPS = 32;
+    localparam integer S_HALF = S_TAPS/2 - 1;                 // 15
+
+    // window wholly in range?  idx >= 15  AND  idx + 16 <= SN-1
+    wire [15:0] cf_idx16 = {{(16-IDX_W){1'b0}}, cf_idx};
+    wire        s_edge   = ~cf_q[CF_W-1]                                   // idx<0: zero fill
+                         | (cf_idx16 < S_HALF[15:0])
+                         | (cf_idx16 > (r_sn - (S_TAPS - S_HALF)));        // > SN-17
+
+    wire        s_ov;
+    wire [31:0] s_odata;
+
+    sar_sinc32_gather #(.IDX_W(IDX_W), .WQ_W(WQ_W)) u_sinc (
+        .clk(clk), .resetn(resetn),
+        .ct_we(tab_we[4]), .ct_data(tab_wdata[15:0]), .ct_rewind(1'b0),
+        // one 64-bit beat carries two consecutive samples -> both write ports, different banks
+        .sw_we(lo_ok),  .sw_idx(n_lo[IDX_W-1:0]),  .sw_data(m_rdata[31:0]),
+        .sw2_we(hi_ok), .sw2_idx(n_hi[IDX_W-1:0]), .sw2_data(m_rdata[63:32]),
+        .en(gen), .g_v(g0_v), .g_idx(cf_idx), .g_wq(cf_q[WQ_W-1:0]), .g_edge(s_edge),
+        .o_v(s_ov), .o_data(s_odata)
+    );
+
+    // lerp delayed by 4 (4 -> 8), and the edge flag delayed by 8 from g0_v
+    reg  [3:0]  d_v;
+    reg  [31:0] d_out [0:3];
+    reg  [7:0]  e_pipe;
+    integer di;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            d_v <= 4'd0; e_pipe <= 8'd0;
+            for (di = 0; di < 4; di = di + 1) d_out[di] <= 32'd0;
+        end else if (gen) begin
+            d_v      <= {d_v[2:0], g4_v};
+            d_out[0] <= g_out;
+            for (di = 1; di < 4; di = di + 1) d_out[di] <= d_out[di-1];
+            e_pipe   <= {e_pipe[6:0], s_edge & g0_v};
+        end
+    end
+
+    // ONE output per query either way: in sinc mode the valid comes from the DELAYED LERP (which
+    // is asserted for every query, edge or not); only the DATA is switched.
+    wire        gsel_v   = sinc_en ? d_v[3] : g4_v;
+    wire [31:0] gsel_out = sinc_en ? (e_pipe[7] ? d_out[3] : s_odata) : g_out;
+
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin gi <= 0; g_left <= 16'd0; end
         // load from the CONTROL register qn, not r_qn: at the start_pulse cycle state is still
@@ -854,16 +910,16 @@ module sar_resample_v #(
 
     // The push must be evaluated in the SAME cycle as the second output of the pair -- a
     // registered push flag would write one cycle later, when g_out has already moved on.
-    wire wf_do = gen & g4_v & g_word_v;
+    wire wf_do = gen & gsel_v & g_word_v;
     always @(posedge clk or negedge resetn) begin
         if (!resetn)              begin g_word <= 32'd0; g_word_v <= 1'b0; end
         else if (state == T_IDLE) begin g_word_v <= 1'b0; end
-        else if (gen && g4_v) begin
-            if (!g_word_v) begin g_word <= g_out; g_word_v <= 1'b1; end
+        else if (gen && gsel_v) begin
+            if (!g_word_v) begin g_word <= gsel_out; g_word_v <= 1'b1; end
             else                 g_word_v <= 1'b0;
         end
     end
-    always @(posedge clk) if (wf_do) wf_mem[wf_wptr[WF_AW-1:0]] <= {g_out, g_word};
+    always @(posedge clk) if (wf_do) wf_mem[wf_wptr[WF_AW-1:0]] <= {gsel_out, g_word};
     always @(posedge clk or negedge resetn) begin
         if (!resetn)                    wf_wptr <= 0;
         else if (state == T_IDLE)       wf_wptr <= 0;
@@ -996,7 +1052,13 @@ module sar_resample_v #(
     // ---------------------------------------------------------------------------------
     // top-level sequencer
     // ---------------------------------------------------------------------------------
+    // The 4-deep alignment delay and the sinc core's own 8 stages are IN FLIGHT after g4_v
+    // clears, so the drain has to wait for them too -- otherwise the line is declared done
+    // while its last outputs are still in the pipe. d_v covers the delay in both modes;
+    // s_ov covers the sinc core. Included unconditionally: in lerp mode they simply drain
+    // a few cycles later, which costs nothing and removes a mode-dependent drain rule.
     wire gather_drained = (g_left == 16'd0) && !g0_v && !g1_v && !g2_v && !g3_v && !g4_v
+                          && (d_v == 4'd0) && !s_ov
                           && !g_word_v && wf_empty && !wsv;
 
     always @(posedge clk or negedge resetn) begin

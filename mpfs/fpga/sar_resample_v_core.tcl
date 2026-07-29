@@ -9,6 +9,10 @@
 source [file join [file dirname [info script]] lib sar_env.tcl]   ;# SAR_ROOT/SAR_FPGA + tool paths
 set here "$SAR_FPGA"
 
+# sar_sinc32_gather is a SUBMODULE of sar_resample_v (the LCFG[17] 32-tap path), so it has to be
+# linked into the project or synthesis fails on a missing module. Listed before its parent for
+# readability only -- build_design_hierarchy resolves the order.
+catch { create_links -hdl_source "$here/sar_sinc32_gather.v" }
 catch { create_links -hdl_source "$here/sar_resample_v.v" }
 catch { create_links -hdl_source "$here/sar_resample_v_top.v" }
 build_design_hierarchy

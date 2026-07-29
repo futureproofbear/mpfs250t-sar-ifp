@@ -194,11 +194,14 @@ def lagrange_taps_q15(w):
     return [iround(x * (1 << 15)) for x in c]
 
 
-SINC8_TAPS   = 8       # taps at idx-3 .. idx+4
-SINC8_PHASES = 256     # mu quantisation: 1/512 sample max delay error, about -46 dB
+SINC_TAPS    = 24      # taps at idx-11 .. idx+12. 24 chosen 2026-07-29 from measured
+                       # error: +6.3 dB over the lerp at the shipping 0.978 Nyquist and
+                       # +22 dB at 0.815, for 12-way banking and 48 MACs/stage -- a far
+                       # smaller perturbation than 40 taps to a design with 2.6% slack.
+SINC_PHASES  = 256     # measured: 1024 phases buys only ~0.5 dB, so 256 is enough
 
 
-def sinc8_table_q15(phases=SINC8_PHASES, taps=SINC8_TAPS):
+def sinc_table_q15(phases=SINC_PHASES, taps=SINC_TAPS):
     """Polyphase truncated-sinc coefficients, Q15, [phase][tap].
 
     SCENE-INDEPENDENT -- these depend only on the fractional delay, never on geometry, so unlike
@@ -220,34 +223,41 @@ def sinc8_table_q15(phases=SINC8_PHASES, taps=SINC8_TAPS):
              F(math.sin(math.pi * float(mu - (lo + k)))) / (F(math.pi) * (mu - (lo + k)))
              for k in range(taps)]
         s = sum(c)
-        tab.append([iround(x / s * (1 << 15)) for x in c])   # ONE rounding, after normalising
+        q = [iround(x / s * (1 << 15)) for x in c]
+        # FORCE the sum to exactly 2^15. Rounding each tap independently leaves a residual that
+        # grows with tap count -- harmless at 8 taps, but at 24 it left 17 of 256 phases more than
+        # 2 LSB off unity, which is a per-phase GAIN RIPPLE, i.e. amplitude modulation across the
+        # image that no amount of downstream scaling removes. Push the residual onto the largest
+        # tap, where it is the smallest relative perturbation. Free: this is a table, not logic.
+        q[max(range(len(q)), key=lambda i: abs(q[i]))] += (1 << 15) - sum(q)
+        tab.append(q)
     return tab
 
 
-def gather_sinc8(src, idx, wq, sn, tab=None):
-    """out = 8-tap polyphase sinc. Phase = wq >> 7 (top 8 bits of the Q15 fraction).
+def gather_sinc(src, idx, wq, sn, tab=None, taps=SINC_TAPS):
+    """out = N-tap polyphase sinc. Phase index = (wq * phases) >> 15.
 
-    EDGE RULE, same principle as gather_cubic: 8 taps need idx-3 .. idx+4, so full width is used
-    only for 3 <= idx <= sn-5 and the line's first/last few brackets fall back to the 2-tap lerp.
+    EDGE RULE, same principle as gather_cubic: N taps need idx+lo .. idx+lo+N-1, so full width
+    is used only where the whole span is in range and the line's first/last few brackets fall back to the 2-tap lerp.
     This keeps the SET OF NON-ZERO OUTPUTS IDENTICAL to the linear path, so an A/B against the
     shipping kernel is a like-for-like value comparison and not a support change."""
     if tab is None:
-        tab = sinc8_table_q15()
-    lo = -(SINC8_TAPS // 2 - 1)
+        tab = sinc_table_q15(taps=taps)
+    lo = -(taps // 2 - 1)
     out = []
     for k, w in zip(idx, wq):
         if k < 0:
             out.append(0)
             continue
-        if k < -lo or k > sn - (SINC8_TAPS + lo) - 1:
+        if k < -lo or k > sn - (taps + lo) - 1:
             a, b = src[k], src[k + 1]
             ah, al = s16(a >> 16), s16(a & 0xFFFF)
             bh, bl = s16(b >> 16), s16(b & 0xFFFF)
             rh = ah + (((bh - ah) * w) >> 15)
             rl = al + (((bl - al) * w) >> 15)
         else:
-            c = tab[w >> 7]
-            xs = [src[k + lo + j] for j in range(SINC8_TAPS)]
+            c = tab[(w * len(tab)) >> 15]
+            xs = [src[k + lo + j] for j in range(taps)]
             hi = sum(ci * s16(x >> 16) for ci, x in zip(c, xs)) >> 15
             loo = sum(ci * s16(x & 0xFFFF) for ci, x in zip(c, xs)) >> 15
             rh = -32768 if hi < -32768 else (32767 if hi > 32767 else hi)

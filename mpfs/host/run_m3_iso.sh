@@ -80,6 +80,19 @@ set {unsigned int}0xB005913C = $DUALFFT
 set {unsigned int}0xB005912C = $RWRKNW
 set {unsigned int}0xB0059140 = $FFTBLK
 set {unsigned int}0xB0059144 = $WORKBUF"
+  # XPOKE: generic "addr=value[,addr=value...]" escape hatch for a knob this runner does not know
+  # about yet, so a one-off debug word does not need an edit here (and a debug-only knob does not
+  # need a named env var forever). Example, stop the frame after pass 1:
+  #   XPOKE=0xB0059160=0x50315354
+  if [ -n "${XPOKE:-}" ]; then
+    OLDIFS="$IFS"; IFS=','
+    for kv in $XPOKE; do
+      FFTSET="$FFTSET
+set {unsigned int}${kv%%=*} = ${kv#*=}"
+    done
+    IFS="$OLDIFS"
+    echo ">>> XPOKE: $XPOKE"
+  fi
   FFTECHO='printf ">>> fft_mode=%u detect_mode=%u gather_mode=%u cgen=0x%08x dualfft=0x%08x rwrk=0x%08x\\n", *(unsigned int*)0xB0059110, *(unsigned int*)0xB0059118, *(unsigned int*)0xB005911C, *(unsigned int*)0xB0059138, *(unsigned int*)0xB005913C, *(unsigned int*)0xB005912C'
 fi
 

@@ -405,6 +405,11 @@ static inline uint32_t fft_seg(uint32_t r0, uint32_t r1, uint32_t nch)
  *
  * Must DIVIDE seg so the mapping tiles the frame exactly; anything else falls back to the default.
  */
+/* Debug-only: stop the frame after pass 1 so SCRATCH can be dumped and diffed against the
+ * bit-accurate model VALUE BY VALUE. Free word after the RSVDBG block (0xB0059150..0x15C).
+ * Fail-safe: only the exact magic acts, so cold-boot DDR means normal operation. */
+#define SAR_P1STOP_ADDR  0xB0059160u
+#define SAR_P1STOP_MAGIC 0x50315354u   /* 'P1ST' */
 #define SAR_FFTBLK_ADDR 0xB0059140u        /* free: 0x13C = SAR_DUALFFT is the last one used */
 #define SAR_FFTBLK_DEF  64u                /* silicon-measured best; 0/garbage/non-divisor -> this */
 static inline uint32_t fft_blk(uint32_t seg)
@@ -1105,7 +1110,13 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
               /* the kernel's whole per-line CPU cost: three scalars, in double (U54 is RV64GC).
                * kr[i,j] = 2*pr[i]/C * (f0[i] + j*df[i]) = x0 + j*dx -- the same uniform mapping
                * sar_coeffs_pass1() uses, kept in double here because A/B are exact integers. */
-              double ag = 2.0 * (double)g->pr[i] / (double)SAR_C_LIGHT;
+              /* NOT SAR_C_LIGHT: that is a FLOAT literal (299792458.0f), so it has already been
+               * rounded to 299792448 before any cast to double can help -- a 3.34e-8 relative
+               * error. It survives into A and, through the near-cancellation in (kr_off - x0),
+               * lands as 1.49e-5 in B: a uniform 0.0119-sample range shift. Measured against the
+               * board on 2026-07-29 it was the whole difference between a 55% and a 99.2%
+               * value-level match on line 0. Small, but there is no reason to carry it. */
+              double ag = 2.0 * (double)g->pr[i] / 299792458.0;
               double x0 = ag * (double)g->f0[i], dx = ag * (double)g->df[i];
               if (i == 0u) {
                   /* publish line 0's scalars so the first board run CHECKS this arithmetic against
@@ -1162,6 +1173,17 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
         b ^= 1;
     }
     RPROF[5] = readmtime() - sar_resample_ts[0];
+    /* SAR_P1STOP: abort the frame right here, with SCRATCH still holding PURE pass-1 output.
+     * FFT-1 writes BUF_SCRATCH (fft1_gather_pass, dst=BUF_SCRATCH), so after a normal PIPE the
+     * pass-1 result is long gone and the only thing left to judge is the final image -- which is
+     * scale-, phase- and orientation-invariant and hides exactly the kind of fault being hunted.
+     * Returning 0 aborts the pipeline (the caller reports a stage failure), which is the POINT:
+     * nothing downstream runs, so SCRATCH survives for a value-level dump. The non-zero mailbox
+     * result is expected and is not a fault. */
+    if (*(volatile uint32_t *)(uintptr_t)SAR_P1STOP_ADDR == SAR_P1STOP_MAGIC) {
+        flush_l2_cache(1u);                 /* publish: the host reads DDR, FIC_0 is non-coherent */
+        return 0;
+    }
     if (rsv_on) {
         /* sticky and frame-level -- it cannot say WHICH line, only that one of them tripped */
         *(volatile uint32_t *)(uintptr_t)SAR_RSVSTAT_ADDR =

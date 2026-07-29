@@ -97,9 +97,15 @@ what later makes on-fabric coefficient generation possible.
 
 ---
 
-# ① Range resample — drawn
-![w:1120](diagrams/fig-sar-range-resamp.drawio.svg)
+# The PFA geometry — why there are two resamples
 
+![w:1080](diagrams/fig-sar-kspace.drawio.svg)
+
+---
+
+# ① Range resample — drawn
+
+![w:1120](diagrams/fig-sar-range-resamp.drawio.svg)
 Each pulse carries its own grid; the output grid is shared. `mu` is the fractional position of the
 query between two source samples — and **how well a kernel estimates the signal at that fractional
 point is the entire interpolation question**, which is what tap count and scalloping measure.

@@ -754,6 +754,145 @@ def fig_sar_azimuth_resamp(out):
     return d.write(out / "fig-sar-azimuth-resamp.drawio.svg")
 
 
+def fig_sar_kspace(out):
+    """The PFA geometry: collected k-space is POLAR, the FFT needs it RECTANGULAR.
+
+    This is the figure the two 1-D resample slides are components of -- it says WHY there are two
+    of them. Standard polar-format geometry (cf. Doerry, Sandia, 'Basics of Polar Format algorithm
+    for processing SAR images'); drawn from the geometry rather than traced from the paper, which
+    is not in this repo."""
+    d = Diagram(1180, 560, "Why two resamples: polar collection, rectangular transform",
+                draw_title=False)
+    d.note("t", 24, 20, 1130, 48,
+           "A SAR collection samples k-space on a POLAR grid: each pulse is an arc at constant "
+           "aspect angle, each sample along\na pulse steps outward in range frequency. The 2-D FFT "
+           "is only valid on a UNIFORM RECTANGULAR grid. Everything\nin stages 1-2 exists to get "
+           "from the left picture to the right one.", fs=12)
+
+    d.note("lp", 120, 96, 300, 24, "COLLECTED  --  polar (kx, ky)", fs=13)
+    d.note("rp", 760, 84, 300, 24, "RESAMPLED  --  rectangular", fs=13)
+    d.box("p0", 127.7, 196.1, 7, 7, "", "mem")
+    d.box("p1", 119.5, 177.8, 7, 7, "", "mem")
+    d.box("p2", 111.4, 159.5, 7, 7, "", "mem")
+    d.box("p3", 103.2, 141.3, 7, 7, "", "mem")
+    d.box("p4", 95.1, 123.0, 7, 7, "", "mem")
+    d.box("p5", 86.9, 104.8, 7, 7, "", "mem")
+    d.box("p6", 157.1, 184.8, 7, 7, "", "mem")
+    d.box("p7", 150.9, 165.7, 7, 7, "", "mem")
+    d.box("p8", 144.7, 146.7, 7, 7, "", "mem")
+    d.box("p9", 138.5, 127.7, 7, 7, "", "mem")
+    d.box("p10", 132.3, 108.7, 7, 7, "", "mem")
+    d.box("p11", 126.1, 89.7, 7, 7, "", "mem")
+    d.box("p12", 187.5, 176.6, 7, 7, "", "mem")
+    d.box("p13", 183.3, 157.0, 7, 7, "", "mem")
+    d.box("p14", 179.1, 137.5, 7, 7, "", "mem")
+    d.box("p15", 175.0, 117.9, 7, 7, "", "mem")
+    d.box("p16", 170.8, 98.3, 7, 7, "", "mem")
+    d.box("p17", 166.6, 78.8, 7, 7, "", "mem")
+    d.box("p18", 218.6, 171.7, 7, 7, "", "mem")
+    d.box("p19", 216.5, 151.8, 7, 7, "", "mem")
+    d.box("p20", 214.4, 131.9, 7, 7, "", "mem")
+    d.box("p21", 212.3, 112.0, 7, 7, "", "mem")
+    d.box("p22", 210.2, 92.1, 7, 7, "", "mem")
+    d.box("p23", 208.1, 72.2, 7, 7, "", "mem")
+    d.box("p24", 250.0, 170.0, 7, 7, "", "mem")
+    d.box("p25", 250.0, 150.0, 7, 7, "", "mem")
+    d.box("p26", 250.0, 130.0, 7, 7, "", "mem")
+    d.box("p27", 250.0, 110.0, 7, 7, "", "mem")
+    d.box("p28", 250.0, 90.0, 7, 7, "", "mem")
+    d.box("p29", 250.0, 70.0, 7, 7, "", "mem")
+    d.box("p30", 281.4, 171.7, 7, 7, "", "mem")
+    d.box("p31", 283.5, 151.8, 7, 7, "", "mem")
+    d.box("p32", 285.6, 131.9, 7, 7, "", "mem")
+    d.box("p33", 287.7, 112.0, 7, 7, "", "mem")
+    d.box("p34", 289.8, 92.1, 7, 7, "", "mem")
+    d.box("p35", 291.9, 72.2, 7, 7, "", "mem")
+    d.box("p36", 312.5, 176.6, 7, 7, "", "mem")
+    d.box("p37", 316.7, 157.0, 7, 7, "", "mem")
+    d.box("p38", 320.9, 137.5, 7, 7, "", "mem")
+    d.box("p39", 325.0, 117.9, 7, 7, "", "mem")
+    d.box("p40", 329.2, 98.3, 7, 7, "", "mem")
+    d.box("p41", 333.4, 78.8, 7, 7, "", "mem")
+    d.box("p42", 342.9, 184.8, 7, 7, "", "mem")
+    d.box("p43", 349.1, 165.7, 7, 7, "", "mem")
+    d.box("p44", 355.3, 146.7, 7, 7, "", "mem")
+    d.box("p45", 361.5, 127.7, 7, 7, "", "mem")
+    d.box("p46", 367.7, 108.7, 7, 7, "", "mem")
+    d.box("p47", 373.9, 89.7, 7, 7, "", "mem")
+    d.box("p48", 372.3, 196.1, 7, 7, "", "mem")
+    d.box("p49", 380.5, 177.8, 7, 7, "", "mem")
+    d.box("p50", 388.6, 159.5, 7, 7, "", "mem")
+    d.box("p51", 396.8, 141.3, 7, 7, "", "mem")
+    d.box("p52", 404.9, 123.0, 7, 7, "", "mem")
+    d.box("p53", 413.1, 104.8, 7, 7, "", "mem")
+    d.box("r0", 700.0, 120.0, 7, 7, "", "ip")
+    d.box("r1", 700.0, 154.0, 7, 7, "", "ip")
+    d.box("r2", 700.0, 188.0, 7, 7, "", "ip")
+    d.box("r3", 700.0, 222.0, 7, 7, "", "ip")
+    d.box("r4", 700.0, 256.0, 7, 7, "", "ip")
+    d.box("r5", 700.0, 290.0, 7, 7, "", "ip")
+    d.box("r6", 746.0, 120.0, 7, 7, "", "ip")
+    d.box("r7", 746.0, 154.0, 7, 7, "", "ip")
+    d.box("r8", 746.0, 188.0, 7, 7, "", "ip")
+    d.box("r9", 746.0, 222.0, 7, 7, "", "ip")
+    d.box("r10", 746.0, 256.0, 7, 7, "", "ip")
+    d.box("r11", 746.0, 290.0, 7, 7, "", "ip")
+    d.box("r12", 792.0, 120.0, 7, 7, "", "ip")
+    d.box("r13", 792.0, 154.0, 7, 7, "", "ip")
+    d.box("r14", 792.0, 188.0, 7, 7, "", "ip")
+    d.box("r15", 792.0, 222.0, 7, 7, "", "ip")
+    d.box("r16", 792.0, 256.0, 7, 7, "", "ip")
+    d.box("r17", 792.0, 290.0, 7, 7, "", "ip")
+    d.box("r18", 838.0, 120.0, 7, 7, "", "ip")
+    d.box("r19", 838.0, 154.0, 7, 7, "", "ip")
+    d.box("r20", 838.0, 188.0, 7, 7, "", "ip")
+    d.box("r21", 838.0, 222.0, 7, 7, "", "ip")
+    d.box("r22", 838.0, 256.0, 7, 7, "", "ip")
+    d.box("r23", 838.0, 290.0, 7, 7, "", "ip")
+    d.box("r24", 884.0, 120.0, 7, 7, "", "ip")
+    d.box("r25", 884.0, 154.0, 7, 7, "", "ip")
+    d.box("r26", 884.0, 188.0, 7, 7, "", "ip")
+    d.box("r27", 884.0, 222.0, 7, 7, "", "ip")
+    d.box("r28", 884.0, 256.0, 7, 7, "", "ip")
+    d.box("r29", 884.0, 290.0, 7, 7, "", "ip")
+    d.box("r30", 930.0, 120.0, 7, 7, "", "ip")
+    d.box("r31", 930.0, 154.0, 7, 7, "", "ip")
+    d.box("r32", 930.0, 188.0, 7, 7, "", "ip")
+    d.box("r33", 930.0, 222.0, 7, 7, "", "ip")
+    d.box("r34", 930.0, 256.0, 7, 7, "", "ip")
+    d.box("r35", 930.0, 290.0, 7, 7, "", "ip")
+    d.box("r36", 976.0, 120.0, 7, 7, "", "ip")
+    d.box("r37", 976.0, 154.0, 7, 7, "", "ip")
+    d.box("r38", 976.0, 188.0, 7, 7, "", "ip")
+    d.box("r39", 976.0, 222.0, 7, 7, "", "ip")
+    d.box("r40", 976.0, 256.0, 7, 7, "", "ip")
+    d.box("r41", 976.0, 290.0, 7, 7, "", "ip")
+    d.box("r42", 1022.0, 120.0, 7, 7, "", "ip")
+    d.box("r43", 1022.0, 154.0, 7, 7, "", "ip")
+    d.box("r44", 1022.0, 188.0, 7, 7, "", "ip")
+    d.box("r45", 1022.0, 222.0, 7, 7, "", "ip")
+    d.box("r46", 1022.0, 256.0, 7, 7, "", "ip")
+    d.box("r47", 1022.0, 290.0, 7, 7, "", "ip")
+    d.box("r48", 1068.0, 120.0, 7, 7, "", "ip")
+    d.box("r49", 1068.0, 154.0, 7, 7, "", "ip")
+    d.box("r50", 1068.0, 188.0, 7, 7, "", "ip")
+    d.box("r51", 1068.0, 222.0, 7, 7, "", "ip")
+    d.box("r52", 1068.0, 256.0, 7, 7, "", "ip")
+    d.box("r53", 1068.0, 290.0, 7, 7, "", "ip")
+    d.note("a1", 470, 250, 190, 60,
+           "1  range resample\n     (radial, per pulse)\n2  azimuth resample\n     (across pulses)", fs=12)
+
+    d.note("n1", 60, 470, 380, 76,
+           "Radial spacing is set by df and the pulse's own\nx0 -- which differ pulse to pulse, so "
+           "the arcs\nare neither concentric in index nor evenly\nspaced. Hence a resample, not a "
+           "reindex.", fs=11)
+    d.note("n2", 700, 350, 420, 76,
+           "Uniform in both axes, so a separable 2-D FFT applies\nand the hardware can do two 1-D "
+           "passes with a\ntranspose between. The corner-turn between the\npasses exists for "
+           "exactly this reason.", fs=11)
+    return d.write(out / "fig-sar-kspace.drawio.svg")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
@@ -771,7 +910,7 @@ def main():
     for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa, fig_python,
                fig_fabric, fig_dataflow, fig_timing, fig_bug,
                fig_sar_python, fig_sar_fabric, fig_sar_dataflow,
-               fig_sar_range_resamp, fig_sar_azimuth_resamp):
+               fig_sar_range_resamp, fig_sar_azimuth_resamp, fig_sar_kspace):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()

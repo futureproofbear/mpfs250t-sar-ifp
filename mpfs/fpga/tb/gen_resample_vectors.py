@@ -173,6 +173,57 @@ def gather(src, idx, wq):
     return out
 
 
+def lagrange_taps_q15(w):
+    """4-point cubic Lagrange weights at fractional delay mu = w/32768, returned in Q15.
+
+    THE FIXED-POINT CONTRACT the RTL must implement. Taps sit at idx-1, idx, idx+1, idx+2:
+
+        L(-1) = -mu (mu-1)(mu-2) / 6        L(0)  =  (mu+1)(mu-1)(mu-2) / 2
+        L(+1) = -(mu+1) mu (mu-2) / 2       L(+2) =  (mu+1) mu (mu-1) / 6
+
+    Exact rational throughout, then ONE rounding to Q15 per tap -- not a chain of roundings --
+    so the model is reproducible and the RTL has an unambiguous target. Weights are in about
+    [-0.13, 1.13], so Q15 signed holds them with room; the sum is exactly 1.0 in exact
+    arithmetic and within a few LSB after rounding, which is what stops a DC gain error.
+    """
+    mu = F(w, 1 << 15)
+    c = (-mu * (mu - 1) * (mu - 2) / 6,
+         (mu + 1) * (mu - 1) * (mu - 2) / 2,
+         -(mu + 1) * mu * (mu - 2) / 2,
+         (mu + 1) * mu * (mu - 1) / 6)
+    return [iround(x * (1 << 15)) for x in c]
+
+
+def gather_cubic(src, idx, wq, sn):
+    """out = 4-tap cubic Lagrange. idx<0 -> zero fill, exactly as linear.
+
+    EDGE RULE, chosen deliberately: cubic needs idx-1 and idx+2, so it is only applied when
+    1 <= idx <= sn-3. Outside that -- the first and last bracket of the line -- it falls back to
+    the 2-tap lerp. That keeps the SET OF NON-ZERO OUTPUTS IDENTICAL to the linear path, so the
+    zero-fill pattern is unchanged and the two interpolators stay directly comparable. Zeroing
+    the edges instead would change the support and confound every comparison."""
+    out = []
+    for k, w in zip(idx, wq):
+        if k < 0:
+            out.append(0)
+            continue
+        if k < 1 or k > sn - 3:
+            a, b = src[k], src[k + 1]                      # linear fallback at the edges
+            ah, al = s16(a >> 16), s16(a & 0xFFFF)
+            bh, bl = s16(b >> 16), s16(b & 0xFFFF)
+            rh = ah + (((bh - ah) * w) >> 15)
+            rl = al + (((bl - al) * w) >> 15)
+        else:
+            c = lagrange_taps_q15(w)
+            xs = [src[k - 1], src[k], src[k + 1], src[k + 2]]
+            hi = sum(ci * s16(x >> 16) for ci, x in zip(c, xs)) >> 15
+            lo = sum(ci * s16(x & 0xFFFF) for ci, x in zip(c, xs)) >> 15
+            rh = -32768 if hi < -32768 else (32767 if hi > 32767 else hi)
+            rl = -32768 if lo < -32768 else (32767 if lo > 32767 else lo)
+        out.append(((rh & 0xFFFF) << 16) | (rl & 0xFFFF))
+    return out
+
+
 # ------------------------------------------------------------------ source samples
 def source_line(cid, sn):
     """Adversarial source: all four sign combinations plus the int16 extremes."""

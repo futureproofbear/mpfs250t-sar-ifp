@@ -18,6 +18,11 @@
 //
 //     base = idx - 15,   r = base[4:0],   A = base >> 5
 //
+// NOTE the bank DEPTH must exceed ceil(N/32) by at least one row, because the window reaches
+// past the end of the line and A+1 is issued for banks below the rotation point. Headroom does
+// NOT remove the edge fallback: that exists because the SAMPLES do not exist outside [0, N-1],
+// which no amount of buffer fixes.
+//
 // then bank b holds the window sample at address A + (b < r), and the tap that sample belongs to
 // is t = (b - r) mod 32. So the read is a per-bank address that is one of two values, and the
 // tap ordering is a BARREL ROTATION of the bank outputs by r. Both are cheap; the rotation is
@@ -38,7 +43,17 @@ module sar_sinc32_gather #(
     parameter integer LOG2T   = 5,         // log2(TAPS)
     parameter integer PHASES  = 256,
     parameter integer LOG2P   = 8,
-    parameter integer BANK_AW = 8,         // 256 entries/bank x 32 banks = 8192 samples
+    parameter integer BANK_AW = 9,         // 512 entries/bank x 32 banks = 16384 samples
+                                           // HEADROOM, and it costs nothing. A PolarFire LSRAM is
+                                           // 20 kbit, so 512x32 = 16 kbit still fits ONE block per
+                                           // bank -- the same 32 blocks as 256x32. Sized at 8192
+                                           // it exactly fitted NDSU's N=8192 line with zero slack,
+                                           // and the window (idx-15 .. idx+16) then computes a
+                                           // read address of baseA+1 = 256, one past an 8-bit bank
+                                           // address, which WRAPS to row 0. It was harmless only
+                                           // because g_edge gates the output -- an implicit
+                                           // invariant no one had written down. With 9 bits the
+                                           // address cannot wrap for any N <= 16352.
     parameter integer IDX_W   = 14,
     parameter integer WQ_W    = 15
 )(

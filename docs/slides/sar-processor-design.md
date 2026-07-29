@@ -64,9 +64,7 @@ The engineering goal is therefore *fewer passes over the data*, not faster maths
 
 # Part 2 — The Python reference pipeline
 
-<!-- TODO(diagram): fig-sar-python.drawio.svg -- CPHD -> geometry -> range resample ->
-     azimuth resample -> window -> 2-D FFT -> detect -> GeoTIFF, with the array shape
-     annotated on each arrow (M x N -> M x Np -> Mp x Np -> ...). -->
+![w:1150](diagrams/fig-sar-python.drawio.svg)
 
 `src/form_image_pfa.py` — the **Polar Format Algorithm** (PFA), the correctness reference for
 everything that follows.
@@ -135,8 +133,7 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 # Part 3 — Mapping onto MPFS250T fabric
 
-<!-- TODO(diagram): fig-sar-fabric.drawio.svg -- MSS (4x U54) | FIC_0 64-bit | DIC/CIC
-     interconnect | RES, CT, FEED/CoreFFT/UNLD x2, COEFG | DDR with the buffer map. -->
+![w:1150](diagrams/fig-sar-fabric.drawio.svg)
 
 Two compute domains, one narrow bridge:
 
@@ -170,8 +167,7 @@ transform *t* while the feeder pulls *t+1* over the shared interconnect, CoreFFT
 
 # Dataflow — one frame
 
-<!-- TODO(diagram): fig-sar-dataflow.drawio.svg -- swimlane per buffer, arrows annotated
-     with bytes moved and elapsed time; mark the fused and overlapped stages. -->
+![w:1150](diagrams/fig-sar-dataflow.drawio.svg)
 
 ```
 SIG ──① range gather (per pulse, 5634×)──► SCRATCH        3.74 s

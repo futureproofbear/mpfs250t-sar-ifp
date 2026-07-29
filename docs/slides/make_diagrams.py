@@ -552,6 +552,120 @@ def fig_arch_pipeline(out):
     return d.write(out / "sar_pipeline.drawio.svg")
 
 
+# ---------------------------------------------------------------------------------------------
+# Figures for docs/slides/sar-processor-design.md. Kept in this generator rather than authored as
+# loose SVG so the rendered picture and the embedded draw.io XML can never disagree.
+# ---------------------------------------------------------------------------------------------
+def fig_sar_python(out):
+    """Part 2 -- the Python reference pipeline, with the mathematics of each stage."""
+    d = Diagram(1180, 470, "Python reference pipeline (PFA) -- stage mathematics",
+                draw_title=False)
+    d.box("cphd", 24, 150, 140, 78, "CPHD\nphase history\nM x N complex", "host")
+    d.box("geo", 24, 262, 140, 68, "geometry\nf0, df, pr, tan_s", "host")
+    d.box("r1", 196, 150, 180, 78,
+          "1. range resample\nkr = 2pr/c (f0 + j df)\nt = (KR - x0)/dx", "fab")
+    d.box("r2", 408, 150, 180, 78,
+          "2. azimuth resample\nu = KC / kr\nmerge scan on tan_s", "fab")
+    d.box("w", 620, 150, 150, 78,
+          "3. window\nw[r,c] = wr[r] wc[c]\nHamming", "fab", dashed=True)
+    d.box("f", 802, 150, 150, 78, "4. 2-D FFT\nseparable:\ntwo 1-D passes", "ip")
+    d.box("det", 984, 150, 160, 78, "5. detect\n|z| = sqrt(Re^2 + Im^2)", "fab", dashed=True)
+    d.box("img", 984, 268, 160, 62, "detected image\n8192 x 8192", "host", bold=True)
+    for a, b in [("cphd", "r1"), ("r1", "r2"), ("r2", "w"), ("w", "f"), ("f", "det")]:
+        d.edge(a, b)
+    d.edge("det", "img")
+    d.edge("geo", "r1", dashed=True)
+    d.note("n1", 196, 262, 392, 74,
+           "Both resamples share ONE 2-tap kernel:  out = (1-mu) in[k] + mu in[k+1].\n"
+           "Range: the source grid is UNIFORM in j, so k and mu are closed form -- no search.\n"
+           "Azimuth: the source (tan_s) is NON-uniform, so k comes from a monotone merge scan.", fs=11)
+    d.note("n2", 620, 262, 332, 74,
+           "The 2-D FFT is SEPARABLE. That is the whole reason the\n"
+           "hardware can do two 1-D passes with a transpose between\n"
+           "them, instead of a 2-D transform it has no memory for.", fs=11)
+    d.note("n3", 24, 42, 1120, 54,
+           "Dashed = fused on hardware, no pass of its own. This is the CORRECTNESS reference: the "
+           "fabric build is trusted\nby matching these values sample by sample, not by matching the "
+           "Python code structure.", fs=12)
+    return d.write(out / "fig-sar-python.drawio.svg")
+
+
+def fig_sar_fabric(out):
+    """Part 3 -- how the pipeline maps onto MPFS250T: compute domains and the DDR bridge."""
+    d = Diagram(1180, 560, "MPFS250T mapping -- domains, kernels and the DDR bridge",
+                draw_title=False)
+    d.box("mss", 24, 60, 250, 120,
+          "MSS -- 4 x U54 @ 600 MHz\norchestration, geometry,\nblock-exponent bookkeeping", "mss")
+    d.box("cic", 24, 210, 250, 56, "CIC  AXI4-Lite, 9 targets\narm / status / tables", "ip")
+    d.box("fic", 318, 120, 150, 96,
+          "FIC_0\n64-bit @ 100 MHz\n~ 800 MB/s\nTHE BOTTLENECK", "ip", bold=True)
+    d.box("res", 520, 40, 170, 62, "RES\nresample gather\n+ coeff generation", "fab")
+    d.box("ct", 520, 118, 170, 62, "CT\ncorner-turn\ntiled transpose", "fab")
+    d.box("fft", 520, 196, 170, 78,
+          "FEED -> CoreFFT -> UNLD\nx2 chains\nSLOWCLK 12.5 MHz", "ip")
+    d.box("cg", 520, 290, 170, 56, "COEFG\nazimuth coefficients", "fab")
+    d.box("ddr", 780, 40, 370, 306,
+          "DDR (LPDDR4)\n\n"
+          "SIG       0x8800_0000   256 MB\n"
+          "SCRATCH   0x9800_0000   256 MB\n"
+          "OUT       0xA800_0000   128 MB\n"
+          "geometry  0xB000_0000    ~1 MB\n"
+          "knobs     0xB005_9xxx    words", "mem")
+    d.edge("mss", "fic")
+    d.edge("cic", "fic", dashed=True)
+    for k in ("res", "ct", "fft", "cg"):
+        d.edge("fic", k, double=True)
+        d.edge(k, "ddr", double=True)
+    d.note("n1", 24, 300, 470, 92,
+           "WHY BUFFERS SIT 256 MB APART. An in-place FFT stalls on silicon: the DMA is\n"
+           "still flushing transform t while the feeder pulls t+1 over the shared\n"
+           "interconnect, CoreFFT drops BUF_READY and the pipeline locks. Ping-ponging\n"
+           "SCRATCH <-> SIG keeps read and write on SEPARATE 256 MB pages.", fs=11)
+    d.note("n2", 24, 410, 1126, 74,
+           "An 8192 x 8192 complex frame is 256 MB, so no stage fits on chip and every stage streams "
+           "through FIC_0. The design\nis therefore BANDWIDTH-bound, not compute-bound -- MACC "
+           "utilisation is 74 of 784 (9%). Deleting a DDR pass is worth\nmore than any arithmetic "
+           "optimisation.", fs=12)
+    return d.write(out / "fig-sar-fabric.drawio.svg")
+
+
+def fig_sar_dataflow(out):
+    """Part 3 -- one frame end to end: passes over DDR, what is fused, where the time goes."""
+    d = Diagram(1180, 520, "One frame -- DDR passes, fusion and elapsed time", draw_title=False)
+    d.box("sig1", 24, 96, 130, 58, "SIG\nphase history", "mem")
+    d.box("g", 194, 96, 190, 58, "range gather\n5634 lines", "fab")
+    d.box("scr1", 424, 96, 130, 58, "SCRATCH", "mem")
+    d.box("ct1", 594, 96, 150, 58, "corner-turn", "fab")
+    d.box("sig2", 784, 96, 130, 58, "SIG", "mem")
+    d.box("f1", 194, 214, 190, 74,
+          "FFT-1\n+ azimuth gather\n+ window   (FUSED)", "ip", bold=True)
+    d.box("scr2", 424, 214, 130, 58, "SCRATCH", "mem")
+    d.box("ct2", 594, 214, 150, 58, "corner-turn #2\n(OVERLAPPED)", "fab", dashed=True)
+    d.box("sig3", 784, 214, 130, 58, "SIG", "mem")
+    d.box("f2", 194, 332, 190, 74, "FFT-2\n+ detect   (FUSED)", "ip", bold=True)
+    d.box("out", 424, 332, 130, 58, "OUT\n8192 x 8192", "mem", bold=True)
+    d.edge("sig1", "g", label="3.74 s")
+    d.edge("g", "scr1")
+    d.edge("scr1", "ct1")
+    d.edge("ct1", "sig2")
+    d.edge("sig2", "f1", label="5.42 s")
+    d.edge("f1", "scr2")
+    d.edge("scr2", "ct2")
+    d.edge("ct2", "sig3")
+    d.edge("sig3", "f2", label="5.77 s")
+    d.edge("f2", "out")
+    d.note("n1", 784, 318, 366, 90,
+           "TOTAL 14.92 s   (budget 15 s)\n\n"
+           "3 passes over 256 MB, not 7.\nThe budget is met by moving less\n"
+           "data, not by computing faster.", fs=12)
+    d.note("n2", 24, 424, 1126, 74,
+           "WHY THE FUSIONS ARE EXACT, not merely convenient:  window -- F{w.s}, a pointwise scale "
+           "commutes with the read;\nazimuth gather -- the feeder already chooses which sample to "
+           "present;  detect -- |z| is pointwise on the FFT output;\ncorner-turn #2 -- strip-pipelined "
+           "against FFT-2, legal because the 1-D transforms of distinct rows are INDEPENDENT.", fs=12)
+    return d.write(out / "fig-sar-dataflow.drawio.svg")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
@@ -567,7 +681,8 @@ def main():
     out = here / a.out
     out.mkdir(parents=True, exist_ok=True)
     for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa, fig_python,
-               fig_fabric, fig_dataflow, fig_timing, fig_bug):
+               fig_fabric, fig_dataflow, fig_timing, fig_bug,
+               fig_sar_python, fig_sar_fabric, fig_sar_dataflow):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()

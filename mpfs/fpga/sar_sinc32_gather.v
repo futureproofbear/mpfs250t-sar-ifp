@@ -71,6 +71,12 @@ module sar_sinc32_gather #(
     input  wire [31:0]          sw_data,   // {I[31:16], Q[15:0]}
 
     // ---- gather request ----
+    // Pipeline enable / BACKPRESSURE. Low freezes the whole gather -- bank reads, multiply,
+    // adder tree and output register all hold. This is a FIXED-LATENCY pipeline with no elastic
+    // buffering, so the caller must hold g_v/g_idx/g_wq/g_edge stable while en is low, exactly
+    // as the shipping gather's `gen` works. Without it the core free-runs and overruns the write
+    // FIFO the moment DDR backs up.
+    input  wire                 en,
     input  wire                 g_v,
     input  wire [IDX_W-1:0]     g_idx,     // centre: taps span g_idx-15 .. g_idx+16
     input  wire [WQ_W-1:0]      g_wq,      // Q15 fraction; phase = top LOG2P bits
@@ -122,15 +128,17 @@ module sar_sinc32_gather #(
             // b < rot -> this bank's window sample lives in the NEXT row of the bank
             wire [BANK_AW-1:0] ra = baseA + ((b < rot) ? 1'b1 : 1'b0);
             always @(posedge clk) begin
+                // the source WRITE is not part of the gather pipeline: it runs while the core is
+                // idle between lines, so it is deliberately NOT gated by en.
                 if (sw_we && sw_bank == b[LOG2T-1:0]) sbank[b][sw_addr] <= sw_data;
-                sq[b] <= sbank[b][ra];
+                if (en) sq[b] <= sbank[b][ra];
             end
         end
     endgenerate
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin v1 <= 1'b0; rot1 <= 0; ph1 <= 0; end
-        else begin
+        else if (en) begin
             v1   <= g_v & ~g_edge;
             rot1 <= rot;
             ph1  <= g_wq[WQ_W-1 -: LOG2P];      // top LOG2P bits of the Q15 fraction
@@ -148,7 +156,7 @@ module sar_sinc32_gather #(
         if (!resetn) begin
             v2 <= 1'b0;
             for (t = 0; t < TAPS; t = t + 1) begin p_hi[t] <= 0; p_lo[t] <= 0; end
-        end else begin
+        end else if (en) begin
             v2 <= v1;
             for (t = 0; t < TAPS; t = t + 1) begin
                 p_hi[t] <= $signed(sq[(rot1 + t[LOG2T-1:0])][31:16]) * ctab[t][ph1];
@@ -170,7 +178,7 @@ module sar_sinc32_gather #(
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) vv <= 5'd0;
-        else begin
+        else if (en) begin
             vv <= {vv[3:0], v2};
             for (k = 0; k < 16; k = k + 1) begin
                 s1_hi[k] <= p_hi[2*k] + p_hi[2*k+1];
@@ -204,7 +212,7 @@ module sar_sinc32_gather #(
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin o_v <= 1'b0; o_data <= 32'd0; end
-        else begin
+        else if (en) begin
             o_v <= vv[4];
             o_data[31:16] <= (q_hi >  22'sd32767) ? 16'sd32767 :
                              (q_hi < -22'sd32768) ? -16'sd32768 : q_hi[15:0];

@@ -35,6 +35,7 @@ module tb_sar_sinc32;
     reg  [13:0]       sw_idx = 14'd0;
     reg  [31:0]       sw_data = 32'd0;
     reg               g_v = 1'b0, g_edge = 1'b0;
+    reg               en = 1'b1;   // pipeline enable / backpressure
     reg  [13:0]       g_idx = 14'd0;
     reg  [14:0]       g_wq = 15'd0;
     wire              o_v;
@@ -44,7 +45,7 @@ module tb_sar_sinc32;
         .clk(clk), .resetn(resetn),
         .ct_we(ct_we), .ct_data(ct_data), .ct_rewind(ct_rewind),
         .sw_we(sw_we), .sw_idx(sw_idx), .sw_data(sw_data),
-        .g_v(g_v), .g_idx(g_idx), .g_wq(g_wq), .g_edge(g_edge),
+        .en(en), .g_v(g_v), .g_idx(g_idx), .g_wq(g_wq), .g_edge(g_edge),
         .o_v(o_v), .o_data(o_data)
     );
 
@@ -52,7 +53,7 @@ module tb_sar_sinc32;
     integer got_n = 0, errors = 0, shown = 0;
     reg [31:0] got [0:NEXP+64];
     always @(posedge clk) begin
-        if (resetn && o_v) begin
+        if (resetn && en && o_v) begin
             if (got_n <= NEXP + 64) got[got_n] = o_data;
             got_n = got_n + 1;
         end
@@ -65,10 +66,12 @@ module tb_sar_sinc32;
     // it will multiply, so a mismatch can be attributed to ADDRESSING or to COEFFICIENTS rather
     // than inferred from the output value.
     integer v1_n = 0, dumpsel = -1, fh2, pt;
+    integer do_stall = 0, stall_cyc = 0;
     reg [7:0]  used_ph  [0:NEXP+8];
     reg [5:0]  used_rot [0:NEXP+8];
     always @(posedge clk) begin
-        if (resetn && dut.v1) begin
+        if (resetn && !en) stall_cyc = stall_cyc + 1;
+        if (resetn && en && dut.v1) begin
             if (v1_n <= NEXP) begin
                 used_ph[v1_n]  = dut.ph1;
                 used_rot[v1_n] = dut.rot1;
@@ -87,6 +90,7 @@ module tb_sar_sinc32;
     integer i, p, t, k, nedge;
     initial begin
         fh2 = $fopen("s32_probe.txt", "w");
+        if ($test$plusargs("STALL")) begin do_stall = 1; $display("  RANDOM STALLS enabled"); end
         if ($value$plusargs("SEL=%d", dumpsel)) $display("  probing accepted request %0d", dumpsel);
         $readmemh("s32_coef.hex", coef);
         $readmemh("s32_src.hex",  src);
@@ -111,7 +115,10 @@ module tb_sar_sinc32;
         sw_we = 1'b0;
         repeat (4) @(posedge clk);
 
-        // ---- issue every request back to back; the core is fully pipelined ----
+        // ---- issue every request; with +STALL, randomly deassert `en` mid-stream ----
+        // The results must be IDENTICAL with and without stalls. A stall that drops or duplicates
+        // a sample would otherwise only show up on silicon under DDR backpressure, which is the
+        // hardest possible place to debug it.
         nedge = 0;
         for (i = 0; i < NREQ; i = i + 1) begin
             g_v    = 1'b1;
@@ -120,12 +127,22 @@ module tb_sar_sinc32;
             g_edge = req[i][31];
             if (req[i][31]) nedge = nedge + 1;
             @(posedge clk);
+            while (do_stall && ($random % 4) == 0) begin
+                en = 1'b0;                       // hold the request steady while stalled
+                @(posedge clk);
+                en = 1'b1;
+            end
         end
         g_v = 1'b0; g_edge = 1'b0;
-        repeat (32) @(posedge clk);             // drain the pipeline
+        repeat (48) @(posedge clk);             // drain the pipeline
 
         // ---- compare ----
         $display("  requests %0d (%0d full-tap, %0d edge) -> outputs %0d", NREQ, NEXP, nedge, got_n);
+        $display("  stall cycles injected: %0d", stall_cyc);
+        if (do_stall && stall_cyc == 0) begin
+            $display("  FAIL: +STALL requested but no stall ever fired -- the test is VACUOUS");
+            errors = errors + 1;
+        end
         if (got_n != NEXP) begin
             $display("  FAIL: expected exactly %0d outputs, got %0d", NEXP, got_n);
             if (got_n == NREQ)

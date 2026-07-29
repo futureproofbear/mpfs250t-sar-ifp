@@ -36,15 +36,15 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
 
 | requirement | target |
 |---|---|
-| Input | complex phase history, **≤ 8192 × 8192** samples |
-| Output | detected magnitude image, **8192 × 8192** |
+| Input | complex phase history, **≤ 8192 × 8192** samples — **int16 I + int16 Q**, 4 B/sample (256 MB) |
+| Output | detected magnitude, **8192 × 8192** — **uint16**, 2 B/pixel (128 MB) |
+| Internal | int16 complex throughout, **block floating point** across the FFTs |
 | Wall-clock | **≤ 15 s** per frame |
 | Chip resources | minimise power and area |
 | Interpolation | **baseline: linear** · **variant: 32-tap sinc** |
 
 The two interpolation variants are a deliberate pair: the linear build establishes a correct,
 cheap reference, and the sinc build buys image quality at a known cost in silicon.
-
 ---
 
 # Why the resource constraint bites
@@ -95,6 +95,15 @@ $$\text{out}[q] = (1-\mu)\,\text{in}[k] + \mu\,\text{in}[k{+}1]$$
 
 **The grid is uniform in $j$**, so no search is needed — $k$ and $\mu$ are closed-form. That is
 what later makes on-fabric coefficient generation possible.
+---
+
+# ① Range resample — drawn
+
+![w:1120](diagrams/fig-sar-range-resamp.drawio.svg)
+
+Each pulse carries its own grid; the output grid is shared. `mu` is the fractional position of the
+query between two source samples — and **how well a kernel estimates the signal at that fractional
+point is the entire interpolation question**, which is what tap count and scalloping measure.
 
 ---
 
@@ -111,6 +120,15 @@ $k$ comes from a **monotone merge scan** rather than a division — one pointer 
 $q$ advances, $O(M+M_p)$ for the whole line rather than $O(M_p \log M)$.
 
 Together ① and ② map the polar-sampled phase history onto a **rectangular** $k$-space grid.
+---
+
+# ② Azimuth resample — drawn
+
+![w:1120](diagrams/fig-sar-azimuth-resamp.drawio.svg)
+
+The kernel is **identical** to range — same 2-tap blend, same 32-tap sinc variant. Only the way
+`k` and `mu` are *found* differs, because the source abscissa is non-uniform. That is why one
+gather core can serve both passes.
 
 ---
 
@@ -125,6 +143,10 @@ the entire reason the hardware can do it in two 1-D passes with a transpose betw
 
 $$I[y,x] = \sum_{r}\sum_{c} S[r,c]\;e^{-2\pi i (ry/N_p + cx/M_p)}$$
 
+$S[r,c]$ is the **windowed, rectangular $k$-space array** produced by stages ①–③: row $r$ is a
+range-frequency bin, column $c$ a cross-range (Doppler) bin, each entry a complex int16 sample.
+It is what the polar-to-rectangular resampling exists to construct — the FFT is only valid on a
+*uniformly* sampled grid, which the raw phase history is not.
 **Detect** — discard phase, keep brightness:
 
 $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
@@ -132,10 +154,12 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 ---
 
 # Part 3 — Mapping onto MPFS250T fabric
-
 ![w:1150](diagrams/fig-sar-fabric.drawio.svg)
 
-Two compute domains, one narrow bridge:
+---
+
+# Two compute domains, one narrow bridge
+
 
 | | |
 |---|---|
@@ -162,6 +186,46 @@ Fabric runs at **100 MHz**; CoreFFT's `SLOWCLK` domain at **12.5 MHz** (CLK/8).
 transform *t* while the feeder pulls *t+1* over the shared interconnect, CoreFFT drops
 `BUF_READY` and the pipeline locks. Ping-ponging `SCRATCH`↔`SIG` keeps read and write on
 **separate 256 MB pages** — validated on silicon after an in-place build hung at transform 1.
+
+---
+
+# DDR memory map — the allocation
+
+![w:900](../img/sar_ddr_map.svg)
+
+Three 256 MB-aligned regions plus a small geometry/telemetry block. `OUT` is half the size of the
+others because the detected image is **uint16**, 2 B/px, where the complex buffers are 4 B/sample.
+
+---
+
+# Fabric-to-DDR routing
+
+![w:1000](../img/sar_fabric_ddr_routing.svg)
+
+Every fabric master reaches DDR through **one** FIC_0 port. The interconnect is single-outstanding,
+so concurrency between masters buys far less than it appears to — measured overlap between
+independent kernels on the shared port is ~81%, not 2×.
+
+---
+
+# AXI beat packing — why the gather reads full-width
+
+![w:1000](../img/sar_axi_packing.svg)
+
+A pulse row is `N·4` bytes with `N` odd, so a row base is only **4-byte aligned**. The SmartHLS
+resample handled that by dropping to `ar_size=2` and wasting half the 64-bit bus. The hand-written
+gather instead always reads full 64-bit beats from `IN_BASE & ~7` and discards the odd leading
+word — so pass 1 gets the whole bus.
+
+---
+
+# CoreFFT streaming chain
+
+![w:1000](../img/sar_corefft_chain.svg)
+
+`feeder → gearbox → CoreFFT → unloader`, crossing from the 100 MHz fabric domain into CoreFFT's
+12.5 MHz `SLOWCLK`. The feeder is where the azimuth gather and the window are fused in; the
+unloader is where detect is fused. Two such chains run in parallel, splitting rows.
 
 ---
 

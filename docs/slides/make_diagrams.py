@@ -666,6 +666,94 @@ def fig_sar_dataflow(out):
     return d.write(out / "fig-sar-dataflow.drawio.svg")
 
 
+def fig_sar_range_resamp(out):
+    """Range resample, drawn: one pulse's own grid, the common grid, and where a sample comes from."""
+    d = Diagram(1160, 470, "Range resample -- what the interpolation actually does",
+                draw_title=False)
+    d.note("t1", 24, 24, 1112, 30,
+           "Pulse i is sampled on ITS OWN range-frequency grid kr[i,j] = x0_i + j dx_i. Every pulse "
+           "has a different x0 and dx, so the\ngrid SHIFTS AND STRETCHES pulse to pulse. The FFT "
+           "needs one COMMON grid, so each pulse is resampled onto KR[q].", fs=12)
+
+    # source grid (pulse i), evenly spaced
+    d.box("slab", 24, 120, 120, 34, "pulse i\nown grid", "host", fs=12)
+    for j in range(9):
+        d.box("s%d" % j, 176 + j * 104, 120, 22, 34, "", "mem")
+    d.note("sx", 176, 160, 940, 22,
+           "x0_i            +dx            +2dx           +3dx           +4dx           "
+           "+5dx           +6dx           +7dx", fs=10)
+
+    # the two taps that matter, and the query between them
+    d.box("k0", 488, 120, 22, 34, "", "fab", bold=True)
+    d.box("k1", 592, 120, 22, 34, "", "fab", bold=True)
+    d.note("kl", 452, 86, 200, 24, "in[k]                  in[k+1]", fs=11)
+
+    # query grid (common), offset so a query lands BETWEEN two source samples
+    d.box("qlab", 24, 300, 120, 34, "common grid\nKR[q]", "ip", fs=12)
+    for q in range(9):
+        d.box("q%d" % q, 210 + q * 104, 300, 22, 34, "", "mem")
+    d.box("qt", 522, 300, 22, 34, "", "ip", bold=True)
+    d.note("ql", 470, 340, 260, 24, "KR[q]  --  the output sample", fs=11)
+
+    d.edge("k0", "qt", dashed=True)
+    d.edge("k1", "qt", dashed=True)
+
+    d.note("m", 660, 236, 476, 116,
+           "t = (KR[q] - x0_i) / dx_i        k = floor(t)      mu = t - k\n\n"
+           "out[q] = (1-mu) in[k] + mu in[k+1]        (2-tap, baseline)\n"
+           "out[q] = SUM c_t(mu) in[k-15+t]           (32-tap sinc, variant)\n\n"
+           "The grid is UNIFORM in j, so k and mu are closed form -- no search,\n"
+           "which is what lets the fabric generate them from 3 scalars per line.", fs=11)
+    d.note("m2", 24, 380, 600, 60,
+           "mu is the FRACTIONAL position of the query between two source samples. The whole\n"
+           "interpolation question is how well a kernel estimates the signal AT that fractional\n"
+           "point -- which is why tap count and scalloping matter.", fs=11)
+    return d.write(out / "fig-sar-range-resamp.drawio.svg")
+
+
+def fig_sar_azimuth_resamp(out):
+    """Azimuth resample: same 2-tap kernel, but a NON-uniform source abscissa."""
+    d = Diagram(1160, 470, "Azimuth resample -- same kernel, non-uniform source",
+                draw_title=False)
+    d.note("t1", 24, 24, 1112, 30,
+           "After the corner-turn each RANGE BIN is a row of pulses. The source abscissa is "
+           "tan(phi) of each pulse -- and the\nplatform does not fly at constant angular rate, so "
+           "these are NOT evenly spaced. That is the one structural difference from range.", fs=12)
+
+    d.box("slab", 24, 120, 120, 34, "sorted pulses\ntan(phi)_s", "host", fs=12)
+    # deliberately UNEVEN spacing
+    xs = [176, 262, 372, 450, 566, 700, 792, 918, 1050]
+    for j, x in enumerate(xs):
+        d.box("s%d" % j, x, 120, 22, 34, "", "mem")
+    d.note("sx", 176, 160, 940, 22,
+           "unevenly spaced -- the gaps differ, so the bracket cannot be computed by division", fs=10)
+
+    d.box("k0", 566, 120, 22, 34, "", "fab", bold=True)
+    d.box("k1", 700, 120, 22, 34, "", "fab", bold=True)
+    d.note("kl", 530, 86, 240, 24, "tan_s[k]                   tan_s[k+1]", fs=11)
+
+    d.box("qlab", 24, 300, 120, 34, "uniform grid\nKC[q]/kr", "ip", fs=12)
+    for q in range(9):
+        d.box("q%d" % q, 210 + q * 104, 300, 22, 34, "", "mem")
+    d.box("qt", 626, 300, 22, 34, "", "ip", bold=True)
+    d.note("ql", 566, 340, 260, 24, "u = KC[q]/kr  --  the output sample", fs=11)
+
+    d.edge("k0", "qt", dashed=True)
+    d.edge("k1", "qt", dashed=True)
+
+    d.note("m", 700, 236, 436, 116,
+           "k = max{ m : tan_s[m] <= u }\n"
+           "mu = (u - tan_s[k]) / (tan_s[k+1] - tan_s[k])\n\n"
+           "Found by a MONOTONE MERGE SCAN: one pointer walks forward\n"
+           "as q advances, O(M + Mp) per line rather than O(Mp log M).\n"
+           "Both sequences are sorted, so the pointer never goes back.", fs=11)
+    d.note("m2", 24, 380, 640, 60,
+           "The KERNEL is identical to range -- same 2-tap blend, same 32-tap sinc variant. Only "
+           "the way\nk and mu are FOUND differs. That is why one gather core can serve both passes, "
+           "and why the\ninterpolator upgrade applies to both.", fs=11)
+    return d.write(out / "fig-sar-azimuth-resamp.drawio.svg")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
@@ -682,7 +770,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa, fig_python,
                fig_fabric, fig_dataflow, fig_timing, fig_bug,
-               fig_sar_python, fig_sar_fabric, fig_sar_dataflow):
+               fig_sar_python, fig_sar_fabric, fig_sar_dataflow,
+               fig_sar_range_resamp, fig_sar_azimuth_resamp):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()

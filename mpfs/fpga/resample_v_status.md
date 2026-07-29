@@ -120,6 +120,38 @@ gather would, from a 2-tap lerp to a 4-tap Horner cascade (which also needs 4-wa
 invalidates CRC `0x319037b2` and the golden reference itself (`sar_pipeline.py` uses `np.interp`,
 which is linear). Land this core bit-exact first.
 
+## 32-TAP SINC GATHER (2026-07-30) — verified in simulation, not yet on silicon
+
+A second interpolation kernel now lives in `sar_resample_v` beside the 2-tap lerp, selected by
+`LCFG[17]` / `SAR_SINCMODE`. Both are in the bitstream so they can be A/B'd on one board run.
+
+**Why.** The 2-tap lerp scallops **29.2 dB** at this scene's 0.978-Nyquist band edge — the
+linear-interpolation null, gain `|cos(pi f/2)| -> 0.034` at mu=0.5 — so a scatterer's brightness
+depends on where it lands *between* samples by up to 29 dB. 32 taps brings that to **3.46 dB**.
+
+| bench | result |
+|---|---|
+| Small synthetic suite, 8 cases + re-arm | PASS, 0 mismatching words |
+| Real geometry ×4 lines, **lerp** mode | PASS, 8192/8192 each |
+| Real geometry ×4 lines, **sinc** mode | PASS, 8192/8192 each |
+| Standalone core, dual-port fill + 1235 stall cycles | PASS, 3621/3621 bit-exact |
+| Trial synthesis, standalone | +1.083 ns at 100 MHz; 64 MACC, 32 LSRAM, 256 uSRAM |
+
+**Design notes worth keeping.** Banks are sample-index mod 32 and the window is 32 consecutive
+samples, so every bank is hit *exactly once* — single-port RAMs suffice and the tap order is a
+barrel rotation. `BANK_AW=9` gives headroom at no cost (a 20 kbit LSRAM holds 512×32 either way);
+at 8 it exactly fitted NDSU's N=8192 and the read address wrapped. Latency is 8 cycles against the
+lerp's 4, so the lerp is delayed 4 and the edge flag 8, and the *valid* comes from the delayed lerp
+in both modes — only the data is switched.
+
+**The coefficient table is loaded by the HOST**, not firmware: 16 KB does not fit in the L2
+scratchpad (linking it overflowed by 15,584 bytes) and the C cannot compute it (no libm). It is
+scene-independent, so `bash mpfs/host/run_sinc_table_load.sh` is a one-time push.
+
+**NOT yet validated on silicon.** Simulation is bit-exact against the model, but no board run has
+been made in sinc mode. Load the table *before* the first PIPE — an unloaded table is all zeros and
+every query maps to the same place.
+
 ## BASELINE 2026-07-29 — SHIPPING, and it works
 
 | measure | value |

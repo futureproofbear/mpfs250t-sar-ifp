@@ -194,10 +194,11 @@ def lagrange_taps_q15(w):
     return [iround(x * (1 << 15)) for x in c]
 
 
-SINC_TAPS    = 24      # taps at idx-11 .. idx+12. 24 chosen 2026-07-29 from measured
-                       # error: +6.3 dB over the lerp at the shipping 0.978 Nyquist and
-                       # +22 dB at 0.815, for 12-way banking and 48 MACs/stage -- a far
-                       # smaller perturbation than 40 taps to a design with 2.6% slack.
+SINC_TAPS    = 32      # taps at idx-15 .. idx+16. 32 chosen 2026-07-29 from measured
+                       # SCALLOPING, the artefact that actually shows in the image: the
+                       # shipping 2-tap lerp scallops 29.2 dB at 0.978 Nyquist (the
+                       # classic linear-interp null at mu=0.5), 32 taps brings that to
+                       # ~3 dB. 16 dual-port banks + 64 MACs/stage.
 SINC_PHASES  = 256     # measured: 1024 phases buys only ~0.5 dB, so 256 is enough
 
 

@@ -120,6 +120,37 @@ gather would, from a 2-tap lerp to a 4-tap Horner cascade (which also needs 4-wa
 invalidates CRC `0x319037b2` and the golden reference itself (`sar_pipeline.py` uses `np.interp`,
 which is linear). Land this core bit-exact first.
 
+## BASELINE 2026-07-29 — SHIPPING, and it works
+
+| measure | value |
+|---|---|
+| Frame | **14.92 s** (was 18.45 s) — **−3.53 s, −19%** |
+| Top-left 1024x1024 vs the known-good baseline, same region | **corr 0.9765**, max 3030 vs 3069, mean 68.1 vs 67.3 |
+| Crop CRC (top-left) | `0x221e5e7a` — **replaces nothing**; the old `0x319037b2` was a CENTRE crop of the float32 path |
+| `STATUS2` @ `0xB005914C` | `0x52530000` — clean across all 5634 lines |
+| Line-0 scalars @ `0xB0059150` | `0x00000018 0x4FE68946 0xE464BAAC 0xFFFFFFFC` — bit-exact vs the Python reference |
+| Pass 1 on silicon, value level | 99.19% exact vs the bit-accurate model |
+
+CRC not matching the old baseline is the DESIGNED outcome (fixed point vs float32), and the
+correlation is what the header predicted. Validate future runs by correlation against
+`jtag_full/crop_topleft.bin`, not by CRC equality with the float32 era.
+
+### Reading a crop — get the region right
+
+`EROI` encodes `.base=(r0<<16)|r1`, `.len=(c0<<16)|c1` (`u54_1.c:82`) — ROW range in base, COLUMN
+range in len.
+
+```bash
+# top-left 1024x1024 -- the region worth assessing (the scene CENTRE is low-return)
+bash run_m3_iso.sh 0x45524F49 0x00000400 0x00000400 20000 0xB005E200      0x98000000 2097152 "$(pwd)/jtag_full/crop_tl.bin"
+```
+
+**The centre crop is a trap.** Rows/cols 3584..4608 of this scene are dark: peak ~76 against ~3030
+in the top-left. On 2026-07-29 a centre crop was correlated against `crop_100.bin` — which is a
+TOP-LEFT crop, not a centre one — giving corr −0.04 and an apparent 40x "amplitude collapse" that
+sent a whole debugging session after a nonexistent downstream bug. Two crops are comparable only if
+the same `(r0,r1,c0,c1)` produced both; check that before believing any correlation.
+
 ## STATE AT 2026-07-29 POWER-OFF — read this first next session
 
 **The board is NOT in a usable state and the ELF on it is stale.**

@@ -236,8 +236,12 @@ static void m2_run_tests(void)
                flt ? M2_FAULT : (v == 0u ? M2_PASS : M2_FAIL));
     }
 
-    /* T2 -- AXI4-Lite latch: write a distinct pattern to each RESAMPLE ARG, read back. */
-    for (uint32_t a = 0u; a < 4u; a++) {
+    /* T2 -- AXI4-Lite latch: write a distinct pattern to each RESAMPLE ARG, read back.
+     * TWO registers, not four: on sar_resample_v the old ARG2/ARG3 offsets (0x14/0x18) are
+     * STATUS2 (read-only) and DIMS. Walking a pattern across them recorded a false M2_FAIL on the
+     * read-only one and left junk geometry behind. 0x0c/0x10 (IN_BASE/OUT_BASE) are genuine
+     * read-write scratch under both contracts, so the latch test still means what it says. */
+    for (uint32_t a = 0u; a < 2u; a++) {
         uint32_t off = HLS_ARG0 + a * 4u;
         uint32_t pat = 0xA5A50000u | (a << 8) | 0x5Au;
         sar_reg_w(K_RESAMPLE, off, pat);
@@ -255,10 +259,23 @@ static void m2_run_tests(void)
         volatile uint32_t *scr = (volatile uint32_t *)(uintptr_t)SAR_SCRATCH_ADDR;
         scr[0] = 0xDEADBEEFu; scr[1] = 0xDEADBEEFu;
         __asm volatile ("fence rw, rw");
-        sar_reg_w(K_RESAMPLE, HLS_ARG0, (uint32_t)SAR_SIG_ADDR);
-        sar_reg_w(K_RESAMPLE, HLS_ARG1, (uint32_t)SAR_COEF_IDX(0));
-        sar_reg_w(K_RESAMPLE, HLS_ARG2, (uint32_t)SAR_COEF_WQ(0));
-        sar_reg_w(K_RESAMPLE, HLS_ARG3, (uint32_t)SAR_SCRATCH_ADDR);
+        /* RES is sar_resample_v since 2026-07-28, NOT the SmartHLS resample, and its register map
+         * is different. The old four-ARG arming below put SAR_SCRATCH_ADDR into DIMS (0x18), so
+         * this probe armed the kernel with qn=0 and sn=0x9800 and latched err_align at EVERY
+         * boot. STATUS2 is sticky with no software clear, so that silently destroyed its value as
+         * a per-frame health signal -- the 0xB005914C readout could never have meant anything.
+         *
+         * Same test, real contract: the smallest legal geometry (QN=2 even/non-zero, SN=2, both
+         * bases aligned) with A=B=0, so every query maps to source sample 0. The kernel still has
+         * to read SIG over its AXI master and write SCRATCH, which is exactly what T3 checks --
+         * and the host's "SCRATCH changed vs the 0xDEADBEEF sentinel" verdict still works. */
+        sar_reg_w(K_RESAMPLE, 0x18u, (2u << 16) | 2u);      /* DIMS: SN=2, QN=2 */
+        sar_reg_w(K_RESAMPLE, 0x1cu, 0u);                   /* LCFG: SH=0, MODE=0 (pass 1) */
+        sar_reg_w(K_RESAMPLE, 0x20u, 0u);                   /* COEF_A  = 0 */
+        sar_reg_w(K_RESAMPLE, 0x24u, 0u);                   /* COEF_BLO */
+        sar_reg_w(K_RESAMPLE, 0x28u, 0u);                   /* COEF_BHI -> v=0 -> idx=0, wq=0 */
+        sar_reg_w(K_RESAMPLE, 0x0cu, (uint32_t)SAR_SIG_ADDR);      /* IN_BASE  */
+        sar_reg_w(K_RESAMPLE, 0x10u, (uint32_t)SAR_SCRATCH_ADDR);  /* OUT_BASE */
         sar_k_start(K_RESAMPLE);
         int done = m2_k_wait(K_RESAMPLE);
         __asm volatile ("fence rw, rw");

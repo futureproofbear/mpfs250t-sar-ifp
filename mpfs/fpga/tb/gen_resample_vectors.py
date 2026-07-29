@@ -259,8 +259,11 @@ def gather_sinc(src, idx, wq, sn, tab=None, taps=SINC_TAPS):
         else:
             c = tab[(w * len(tab)) >> 15]
             xs = [src[k + lo + j] for j in range(taps)]
-            hi = sum(ci * s16(x >> 16) for ci, x in zip(c, xs)) >> 15
-            loo = sum(ci * s16(x & 0xFFFF) for ci, x in zip(c, xs)) >> 15
+            # ROUND-TO-NEAREST, not truncate. A bare >>15 floors, which puts a systematic
+            # -0.5 LSB bias on EVERY output -- a DC offset across the whole image. With 32
+            # taps that is free to avoid: one add before the shift.
+            hi = (sum(ci * s16(x >> 16) for ci, x in zip(c, xs)) + (1 << 14)) >> 15
+            loo = (sum(ci * s16(x & 0xFFFF) for ci, x in zip(c, xs)) + (1 << 14)) >> 15
             rh = -32768 if hi < -32768 else (32767 if hi > 32767 else hi)
             rl = -32768 if loo < -32768 else (32767 if loo > 32767 else loo)
         out.append(((rh & 0xFFFF) << 16) | (rl & 0xFFFF))

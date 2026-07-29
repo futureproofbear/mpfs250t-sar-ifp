@@ -42,6 +42,10 @@ REGISTRY = [
     ("sar_resample_v.v", "sar_resample_v_top.v", "tb/tb_sar_resample.v"),
     ("corner_turn_v.v",  "corner_turn_v_top.v",  "tb/tb_corner_turn_v.v"),
     ("sar_coeffgen.v",   None,                   "tb/tb_sar_coeffgen.v"),
+    # No wrapper yet -- the core is standalone pending integration, so its own defaults ARE what
+    # synthesis would build. Registered from the start so it can never reach a bitstream with the
+    # bench validating a different parameterisation, which is the failure this gate exists for.
+    ("sar_sinc32_gather.v", None,                 "tb/tb_sar_sinc32.v"),
 ]
 
 # Parameters that are pure plumbing: a mismatch cannot change functional behaviour, only the

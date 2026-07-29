@@ -210,3 +210,5 @@ mpfs/host/jtag_stage_ndsu/
 mpfs/fpga/bitstreams/
 mpfs/host/component/
 *.libero.log
+mpfs/fpga/tb/s32_*.hex
+mpfs/fpga/tb/s32_dims.vh

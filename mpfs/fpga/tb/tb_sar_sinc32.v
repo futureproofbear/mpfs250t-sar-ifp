@@ -1,0 +1,133 @@
+// tb_sar_sinc32.v -- value-level bench for sar_sinc32_gather.
+//
+// Checks BOTH halves of the contract:
+//   * full-tap requests must produce the value gen_resample_vectors.gather_sinc() computes,
+//     bit for bit
+//   * EDGE requests must produce NOTHING. The core is not allowed to emit a plausible-looking
+//     value there; the caller supplies the 2-tap lerp. A values-only bench would pass a core
+//     that quietly answered edge requests with garbage, so silence is asserted explicitly.
+//
+// PARAMETERS ARE NOT OVERRIDDEN. The DUT is instantiated at its own defaults, i.e. exactly what
+// synthesis builds. That is the rule tb/check_tb_params.py enforces after a bench validated a
+// different parameterisation than the bitstream and cost a full board bring-up (2026-07-29).
+`default_nettype none
+`timescale 1ns/1ps
+`include "s32_dims.vh"
+
+module tb_sar_sinc32;
+    localparam integer TAPS   = `S32_TAPS;
+    localparam integer PHASES = `S32_PHASES;
+    localparam integer N      = `S32_N;
+    localparam integer NREQ   = `S32_NREQ;
+    localparam integer NEXP   = `S32_NEXP;
+
+    reg clk = 1'b0, resetn = 1'b0;
+    always #5 clk = ~clk;                       // 100 MHz, the fabric domain
+
+    reg  [15:0] coef [0:PHASES*TAPS-1];
+    reg  [31:0] src  [0:N-1];
+    reg  [31:0] req  [0:NREQ-1];
+    reg  [31:0] exp  [0:NEXP-1];
+
+    reg               ct_we = 1'b0, ct_rewind = 1'b0;
+    reg signed [15:0] ct_data = 16'sd0;
+    reg               sw_we = 1'b0;
+    reg  [13:0]       sw_idx = 14'd0;
+    reg  [31:0]       sw_data = 32'd0;
+    reg               g_v = 1'b0, g_edge = 1'b0;
+    reg  [13:0]       g_idx = 14'd0;
+    reg  [14:0]       g_wq = 15'd0;
+    wire              o_v;
+    wire [31:0]       o_data;
+
+    sar_sinc32_gather dut (
+        .clk(clk), .resetn(resetn),
+        .ct_we(ct_we), .ct_data(ct_data), .ct_rewind(ct_rewind),
+        .sw_we(sw_we), .sw_idx(sw_idx), .sw_data(sw_data),
+        .g_v(g_v), .g_idx(g_idx), .g_wq(g_wq), .g_edge(g_edge),
+        .o_v(o_v), .o_data(o_data)
+    );
+
+    // ---- collect outputs in order; the core emits one per accepted request, LAT cycles later ----
+    integer got_n = 0, errors = 0, shown = 0;
+    reg [31:0] got [0:NEXP+64];
+    always @(posedge clk) begin
+        if (resetn && o_v) begin
+            if (got_n <= NEXP + 64) got[got_n] = o_data;
+            got_n = got_n + 1;
+        end
+    end
+
+    integer i, p, t, k, nedge;
+    initial begin
+        $readmemh("s32_coef.hex", coef);
+        $readmemh("s32_src.hex",  src);
+        $readmemh("s32_req.hex",  req);
+        $readmemh("s32_exp.hex",  exp);
+
+        repeat (4) @(posedge clk);
+        resetn = 1'b1;
+        @(posedge clk);
+
+        // ---- load the coefficient table, in the documented order (phase-major, tap-minor) ----
+        ct_rewind = 1'b1; @(posedge clk); ct_rewind = 1'b0;
+        for (i = 0; i < PHASES*TAPS; i = i + 1) begin
+            ct_we = 1'b1; ct_data = coef[i]; @(posedge clk);
+        end
+        ct_we = 1'b0; @(posedge clk);
+
+        // ---- load the source line ----
+        for (i = 0; i < N; i = i + 1) begin
+            sw_we = 1'b1; sw_idx = i[13:0]; sw_data = src[i]; @(posedge clk);
+        end
+        sw_we = 1'b0;
+        repeat (4) @(posedge clk);
+
+        // ---- issue every request back to back; the core is fully pipelined ----
+        nedge = 0;
+        for (i = 0; i < NREQ; i = i + 1) begin
+            g_v    = 1'b1;
+            g_idx  = req[i][13:0];
+            g_wq   = req[i][30:16];
+            g_edge = req[i][31];
+            if (req[i][31]) nedge = nedge + 1;
+            @(posedge clk);
+        end
+        g_v = 1'b0; g_edge = 1'b0;
+        repeat (32) @(posedge clk);             // drain the pipeline
+
+        // ---- compare ----
+        $display("  requests %0d (%0d full-tap, %0d edge) -> outputs %0d", NREQ, NEXP, nedge, got_n);
+        if (got_n != NEXP) begin
+            $display("  FAIL: expected exactly %0d outputs, got %0d", NEXP, got_n);
+            if (got_n == NREQ)
+                $display("        (== NREQ: the core answered EDGE requests it must stay silent on)");
+            errors = errors + 1;
+        end
+        for (k = 0; k < NEXP && k < got_n; k = k + 1) begin
+            if (got[k] !== exp[k]) begin
+                errors = errors + 1;
+                if (shown < 8) begin
+                    $display("  [%0d] got %08x want %08x", k, got[k], exp[k]);
+                    shown = shown + 1;
+                end
+            end
+        end
+
+        begin : dump
+            integer fh;
+            fh = $fopen("s32_got.hex", "w");
+            for (k = 0; k < got_n; k = k + 1) $fwrite(fh, "%08x\n", got[k]);
+            $fclose(fh);
+        end
+
+        if (errors == 0)
+            $display("==== sinc32 gather: PASS (%0d values bit-exact vs the model, %0d edge requests silent) ====",
+                     NEXP, nedge);
+        else
+            $display("==== sinc32 gather: FAIL (%0d error(s)) ====", errors);
+        $finish;
+    end
+endmodule
+
+`default_nettype wire

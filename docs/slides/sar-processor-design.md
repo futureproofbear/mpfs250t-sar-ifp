@@ -43,20 +43,29 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
 | Chip resources | minimise power and area |
 | Interpolation | **baseline: linear** · **variant: 32-tap sinc** |
 
-The two interpolation variants are a deliberate pair: the linear build establishes a correct,
-cheap reference, and the sinc build buys image quality at a known cost in silicon.
+- Two interpolation variants: 
+  - linear kernel provides a low resource implementation 
+  - sinc kernel for higher image quality at expense of more fabric resources
+
 ---
 
-# Why the resource constraint bites
+# Resource constraints on the MPFS250T
 
-An 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The MPFS250T has no on-chip memory
-remotely that large, so *every* stage streams through DDR.
+An 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device holds far less:
 
-That single fact drives the whole architecture:
+| on-chip memory | MPFS250T |
+|---|---|
+| LSRAM | 812 × 20 Kb = **~2.0 MB** |
+| µSRAM | 2,352 × 768 b = **~0.2 MB** |
+| MSS L2 (as scratchpad) | **2 MiB** |
+| **Total** | **~4 MB — about 1/64th of one frame** |
+
+So no stage can be held on chip, and *every* stage streams through DDR.
+This constraint drives the whole processing architecture:
 
 - the design is **bandwidth-bound, not compute-bound**
 - the fabric↔DDR port (FIC_0, 64-bit @ 100 MHz ≈ **800 MB/s**) is the scarce resource
-- **every DDR round-trip you can delete is worth more than any arithmetic optimisation**
+- **every DDR round-trip costs more than any arithmetic optimisation**
 
 The engineering goal is therefore *fewer passes over the data*, not faster maths.
 
@@ -66,17 +75,7 @@ The engineering goal is therefore *fewer passes over the data*, not faster maths
 
 ![w:1150](diagrams/fig-sar-python.drawio.svg)
 
-`src/form_image_pfa.py` — the **Polar Format Algorithm** (PFA), the correctness reference for
-everything that follows.
-
-```
-CPHD ─► geometry ─► ① range resample ─► ② azimuth resample
-                          (per pulse)        (per range bin)
-     ─► ③ 2-D window ─► ④ 2-D FFT ─► ⑤ detect ─► image
-```
-
-Each stage below is stated as the mathematics first, because the fabric implementation is
-justified by matching it — not by matching the Python line by line.
+`src/form_image_pfa.py` — python implementation of the Polar Format Algorithm (PFA), .
 
 ---
 
@@ -95,10 +94,10 @@ $$\text{out}[q] = (1-\mu)\,\text{in}[k] + \mu\,\text{in}[k{+}1]$$
 
 **The grid is uniform in $j$**, so no search is needed — $k$ and $\mu$ are closed-form. That is
 what later makes on-fabric coefficient generation possible.
+
 ---
 
 # ① Range resample — drawn
-
 ![w:1120](diagrams/fig-sar-range-resamp.drawio.svg)
 
 Each pulse carries its own grid; the output grid is shared. `mu` is the fractional position of the

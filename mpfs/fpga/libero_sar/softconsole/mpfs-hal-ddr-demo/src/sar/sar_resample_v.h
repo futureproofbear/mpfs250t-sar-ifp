@@ -61,6 +61,15 @@
  * words read back as  0x00000018  0x4FE68946  0xE464BAAC  0xFFFFFFFC. */
 #define SAR_RSVDBG_ADDR     0xB0059150u
 
+/* SINC MODE. 'SNC1' selects the 32-tap polyphase-sinc gather (LCFG[17]) over the 2-tap lerp.
+ * OPT-IN and fail-safe, unlike SAR_RSVMODE: BOTH kernels are in the bitstream, so a cold-boot
+ * zero gets the lerp -- the silicon-verified 14.92 s / corr 0.977 path -- and the two can be
+ * A/B'd on ONE board run. That is the whole point of not replacing the lerp.
+ * Measured motivation: the 2-tap kernel scallops 29.2 dB at this scene's 0.978-Nyquist band
+ * edge (the linear-interpolation null at mu=0.5); 32 taps brings that to 3.46 dB. */
+#define SAR_SINCMODE_ADDR   0xB0059164u
+#define SAR_SINCMODE_ENABLE 0x534E4331u   /* 'SNC1' */
+
 /* AXI4-Lite register map of sar_resample_v.v. 0x08 keeps the SmartHLS START/busy convention so
  * sar_k_start()/sar_k_wait() work unchanged. */
 #define RSV_CTRL       0x08u   /* W bit0 = start ; R bit0 = busy */
@@ -68,11 +77,12 @@
 #define RSV_OUT_BASE   0x10u
 #define RSV_STATUS2    0x14u   /* RO sticky: [0]extra [1]rlast [2]bresp [3]align [4]sat */
 #define RSV_DIMS       0x18u   /* [15:0] QN outputs, [31:16] SN source samples */
-#define RSV_LCFG       0x1cu   /* [5:0] SH, [13:8] FSH, [16] MODE */
+#define RSV_LCFG       0x1cu   /* [5:0] SH, [13:8] FSH, [16] MODE, [17] SINC */
 #define RSV_COEF_A     0x20u
 #define RSV_COEF_BLO   0x24u
 #define RSV_COEF_BHI   0x28u   /* B is 48-bit signed, split lo/hi */
-#define RSV_TAB_CTRL   0x2cu   /* [1:0] select 0=KR 1=KC 2=TS 3=INV, [2] rewind pointer */
+#define RSV_TAB_CTRL   0x2cu   /* select = {[3],[1:0]}: 0=KR 1=KC 2=TS 3=INV 4=SINC.
+                                * SPLIT because [2] is REWIND and predates the 5th table. */
 #define RSV_TAB_DATA   0x30u   /* table word; the shared pointer auto-increments */
 
 /* Scene-level table state, built once per frame and reused by every line. */
@@ -85,6 +95,16 @@ typedef struct {
 
 /* True unless the knob explicitly forces the legacy path. See the inversion note above. */
 int  sar_rsv_enabled(void);
+
+/* True when SAR_SINCMODE holds 'SNC1'. Opt-in: anything else means the 2-tap lerp. */
+int  sar_rsv_sinc_enabled(void);
+
+/* THE SINC COEFFICIENT TABLE IS LOADED BY THE HOST, NOT BY FIRMWARE.
+ * 256 phases x 32 taps x int16 = 16 KB, and it does not fit: the app's .rodata lives in the
+ * 256 KB L2 scratchpad, which is already full -- linking it overflowed the region by 15,584 bytes,
+ * so even a quarter-size table would not fit. It does not need to be in the image anyway: the
+ * table is SCENE-INDEPENDENT (a function of fractional delay only), so it is a one-time push.
+ * Use mpfs/host/run_sinc_table_load.sh, which streams it into TAB_DATA over JTAG before PIPE. */
 
 /* Build the int32 query table from the staged float32 KR grid and push it into the kernel.
  * `kr` is the krgrid table in DDR, `n_real` the genuine entries, `qn` the padded grid length.

@@ -40,6 +40,11 @@ int sar_rsv_enabled(void)
     return *(volatile uint32_t *)(uintptr_t)SAR_RSVMODE_ADDR != SAR_RSVMODE_LEGACY;
 }
 
+int sar_rsv_sinc_enabled(void)
+{
+    return *(volatile uint32_t *)(uintptr_t)SAR_SINCMODE_ADDR == SAR_SINCMODE_ENABLE;
+}
+
 void sar_rsv_scalars(const sar_rsv_scene_t *sc, double x0, double dx,
                      int32_t *a_out, uint32_t *sh_out, int64_t *b_out)
 {
@@ -110,7 +115,9 @@ void sar_rsv_arm_line(const sar_rsv_scene_t *sc, double x0, double dx,
     sar_rsv_scalars(sc, x0, dx, &a, &sh, &b);
 
     sar_reg_w(K_RESAMPLE, RSV_DIMS, ((sn & 0xFFFFu) << 16) | (sc->qn & 0xFFFFu));
-    sar_reg_w(K_RESAMPLE, RSV_LCFG, (sh & 0x3Fu));           /* FSH unused, MODE 0 = pass 1 */
+    /* LCFG: [5:0] SH, [13:8] FSH (unused in MODE 0), [16] MODE=0 pass 1, [17] SINC */
+    sar_reg_w(K_RESAMPLE, RSV_LCFG,
+              (sh & 0x3Fu) | (sar_rsv_sinc_enabled() ? (1u << 17) : 0u));
     sar_reg_w(K_RESAMPLE, RSV_COEF_A,   (uint32_t)a);
     sar_reg_w(K_RESAMPLE, RSV_COEF_BLO, (uint32_t)((uint64_t)b & 0xFFFFFFFFu));
     sar_reg_w(K_RESAMPLE, RSV_COEF_BHI, (uint32_t)(((uint64_t)b >> 32) & 0xFFFFu));

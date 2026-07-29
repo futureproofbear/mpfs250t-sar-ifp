@@ -1051,6 +1051,8 @@ static int resample_2pass(const sar_geom_t *g, uint32_t spins)
          * into the coefficient buffer, which is worse than reporting failure. */
         uint32_t n_real = (g->N < Np) ? g->N : Np;
         if (sar_rsv_load_kr(g->KR, n_real, Np, &rsv) != 0) return 0;
+        /* The sinc coefficient table is pushed by the HOST over JTAG (see sar_resample_v.h):
+         * 16 KB does not fit in the L2 scratchpad the app's .rodata lives in. */
     }
     /* PASS 1 (range) */
     if (!rsv_on) {

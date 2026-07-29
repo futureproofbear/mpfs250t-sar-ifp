@@ -82,9 +82,18 @@ timer reports CT#2 as 0 and FFT-2 as the merged wall time.
 Non-shipping configurations move these buffers around (`gather_fused` and `det_fused` each flip a
 source or destination). The table above is the one that produces CRC `0x319037b2`.
 
-Current shipping baseline runtime: **18.45 s** (2026-07-27, 100 MHz fabric clock), verified
-bit-exact against the reference crop CRC `0x319037b2` from a cold start. This is the single current
-number; the chronological optimization history (110.8 s → 18.45 s, one measured step at a time)
+Current shipping baseline runtime: **14.92 s** (2026-07-29, 100 MHz fabric clock) — resample
+3.740 s · range-FFT 5.417 s · azimuth-FFT 5.769 s. Set by `sar_resample_v`, which fuses range-gather
+coefficient generation into the fabric so 32 KB `idx` + 16 KB `wq` per line never reach DDR.
+Verified by **correlation 0.977** against the known-good top-left crop, plus a value-level check of
+pass 1 on silicon (99.19% exact against the bit-accurate model). **Not** by CRC equality: this
+kernel is fixed-point where the previous path was float32, so crop CRC is now `0x221e5e7a`
+(top-left) and the older `0x319037b2` was a CENTRE crop of the float32 path — a different
+measurement, not a superseded one. Chip power (vectorless SmartPower): **2.42 W**. Timing margin:
+100 MHz setup slack **+0.255 ns**, the binding constraint on any clock increase.
+
+The previous baseline was 18.45 s (2026-07-27), verified bit-exact at CRC `0x319037b2`.
+This is the single current number; the chronological optimization history (110.8 s → 14.92 s, one measured step at a time)
 lives in `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3 — do not re-derive it here. Orchestration is `sar_form_image()`
 in `src/sar/sar_sequencer.c`.
 

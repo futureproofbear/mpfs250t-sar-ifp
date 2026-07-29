@@ -353,12 +353,19 @@ DETMODE=3 GATHMODE=1 OVLMODE=1 CGENMODE=0x43474E31 DUALFFT=0x44464632 RWRKNW=0x5
 > **From the 2026-07-28 bitstream on, the range gather runs on `sar_resample_v` whether you ask for
 > it or not.** `RSVMODE` (`0xB0059148`) is the one inverted knob on this project — the new core
 > replaced the SmartHLS resample at the same CIC target, so there is no fallback and a cold-boot
-> zero has to mean ON. Two consequences for a run: the frame time is not the 18.45 s baseline, and
-> **crop CRC `0x319037b2` will not match** — the kernel is fixed-point where the old path was
-> float32, deliberately. Validate by correlation against the golden and by eye, then adopt the new
-> CRC. Read `0xB0059150` (line-0 `SH`/`A`/`B`, expect `0x00000018 0x4FE68946 0xE464BAAC
-> 0xFFFFFFFC`) and `0xB005914C` (`STATUS2`, tagged `0x5253`) **before** judging the image: a
-> mismatch at the first explains a bad image outright, a match rules the CPU side out.
+> zero has to mean ON. Measured result (2026-07-29 baseline): frame **14.92 s** (was 18.45 s) and
+> crop CRC `0x221e5e7a`. **CRC `0x319037b2` does not match, by design** — the kernel is fixed-point
+> where the old path was float32, and that CRC was a CENTRE crop of the old path anyway. Validate by
+> **correlation** against `jtag_full/crop_topleft.bin` (0.977 measured), not CRC equality.
+> Read `0xB0059150` (line-0 `SH`/`A`/`B`, expect `0x00000018 0x4FE68946 0xE464BAAC 0xFFFFFFFC`) and
+> `0xB005914C` (`STATUS2`, expect `0x52530000` — tag `0x5253`, zero error bits) **before** judging
+> the image: a mismatch at the first explains a bad image outright, a match rules the CPU side out.
+>
+> **Use the TOP-LEFT crop to assess the image, not the centre.** Rows/cols 3584..4608 of the
+> Centerfield scene are low-return (peak ~76 against ~3030 top-left), so a centre crop looks
+> alarmingly dim and correlates near zero against a top-left reference. That mistake cost a full
+> debugging session on 2026-07-29. `EROI` encodes `.base=(r0<<16)|r1`, `.len=(c0<<16)|c1`, so
+> top-left 1024×1024 is `base=0x00000400 len=0x00000400`.
 This is the `PIPE` command (`0x50495045`). The runner:
 - selects the shipping **fabric CoreFFT** chain by setting `FFTMODE @0xB0059110 = 1` before arming
   (mode 0 is the legacy CPU-FFT fallback);

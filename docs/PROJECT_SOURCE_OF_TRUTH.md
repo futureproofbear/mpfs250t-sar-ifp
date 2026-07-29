@@ -58,9 +58,19 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/USER_GUIDE.md`
 > §4 (eMMC boot-load) + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > §10 below + the personas under `.claude/agents/`.
-> **Pipeline total: 18.45 s** (measured 2026-07-27, 100 MHz, commit `d07bce7`, bit-exact at crop
-> CRC `0x319037b2`). Window AND detect are fused into the FFT passes; no CPU stage remains in the
-> datapath. Per stage: resample 7.267 s · range-FFT 5.788 s · azimuth-FFT 5.396 s.
+> **Pipeline total: 14.92 s** (measured 2026-07-29, 100 MHz, `sar_resample_v` baseline). Window AND
+> detect are fused into the FFT passes; no CPU stage remains in the datapath, and from this baseline
+> the range-gather coefficients are generated ON FABRIC too, so they never reach DDR.
+> Per stage: resample 3.740 s · range-FFT 5.417 s · azimuth-FFT 5.769 s.
+> Validated by **correlation 0.977** against the known-good top-left crop, NOT by CRC: the kernel is
+> fixed-point where the old path was float32, so crop CRC is now `0x221e5e7a` and the previous
+> `0x319037b2` (a CENTRE crop of the float32 path) is a different measurement, not a superseded one.
+> Chip power, vectorless SmartPower: **2.42 W** (437 mW static / 1980 mW dynamic) — ballpark; the
+> useful signal is the build-to-build delta.
+> Timing margin: 100 MHz fabric setup slack **+0.255 ns** (2.6%) — the binding constraint;
+> 12.5 MHz SLOWCLK +67.5 ns.
+> Previous baseline for reference: 18.45 s (2026-07-27, commit `d07bce7`, crop CRC `0x319037b2`),
+> per stage resample 7.267 s · range-FFT 5.788 s · azimuth-FFT 5.396 s.
 > Authoritative table: `docs/ARCHITECTURE.md` §2.
 > How it got here: 110.8 s -> 88.1 s (targeted CCACHE `FLUSH64` writeback of the coefficient banks
 > replacing a per-line whole-L2 flush) -> 79.79 s (2-D Hamming window fused into the range-FFT

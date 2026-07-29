@@ -119,3 +119,41 @@ gather would, from a 2-tap lerp to a 4-tap Horner cascade (which also needs 4-wa
 **Do that as a separate, separately-gated change.** Cubic alters every output pixel, so it
 invalidates CRC `0x319037b2` and the golden reference itself (`sar_pipeline.py` uses `np.interp`,
 which is linear). Land this core bit-exact first.
+
+## STATE AT 2026-07-29 POWER-OFF — read this first next session
+
+**The board is NOT in a usable state and the ELF on it is stale.**
+
+| thing | state |
+|---|---|
+| Fabric (persists across power-off) | `sar_resample_v` bitstream — **cannot form a correct image** |
+| eNVM app on the board | the OLD build, with the M2 probe defect (`bb0c6c9` is **not** flashed) |
+| Rebuilt ELF on disk | current, probe fixed, `make all` clean — needs flashing + power-cycle |
+| eMMC scene 0 (Centerfield) | intact, reloadable in ~81.5 s (`ELOD`) |
+| DDR | wiped by the power-off, as always |
+
+To make the board useful again, either flash the rebuilt ELF and continue debugging, or run
+`mpfs/host/restore_bitstream.sh` and set `RSVMODE='RSV0'` to get back the 18.45 s / CRC `0x319037b2`
+configuration. There is no third option: this bitstream has no fallback pass-1 path.
+
+### What is settled, and what is not
+
+Settled — do not re-investigate:
+
+- The RTL is correct. At the true silicon parameterisation (`TAB_AW=13 BUF_AW=12 MAX_BURST=64
+  WF_AW=8`) and real scene scale (`SN=4319 QN=8192`, `SH=24 A=1340508486 B=-13348062548`), MODE 0
+  gathers **8192/8192 words correctly** on both `IN_BASE` parities, reset and re-armed.
+- The control port really does decode 6 bits — `mpfs/host/run_rsv_alias_test.sh` proves it on
+  silicon in ~40 s without a scene. Table aliasing is NOT the fault.
+- MODE 0 reads the KR table (sel 0), which is what the firmware loads.
+- Coefficient math matches the CPU reference (98.66% identical `idx`, differences only ±1).
+- Per-line scalars: float64 firmware path identical to exact rational over all 5634 lines.
+- `err_align` came from the M2 boot probe arming with the SmartHLS contract (`qn=0`, `sn=0x9800`).
+  Fixed in `bb0c6c9`.
+
+**Still unexplained: the image itself** (corr −0.04, peak 76 vs 3069, no terrain structure). Nothing
+above accounts for it. Do not treat the `err_align` fix as the diagnosis.
+
+Cheapest next step: flash the rebuilt ELF, power-cycle, `ELOD`, `PIPE`, then read `0xB005914C` and
+`0xB0059150`. Until `bb0c6c9` is on the board those two words are meaningless — `STATUS2` is sticky
+with no software clear and the old probe latched it at every boot.

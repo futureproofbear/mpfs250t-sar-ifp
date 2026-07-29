@@ -58,8 +58,34 @@ module tb_sar_sinc32;
         end
     end
 
+
+    // ---- DIAGNOSTIC: what the DUT actually used, per accepted request ----
+    // v1 is asserted once per accepted (non-edge) request, in order, so the k-th v1 pairs with
+    // the k-th output. Snapshot the rotation and phase it committed to, plus the 32 bank words
+    // it will multiply, so a mismatch can be attributed to ADDRESSING or to COEFFICIENTS rather
+    // than inferred from the output value.
+    integer v1_n = 0, dumpsel = -1, fh2, pt;
+    reg [7:0]  used_ph  [0:NEXP+8];
+    reg [5:0]  used_rot [0:NEXP+8];
+    always @(posedge clk) begin
+        if (resetn && dut.v1) begin
+            if (v1_n <= NEXP) begin
+                used_ph[v1_n]  = dut.ph1;
+                used_rot[v1_n] = dut.rot1;
+            end
+            if (v1_n == dumpsel) begin
+                $fwrite(fh2, "sel %0d rot %0d ph %0d\n", v1_n, dut.rot1, dut.ph1);
+                for (pt = 0; pt < TAPS; pt = pt + 1)
+                    $fwrite(fh2, "sq %0d %08x\n", pt, dut.sq[pt]);
+            end
+            v1_n = v1_n + 1;
+        end
+    end
+
     integer i, p, t, k, nedge;
     initial begin
+        fh2 = $fopen("s32_probe.txt", "w");
+        if ($value$plusargs("SEL=%d", dumpsel)) $display("  probing accepted request %0d", dumpsel);
         $readmemh("s32_coef.hex", coef);
         $readmemh("s32_src.hex",  src);
         $readmemh("s32_req.hex",  req);
@@ -117,8 +143,10 @@ module tb_sar_sinc32;
         begin : dump
             integer fh;
             fh = $fopen("s32_got.hex", "w");
-            for (k = 0; k < got_n; k = k + 1) $fwrite(fh, "%08x\n", got[k]);
+            for (k = 0; k < got_n; k = k + 1)
+                $fwrite(fh, "%08x %0d %0d\n", got[k], used_rot[k], used_ph[k]);
             $fclose(fh);
+            $fclose(fh2);
         end
 
         if (errors == 0)

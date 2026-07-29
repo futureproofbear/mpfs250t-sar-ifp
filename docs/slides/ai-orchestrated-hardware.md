@@ -239,7 +239,7 @@ Forming the image **on the spacecraft** changes what can be sent and when:
 | | |
 |---|---|
 | **Goal** | Turn raw radar pulses into a focused image, entirely on one chip |
-| Input | Complex phase history data (CPHD), up to 8192 pulses × 8192 samples |
+| Input | Compensated phase history data (CPHD), up to 8192 pulses × 8192 samples |
 | Output | 8192 × 8192 focused image, uint16 magnitude |
 | Algorithm | Polar Format Algorithm (PFA) |
 | Hardware | PolarFire SoC MPFS250T — 4× U54 RISC-V @ 600 MHz + FPGA fabric |
@@ -290,9 +290,6 @@ about **moving data**: burst shape, DDR read latency, and one 64-bit port shared
 eMMC, focused in **18.45 s**, and written back as a uint16 image — no host involvement in the
 datapath. Orchestration is a bare-metal sequencer on one RISC-V hart, with three more harts doing
 the coefficient and renormalisation work in parallel.
-
-Input is **CPHD** — phase history that already carries its motion compensation, which is what the
-"C" stands for. The pipeline takes it from there.
 
 ---
 

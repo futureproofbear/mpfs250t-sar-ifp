@@ -58,7 +58,7 @@ An 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device hold
 | LSRAM | 812 × 20 Kb = **~2.0 MB** |
 | µSRAM | 2,352 × 768 b = **~0.2 MB** |
 | MSS L2 (as scratchpad) | **2 MiB** |
-| **Total** | **~4 MB — about 1/64th of one frame** |
+| **Total** | **~4.4 MB — about 1/58th of one frame** |
 
 So no stage can be held on chip, and *every* stage streams through DDR.
 This constraint drives the whole processing architecture:

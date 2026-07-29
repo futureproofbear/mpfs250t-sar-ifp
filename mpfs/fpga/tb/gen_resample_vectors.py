@@ -338,7 +338,9 @@ def main():
     ap.add_argument("--real", metavar="STAGE", nargs="?", const="../../host/jtag_stage_deci1",
                     help="emit ONE full-scale case from a staged scene instead of the small "
                          "suite (SN=4319, QN=8192 -- the geometry silicon actually runs)")
-    ap.add_argument("--line", type=int, default=0, help="which pulse, with --real")
+    ap.add_argument("--lines", default="0", help="comma-separated pulse indices, with --real. "
+                    "MORE THAN ONE is the point: silicon arms 5634 DIFFERENT lines back-to-back "
+                    "against ONE table load, and the bench had only ever re-armed the SAME line")
     a = ap.parse_args()
 
     if a.real:
@@ -346,21 +348,25 @@ def main():
         # 1 KB source slot cannot hold a 4319-sample line or an 8192-entry query grid.
         MAXTAB = MAXQ = 8192
         IN_WORDS_PER_CASE = OUT_WORDS_PER_CASE = 8192
-        OUT_WORD_BASE = 2 * IN_WORDS_PER_CASE
         # +16 words of GUARD past the output region. finish() checks for writes past the line;
         # without room for it the TB reads outside its own array and reports 8 phantom 'wrote
         # past the line (xxxxxxxx)' failures that look like a DUT overrun. Cost real debugging
         # time on 2026-07-29 -- the guard must EXIST for the guard check to mean anything.
-        MEM_WORDS = OUT_WORD_BASE + 2 * (OUT_WORDS_PER_CASE + 16)
-        MEM_BEATS = MEM_WORDS // 2
         stage = here / a.real if not pathlib.Path(a.real).is_absolute() else pathlib.Path(a.real)
         # BOTH IN_BASE parities. On silicon a pulse row is N*4 = 17276 bytes, and 17276 mod 8 = 4,
         # so every ODD pulse starts 4 bytes into a 64-bit beat and takes the rd_odd path. Testing
         # only the aligned one would cover half the real frame.
-        build_real("real-even", stage, a.line, in_odd=False,
-                   note="REAL geometry, silicon scale, 8-byte-aligned IN_BASE")
-        build_real("real-odd", stage, a.line, in_odd=True,
-                   note="REAL geometry, silicon scale, 4-byte-offset IN_BASE (odd pulses)")
+        lines = [int(x) for x in a.lines.split(",")]
+        for n, ln in enumerate(lines):
+            # parity alternates exactly as on silicon: a pulse row is N*4 = 17276 bytes and
+            # 17276 mod 8 = 4, so odd pulses start 4 bytes into a beat (the rd_odd path).
+            build_real(f"real-L{ln}", stage, ln, in_odd=bool(ln & 1),
+                       note=f"REAL line {ln}, silicon scale, "
+                            f"{'4-byte-offset' if ln & 1 else 'aligned'} IN_BASE")
+        nc = len(lines)
+        OUT_WORD_BASE = nc * IN_WORDS_PER_CASE
+        MEM_WORDS = OUT_WORD_BASE + nc * (OUT_WORDS_PER_CASE + 16)
+        MEM_BEATS = MEM_WORDS // 2
         return finish(here)
 
     # (a) MODE=0 ascending (dx>0) -- queries walk from below the grid to past its end, so the

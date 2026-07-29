@@ -122,6 +122,7 @@ binary is behaviour-neutral until switched — with one deliberate exception, `R
 | `RWRKNW` | `0xB005912C` | `0x52575204` (`'RWR'`\|4) | renormalize split over 4 harts |
 | `FFTBLK` | `0xB0059140` | `64` | rows a chain takes before handover |
 | `WORKBUF` | `0xB0059144` | *(disabled)* | would route corner-turns via WORK |
+| `SINCMODE` | `0xB0059164` | *(leave unset)* | `0x534E4331` (`'SNC1'`) selects the **32-tap polyphase sinc** gather over the 2-tap lerp (LCFG[17]). Opt-in and genuinely fail-safe: both kernels are in the bitstream, so a cold-boot zero gets the silicon-verified lerp. **The coefficient table must be pushed first** — `bash mpfs/host/run_sinc_table_load.sh` — because 16 KB does not fit in the firmware image. |
 | `RSVMODE` | `0xB0059148` | *(leave unset)* | **INVERTED — on by default.** Range gather via `sar_resample_v`, coefficients generated on fabric |
 
 Each magic value is **the only accepted value** — anything else means off. Passed as environment

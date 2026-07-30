@@ -214,3 +214,5 @@ mpfs/fpga/tb/s32_*.hex
 mpfs/fpga/tb/s32_dims.vh
 mpfs/fpga/trial_sinc32/
 mpfs/host/jtag_full/sinc_table.gdb
+mpfs/fpga/tb/work_*/
+mpfs/fpga/tb/s32_probe.txt

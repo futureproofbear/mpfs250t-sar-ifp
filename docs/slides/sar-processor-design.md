@@ -14,7 +14,7 @@ style: |
   }
   section > * { max-width: 100%; }
   section p, section ul, section ol, section blockquote { width: 100%; }
-  section table { font-size: 20px; }
+  section table { font-size: 16px; }
   section pre { font-size: 18px; }
   section h1 { font-size: 40px; }
   section h2 { font-size: 32px; }
@@ -51,7 +51,7 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
 
 # Resource constraints on the MPFS250T
 
-An 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device holds far less:
+A 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device does not have enough memory to process fully on chip:
 
 | on-chip memory | MPFS250T |
 |---|---|
@@ -60,20 +60,22 @@ An 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device hold
 | MSS L2 (as scratchpad) | **2 MiB** |
 | **Total** | **~4.4 MB — about 1/58th of one frame** |
 
-So no stage can be held on chip, and *every* stage streams through DDR.
-This constraint drives the whole processing architecture:
-
+No processing stage can be held on chip, and every stage needs to stream through DDR. This constraint drives the whole processing architecture:
 - the design is **bandwidth-bound, not compute-bound**
 - the fabric↔DDR port (FIC_0, 64-bit @ 100 MHz ≈ **800 MB/s**) is the scarce resource
 - **every DDR round-trip costs more than any arithmetic optimisation**
 
-The engineering goal is therefore *fewer passes over the data*, not faster maths.
+The engineering approach is therefore *fewer passes over the data*, not faster maths.
 
 ---
 
 # Part 2 — The Python reference pipeline
 
+<br>
+
 ![w:1150](diagrams/fig-sar-python.drawio.svg)
+
+<br>
 
 `src/form_image_pfa.py` — python implementation of the Polar Format Algorithm (PFA), .
 
@@ -97,18 +99,14 @@ what later makes on-fabric coefficient generation possible.
 
 ---
 
-# The PFA geometry — why there are two resamples
+# The PFA geometry — polar in, rectangular out
 
-![w:1080](diagrams/fig-sar-kspace.drawio.svg)
+![w:1120](diagrams/fig-sar-kspace.drawio.svg)
 
+The middle panel is the one that earns its place: after the range resample the **columns** line up
+(every pulse now shares one $k_x$ grid) but the **rows** do not, because each pulse was only made
+uniform along its own radial. That is precisely why a second, azimuth resample is needed.
 ---
-
-# ① Range resample — drawn
-
-![w:1120](diagrams/fig-sar-range-resamp.drawio.svg)
-Each pulse carries its own grid; the output grid is shared. `mu` is the fractional position of the
-query between two source samples — and **how well a kernel estimates the signal at that fractional
-point is the entire interpolation question**, which is what tap count and scalloping measure.
 
 ---
 

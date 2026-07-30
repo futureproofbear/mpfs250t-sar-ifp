@@ -31,10 +31,19 @@ MUTATION CHECKS (state what breaks it; the TB catches each -- see tb header):
   * lose a stray R beat's err latch, or let it shift a bank: case 3 (stray) catches both.
 """
 import pathlib
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# The sinc reference is NOT re-derived here. gen_resample_vectors.py's table and gather are the
+# authority the pass-1 sinc core is already validated against, edge rule included; writing a second
+# implementation would only prove the two agree with each other.
+from gen_resample_vectors import sinc_table_q15, gather_sinc      # noqa: E402
 
 QN     = 32                 # outputs per case (even; tap words = QN/2 = 16)
 MAXOUT = QN // 2            # output beats per case
-CFGW   = 11
+CFGW   = 12                 # +1: sinc enable (GATHER_CTRL[2])
+SINC_TAPS   = 32
+SINC_PHASES = 256
 NEG1_32 = 0xFFFFFFFF        # -1 as u32
 
 
@@ -94,13 +103,15 @@ HAMR = [q15(0.90 * 32768), q15(-0.31 * 32768), q15(0.77 * 32768),
         q15(0.55 * 32768), q15(-0.62 * 32768), q15(0.40 * 32768)]
 
 
+SINC_TAB = sinc_table_q15(SINC_PHASES, SINC_TAPS)
+
 # ---------------------------------------------------------------------------- case builders
 CASES = []
 
 
-def add_case(name, gath_en, win_en, S, idx, wq, hamr, nbeats, inject, note):
+def add_case(name, gath_en, win_en, S, idx, wq, hamr, nbeats, inject, note, sinc=0):
     CASES.append(dict(name=name, gath_en=gath_en, win_en=win_en, S=S, idx=idx, wq=wq,
-                      hamr=hamr, nbeats=nbeats, inject=inject, note=note))
+                      hamr=hamr, nbeats=nbeats, inject=inject, note=note, sinc=sinc))
 
 
 def wq_varied(seed):
@@ -134,6 +145,28 @@ add_case("descend", 1, 1, S_G, _desc, wq_varied(101), HAMR[4], 0, 0,
 # bonus: gather with window OFF (proves win_en gating inside gather mode)
 add_case("nowin", 1, 0, S_G, [i for i in range(QN)], wq_varied(7), HAMR[5], 0, 0,
          "gather on, window off")
+
+# ---- 32-TAP SINC ARM (GATHER_CTRL[2]) -------------------------------------------------------
+# S_S is deliberately large enough to have a real INTERIOR. A 32-tap window needs idx in
+# [15, S-17], so at the old S_G=36 only idx 15..19 would qualify and the case would be almost all
+# edge-fallback -- it would pass while barely touching the sinc datapath. At S=96 the interior is
+# idx 15..79, so the interior case below is 32/32 genuine sinc outputs.
+S_S = 96
+
+# (g) sinc INTERIOR: every idx has a full 32-tap window, window ON
+add_case("sinc_in", 1, 1, S_S, [15 + i for i in range(QN)], wq_varied(13), HAMR[0], 0, 0,
+         "32-tap sinc, all interior", sinc=1)
+# (h) sinc EDGES: straddles both ends of the sinc support so the lerp fallback is selected on
+# exactly the queries the RTL's s_edge marks -- the two bounds are computed independently
+# (Python: k < -lo or k > sn-(taps+lo); RTL: idx < 15 or idx > S-17) and must agree query for query.
+_se = [i for i in range(QN)]                 # 0..31: idx 0..14 below the sinc support
+_se[QN - 1] = S_S - 16                       # just past the high bound -> fallback
+_se[QN - 2] = S_S - 17                       # exactly ON the high bound -> full sinc (the idx=4302 trap)
+add_case("sinc_edge", 1, 1, S_S, _se, wq_varied(57), HAMR[1], 0, 0,
+         "32-tap sinc across both support bounds", sinc=1)
+# (i) sinc with window OFF, so the sinc value reaches the output unscaled
+add_case("sinc_nowin", 1, 0, S_S, [20 + i for i in range(QN)], wq_varied(91), HAMR[5], 0, 0,
+         "32-tap sinc, window off", sinc=1)
 
 
 # ------------------------------------------------------------------------------ pack helpers
@@ -177,6 +210,13 @@ def expected(cs):
         return outs
     src, S, idx, wq = cs["src"], cs["S"], cs["idx"], cs["wq"]
     outs = []
+    if cs.get("sinc"):
+        # gather_sinc applies the SAME 2-tap fallback outside the 32-tap support that the RTL's
+        # s_edge selects, so this is a like-for-like compare across the whole row, edges included.
+        gs = gather_sinc(src, idx, wq, S, tab=SINC_TAB, taps=SINC_TAPS)
+        for i in range(QN):
+            outs.append(window_sample(gs[i], cs["hamr"], hamc[i]) if cs["win_en"] else gs[i])
+        return outs
     for i in range(QN):
         g = gather_sample(src, S, idx[i], wq[i])
         outs.append(window_sample(g, cs["hamr"], hamc[i]) if cs["win_en"] else g)
@@ -213,17 +253,23 @@ def main():
         exp.extend(beats_out)
         err = 0x1 if cs["inject"] else 0x0            # bit0 = err_extra expected
         cfg += [cs["gath_en"], cs["win_en"], cs["hamr"] & 0xFFFF, src_base, idx_base, wq_base,
-                S, QN, cs["nbeats"], cs["inject"], err]
+                S, QN, cs["nbeats"], cs["inject"], err, cs.get("sinc", 0)]
 
     w = lambda n, s: (here / n).write_text(s)
     w("ga_mem.hex", "".join(f"{v & ((1 << 64) - 1):016x}\n" for v in mem))
     w("ga_tab.hex", "".join(f"{v & 0xFFFFFFFF:08x}\n" for v in tab))
     w("ga_exp.hex", "".join(f"{v & ((1 << 64) - 1):016x}\n" for v in exp))
     w("ga_cfg.hex", "".join(f"{v & 0xFFFFFFFF:08x}\n" for v in cfg))
+    # sinc coefficient table, phase-major, one Q15 tap per line -- the order sar_sinc32_gather's
+    # ct_we write pointer expects.
+    w("ga_sinc.hex", "".join(f"{t & 0xFFFF:04x}\n"
+                             for ph in SINC_TAB for t in ph))
     names = " \\\n".join(f'    names[{c}] = "{cs["name"]}";' for c, cs in enumerate(CASES))
     w("ga_dims.vh",
       f"`define NCASES {len(CASES)}\n`define QN {QN}\n`define MAXOUT {MAXOUT}\n"
       f"`define TAB_WORDS {QN // 2}\n`define CFGW {CFGW}\n`define MEM_BEATS {len(mem)}\n"
+      f"`define SINC_TAPS {SINC_TAPS}\n`define SINC_PHASES {SINC_PHASES}\n"
+      f"`define SINC_WORDS {SINC_TAPS * SINC_PHASES}\n"
       f"`define CASE_NAMES \\\n{names}\n")
 
     print(f"{'case':10s} {'gath':>4s} {'win':>3s} {'S':>3s} {'QN':>3s} {'src':>5s} {'idx':>5s} "

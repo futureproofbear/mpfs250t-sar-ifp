@@ -78,6 +78,7 @@ module tb_fft_feeder_gather;
     reg [63:0] exp [0:`NCASES*`MAXOUT-1];
     reg [31:0] tab [0:`TAB_WORDS-1];
     reg [31:0] cfg [0:`NCASES*`CFGW-1];
+    reg [15:0] sinctab [0:`SINC_WORDS-1];      // 256 phases x 32 taps, Q15, phase-major
     reg [8*12:1] names [0:`NCASES-1];
 
     // ---- DUT wires ----
@@ -271,6 +272,8 @@ module tb_fft_feeder_gather;
     // ================= test =================
     integer cid, b, k, errors, total_errors, mode, nmode, ab_errors, ddr_beats;
     reg [31:0] c_gath, c_win, c_hamr, c_src, c_idxb, c_wqb, c_s, c_qn, c_nb, c_inj, c_err;
+    reg [31:0] c_sinc;
+    integer    ti;
     reg [31:0] st14;
     reg [63:0] want, tmpw;
     reg [63:0] got_ddr [0:`MAXOUT-1];     // DDR-coefficient reference run, for the A/B compare
@@ -281,6 +284,7 @@ module tb_fft_feeder_gather;
         $readmemh("ga_exp.hex", exp);
         $readmemh("ga_tab.hex", tab);
         $readmemh("ga_cfg.hex", cfg);
+        $readmemh("ga_sinc.hex", sinctab);
         `CASE_NAMES
 
         s_awvalid=0; s_wvalid=0; s_arvalid=0; s_awaddr=0; s_wdata=0; s_araddr=0;
@@ -292,6 +296,7 @@ module tb_fft_feeder_gather;
             c_src  = cfg[cid*`CFGW+3]; c_idxb= cfg[cid*`CFGW+4]; c_wqb  = cfg[cid*`CFGW+5];
             c_s    = cfg[cid*`CFGW+6]; c_qn  = cfg[cid*`CFGW+7]; c_nb   = cfg[cid*`CFGW+8];
             c_inj  = cfg[cid*`CFGW+9]; c_err = cfg[cid*`CFGW+10];
+            c_sinc = cfg[cid*`CFGW+11];
 
             // mode 0 = coefficients from DDR (shipping path). mode 1 = same values on the stream.
             // Only gather-enabled cases have a coefficient source to switch.
@@ -345,7 +350,17 @@ module tb_fft_feeder_gather;
             for (k = 0; k < `TAB_WORDS; k = k + 1) lite_w(12'h01c, tab[k]);
 
             // program the row
-            lite_w(12'h020, {30'd0, (mode == 1), c_gath[0]}); // GATHER_CTRL [1]=stream coeffs
+            // 32-tap sinc coefficient table. Pushed BEFORE GATHER_CTRL so the core is armed only
+            // once its table is complete: an unloaded table is all zeros, every phase then weights
+            // the same tap, and the failure looks like an interpolation bug rather than a missing
+            // load. Rewind first so a re-run cannot append to a stale pointer.
+            if (c_sinc[0]) begin
+                lite_w(12'h020, 32'h0000_0008);              // GATHER_CTRL[3] = rewind sinc table
+                for (ti = 0; ti < `SINC_WORDS; ti = ti + 1)
+                    lite_w(12'h030, {16'd0, sinctab[ti]});   // SINC_TAB, pointer auto-increments
+            end
+            // GATHER_CTRL [1]=stream coeffs, [2]=32-tap sinc
+            lite_w(12'h020, {29'd0, c_sinc[0], (mode == 1), c_gath[0]});
             lite_w(12'h018, {15'd0, c_win[0], c_hamr[15:0]}); // WIN_CTRL (bit17=0, no rewind)
             lite_w(12'h00c, c_src);                           // ARG0 = src_base
             if (c_gath[0]) begin

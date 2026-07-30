@@ -88,7 +88,7 @@ The engineering approach is therefore *fewer passes over the data*, not faster m
 Middle panel — **pass 1** resamples every pulse onto the common grid $K_R$. Because $p_r[i]$ is a
 projection onto the mean look direction, $k_r$ is the $k_y$ component, so this makes $k_y$ uniform. $k_x$ still carries an angular increment, leaving a **trapezoid**.
 Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_x$ uniform too.
-
+<!--Not clear what is k_y and k_x-->
 ---
 
 # ① Range resample — keystone, fast-time
@@ -104,13 +104,9 @@ $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,
 |---|---|---|
 | $f_0[i]$ | `freq[i,0]` | first RF frequency of pulse $i$ |
 | $\Delta f[i]$ | `freq[i,1] - freq[i,0]` | step per sample — the ramp is linear, so one difference defines it |
-| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d=\cos\phi_i$ — projection on the **mean** look direction $\hat d=(dx,dy)/dn$. (`dx,dy` are that mean vector; nothing to do with $\Delta x_i$.) |
+| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d=\cos\phi_i$ — projection on the **mean** look direction $\hat d=(dx,dy)/dn$. (`dx,dy` are that mean vector; nothing to do with $\Delta x_i$). $p_r[i]$ is what makes $k_r$ the $k_y$ component, which is why pass ① lines the rows up. |
 | $x_{0,i}$ | `a*f0[i]`, with `a = 2*pr[i]/c` | this pulse's grid origin |
 | $\Delta x_i$ | `a*df[i]` | its spacing — the value ① divides by |
-
-$p_r[i]$ is what makes $k_r$ the $k_y$ component, which is why pass ① lines the rows up; $\phi_i$
-returns as $\tan\phi$ in pass ②. The $k_r$ above drops the common $2/c$: it scales source and query
-alike, so it cancels in $(k,\mu)$ — but the code carries it, so keep it when reproducing $x_{0,i}$.
 
 ---
 
@@ -136,9 +132,17 @@ $$c_n(\mu) \;=\; \frac{\operatorname{sinc}(n-15-\mu)}{\sum_{m=0}^{31}\operatorna
 
 # ② Azimuth resample — finding $(k,\mu)$
 
-After the transpose a row is one range bin $r$: $M$ pulses, resampled onto the uniform cross-range
-grid $K_C[q]$. The source abscissa is the sorted aspect-angle tangent τ = tan φ = $\tau[0\ldots M{-}1]$ — and
-unlike ①, it is **not uniform**.
+After pass ①, a sample from pulse $i$ sits in k-space at $k_y = k \cdot \cos \phi_i$ → resampled onto the uniform grid.
+
+After the transpose a row is one range bin $r$. So along row $r$ the source abscissa in $k_x$ units is $K_R[r] \cdot \tau[m]$ where $\tau = \tan \phi$ sorted. Pass ② wants output at uniform $K_C[q]$. 
+
+$M$ pulses, to be resampled onto the uniform cross-range grid $K_C[q]$. The source abscissa is the sorted aspect-angle tangent τ = tan φ = $\tau[0\ldots M{-}1]$ — and unlike ①, it is **not uniform**.
+
+, so for row $r$ it is exactly $K_R[r]$
+k_x = k·sin φᵢ = k_y·tan φᵢ = K_R[r]·tan φᵢ. 
+
+
+So solving $K_C[q] = K_R[r] \cdot \tan \phi$ → $\tan \phi = K_C[q]/K_R[r] ≡ u$. u is just the desired location expressed as a tangent instead of a frequency — which lets the search run against τ directly.
 
 $$u \;=\; \frac{K_C[q]}{K_R[r]},\qquad
 k \;=\; \max\{\,m : \tau[m] \le u\,\},\qquad
@@ -159,17 +163,11 @@ a **rectangular** $k$-space grid.
 
 ---
 
-Why u = K_C[q]/K_R[r] — it's a change of units that makes the source table row-invariant.
 
-After pass ①, a sample from pulse i sits in k-space at
-
-k_y = k·cos φᵢ → resampled onto the uniform grid, so for row r it is exactly K_R[r]
-k_x = k·sin φᵢ = k_y·tan φᵢ = K_R[r]·tan φᵢ
-So along row r the source abscissa in k_x units is K_R[r]·τ[m], where τ = tan φ sorted. Pass ② wants output at uniform K_C[q], so solve K_C[q] = K_R[r]·tan φ → tan φ = K_C[q]/K_R[r] ≡ u. u is just the desired location expressed as a tangent instead of a frequency — which lets the search run against τ directly.
 
 That matters because τ is row-invariant: the same 705-entry table for all 8192 rows. Search in k_x units instead and the source abscissa K_R[r]·τ[m] changes every row, so you'd rebuild or rescale the whole table 8192 times.
 
-One wrinkle worth knowing: the code doesn't literally divide. sar_coeffs_pass2_range brackets in k_x — SRC(k) = kr*tan_s[k] against KC[q] — and forms μ = (q − x0)·inv with inv = s_inv_tan[k]·(1/kr). Expand it and you get (u − τ[k])/(τ[k+1] − τ[k]), identical to the slide. The rearrangement is the point: s_inv_tan[k] = 1/(τ[k+1] − τ[k]) stays line-invariant and precomputed once per scene, so the row costs one divide (1/kr) instead of one per query — sar_resample_coeffs.c:11-14 records that as 46M divides collapsing to 8192.
+One wrinkle worth knowing: the code doesn't literally divide. sar_coeffs_pass2_range brackets in k_x — SRC(k) = kr*tan_s[k] against KC[q] — and forms μ = (q − x0)·inv with inv = s_inv_tan[k]·(1/kr). Expand it and you get (u − τ[k])/(τ[k+1] − τ[k]), identical to the slide. The rearrangement is the point: s_inv_tan[k] = 1/(τ[k+1] − τ[k]) stays line-invariant and precomputed once per scene, so the row costs one divide (1/kr) instead of one per query
 
 ---
 
@@ -329,37 +327,48 @@ with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalar
 
 ---
 
-# Resource utilisation and timing — linear build
+# Resource utilisation and timing closure
 
-| resource | used | device | note |
+| resource | used | device | % | note |
+|---|---|---|---|---|
+| 4LUT | 124,380 | 254,196 | 49 % | |
+| DFF | 86,910 | 254,196 | 34 % | |
+| **LSRAM** | **537** | **812** | **66 %** | line buffers, FFT ping-pong, 2×32 sinc banks |
+| uSRAM | 1,620 | 2,352 | 69 % | polyphase coefficient tables |
+| **MACC** | **202** | **784** | **26 %** | still *not* compute-bound |
+| User I/O | 11 | 144 | 8 % | |
+
+| clock domain | period | setup slack | verdict |
 |---|---|---|---|
-| 4LUT | 85,288 | 250 K | |
-| DFF | 63,417 | 250 K | |
-| **LSRAM** | **441** | | line buffers, FFT ping-pong, coefficient tables |
-| **MACC** | **74** | **784** | 9 % — the design is *not* compute-bound |
-| Chip power | **2.42 W** | | 437 mW static / 1980 mW dynamic (vectorless) |
+| **fabric 100 MHz** | 10.000 ns | **+0.151 ns** | multi-corner `VIOLRPT` clean |
+| CoreFFT 12.5 MHz | 80.000 ns | +67.784 ns | clean |
 
-| clock domain | period | setup slack | hold slack |
-|---|---|---|---|
-| **fabric 100 MHz** | 10.000 ns | **+0.255 ns** | +0.038 ns |
-| CoreFFT 12.5 MHz | 80.000 ns | +67.536 ns | +0.069 ns |
-
-The 100 MHz domain has **2.6 % margin** — it is the binding constraint on any future change.
+The 100 MHz domain is down to **1.5 % margin** from 2.6 % — the two sinc cores consumed 40 % of the
+remaining headroom, and it stays the binding constraint. The critical path is `COEFG`'s multiplier,
+**not** the interpolator: the sinc did not create the critical path, congestion degraded an existing
+one.
 
 ---
 
-# Pipeline timing — where the 14.92 s goes
+# Pipeline timing — where the 14.17 s goes
+
+Measured on Centerfield (5,634 × 4,319 → 8192 grid), both 32-tap sinc interpolators armed.
 
 | stage | time | share | limited by |
 |---|---|---|---|
-| Range gather | **3.74 s** | 25 % | DDR read latency |
-| FFT-1 (+ gather, window) | **5.42 s** | 36 % | CoreFFT `SLOWCLK` |
-| FFT-2 (+ detect) | **5.77 s** | 39 % | CoreFFT `SLOWCLK` |
-| Window, corner-turns, detect | **0 s** | — | fused / overlapped |
-| **Total** | **14.92 s** | | **within the 15 s budget** |
+| Resample — range gather | **1.67 s** | 12 % | DDR read latency |
+| Resample — corner-turn #1 | **2.06 s** | 15 % | global transpose, not parallelisable |
+| FFT-1 (+ azimuth gather, window) | **4.65 s** | 33 % | CoreFFT `SLOWCLK` |
+| FFT-2 (+ detect, CT#2 overlapped) | **5.78 s** | 41 % | CoreFFT `SLOWCLK` |
+| Window, azimuth gather, detect, CT#2 | **0 s** | — | fused / overlapped |
+| **Total** | **14.17 s** | | **within the 15 s budget** |
 
-The FFTs are now **75 %** of the frame, and their domain has 84 % timing margin — the clearest
-remaining lever is the CoreFFT clock, not the resample.
+The FFTs are **74 %** of the frame and their domain has 85 % timing margin, so the CoreFFT clock —
+not the resample — remains the clearest lever.
+
+**Both sincs are faster than the 2-tap baseline was** (14.95 s), which was not the expected trade.
+The 0.78 s came from a memory-map fix, not the interpolator: a coefficient table had been mapped
+across `SAR_CWRK`, the multi-hart coefficient-worker region that paces FFT-1.
 
 ---
 
@@ -395,6 +404,25 @@ a 5-level pipelined adder tree. **Resources fit; timing is the risk** at 2.6 % s
 
 ---
 
+# Realised bandwidth — the bus is *not* the limit any more
+
+FIC_0 is 64-bit @ 100 MHz ≈ **800 MB/s**. Bytes actually moved per frame, against measured stage time:
+
+| arrow | MB | s | MB/s | % of FIC_0 |
+|---|---|---|---|---|
+| range gather `SIG → SCRATCH` | 281.9 | 1.675 | 168.4 | 21 % |
+| corner-turn #1 `SCRATCH → SIG` | 536.9 | 2.064 | **260.1** | **33 %** |
+| FFT-1 (+ gather, window) | 536.9 | 4.646 | 115.6 | 14 % |
+| CT#2 + FFT-2 (+ detect) | 939.5 | 5.781 | 162.5 | 20 % |
+| **whole frame** | **2,295** | **14.17** | **162.0** | **20 %** |
+
+Nothing exceeds a third of the bus. Deleting DDR passes worked so well that **the bottleneck moved**:
+FFT-1's 4.65 s sits within 0.3 % of the CoreFFT `SLOWCLK` transform floor, so the design is now
+transform-clock bound, not bandwidth bound. The busiest arrow is the corner-turn — the one operator
+that is neither fusable nor local.
+
+---
+
 # Summary
 
 | | |
@@ -402,7 +430,9 @@ a 5-level pipelined adder tree. **Resources fit; timing is the risk** at 2.6 % s
 | **Problem** | CPHD → detected 8192×8192 image, ≤ 15 s, minimum silicon |
 | **Approach** | PFA; delete DDR passes rather than accelerate arithmetic |
 | **Key moves** | fuse window/gather/detect into the FFT feeders and unloader; overlap CT#2 with FFT-2; generate coefficients on fabric from 3 scalars per line |
-| **Achieved** | **14.92 s**, **2.42 W**, 74/784 MACC, timing MET |
-| **Variant** | 32-tap sinc — scalloping 29.2 dB → 3.5 dB, same algorithm, more silicon |
+| **Achieved** | **14.17 s**, 202/784 MACC, 537/812 LSRAM, timing MET (+0.151 ns) |
+| **Interpolation** | 32-tap polyphase sinc in **both** resample passes — scalloping 29.2 dB → 3.5 dB |
+| **Verified** | each arm matches a Python reference running the *same* interpolator; bench gated against silicon parameters |
 
-The budget was met by **moving less data**, not by computing faster.
+The budget was met by **moving less data**, not by computing faster — the frame now runs at 20 % of
+the available bus bandwidth and is limited by the 12.5 MHz transform clock.

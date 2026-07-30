@@ -107,12 +107,24 @@ where $j$ = **input** sample within a pulse, $q$ = **output** sample on the comm
 **On the notation.** $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so
 $p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2).
 
+---
+
 **And yes, the $2\pi$ is deliberately absent.** A two-way angular wavenumber would be
 $4\pi f/c$ rad/m; the implementation uses $k_r = 2f p_r/c$ — **cycles** per metre, not radians.
 The factor is dropped because the resample only ever forms the *ratio*
 $(K_R[q]-x_{0,i})/\Delta x_i$, in which any common scale cancels exactly, and the $2\pi$ that
 does matter lives in the FFT's own exponent $e^{-2\pi i(\cdot)}$. Carrying it here would change
 no computed value and cost precision in fixed point.
+
+The same argument removes $2/c$ — and the hardware **already does**. Under any global rescale
+$k\to\alpha k$ the fixed-point scalars are *invariant*: $k_{\text{scale}}=2^{30}/\text{span}\to
+k_{\text{scale}}/\alpha$, so the query table, $A=2^{24}/(k_{\text{scale}}\,\Delta x)$ and
+$B=(k_{\text{off}}-x_0)\,2^{24}/\Delta x$ are all unchanged. Verified bit-exact for
+$\alpha\in\{2/c,\;4\pi/c,\;1,\;12345.678\}$.
+
+**But $p_r[i]$ cannot go.** It varies *per pulse*. Anything common to every pulse and every sample
+cancels; anything that differs pulse to pulse — $p_r[i]$, $f_0[i]$, $\Delta f[i]$ — is the actual
+geometry and must stay. $2/c$ survives in the reference only so the quantity reads as a wavenumber.
 
 
 Resample each pulse onto the **common** grid $K_R[q]$:

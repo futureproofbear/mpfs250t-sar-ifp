@@ -103,9 +103,10 @@ what later makes on-fabric coefficient generation possible.
 
 ![w:1120](diagrams/fig-sar-kspace.drawio.svg)
 
-The middle panel is the one that earns its place: after the range resample the **columns** line up
-(every pulse now shares one $k_x$ grid) but the **rows** do not, because each pulse was only made
-uniform along its own radial. That is precisely why a second, azimuth resample is needed.
+Following Doerry, *Basics of Polar Format algorithm for processing SAR images* (Figures 3 and 5).
+The middle panel earns its place: after the **radial** interpolation $k_y$ no longer depends on the
+azimuth index, so the **rows line up** — but $k_x$ still carries an angular increment, leaving a
+**trapezoid**, not a rectangle. That is precisely why a second, azimuth interpolation is needed.
 ---
 
 ---

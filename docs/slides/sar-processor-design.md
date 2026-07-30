@@ -93,16 +93,24 @@ Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_
 
 # ① Range resample — keystone, fast-time
 
-Each pulse $i$ samples the range-frequency axis on its **own non-uniform grid**, because the
-sensor's range to scene centre changes pulse to pulse, with $j^{th}$ input sample location within a pulse at:
+Each pulse $i$ samples the range-frequency axis on **its own grid** — uniform in $j$, but with an
+origin and a spacing unlike any other pulse's, and unlike the common output grid $K_R$. What varies
+pulse to pulse is the **look angle**: $p_r[i]=\cos\phi_i$ projects the frequency ramp onto the mean
+look direction, so a pulse seen further off boresight lands its samples closer together.
 
 $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
 
 | symbol | implementation | meaning |
 |---|---|---|
-| $f_0[i]$ | `freq[i][0]` &nbsp;(sample index **zero**) | first RF frequency of pulse $i$ |
-| $\Delta f[i]$ | `freq[i][1] - freq[i][0]` | frequency step per sample — the ramp is linear, so one difference defines it |
-| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos\phi_i$. $p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up. $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so $p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2). |
+| $f_0[i]$ | `freq[i,0]` | first RF frequency of pulse $i$ |
+| $\Delta f[i]$ | `freq[i,1] - freq[i,0]` | step per sample — the ramp is linear, so one difference defines it |
+| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d=\cos\phi_i$ — projection on the **mean** look direction $\hat d=(dx,dy)/dn$. (`dx,dy` are that mean vector; nothing to do with $\Delta x_i$.) |
+| $x_{0,i}$ | `a*f0[i]`, with `a = 2*pr[i]/c` | this pulse's grid origin |
+| $\Delta x_i$ | `a*df[i]` | its spacing — the value ① divides by |
+
+$p_r[i]$ is what makes $k_r$ the $k_y$ component, which is why pass ① lines the rows up; $\phi_i$
+returns as $\tan\phi$ in pass ②. The $k_r$ above drops the common $2/c$: it scales source and query
+alike, so it cancels in $(k,\mu)$ — but the code carries it, so keep it when reproducing $x_{0,i}$.
 
 ---
 
@@ -146,42 +154,10 @@ into a merge scan: one pointer that only ever moves forward.
 while (k+2 < M && tau[k+1] <= u) k++;   /* never retreats */
 ```
 
-$O(M+M_p)$ per row rather than $O(M_p\log M)$. A query outside $[\tau_0,\tau_{M-1})$ emits
-$idx=-1$ — the sentinel the gather reads as a zero sample, so the row edges need no special case.
-
 Then the same gather kernel as ①. Together the two passes map the polar-sampled phase history onto
 a **rectangular** $k$-space grid.
 
 ---
-
-# Same kernel, two implementations
-
-Only $(k,\mu)$ are derived differently by ① and ②; **the blend is the same operation**. It is built
-twice, though — `sar_resample_v` for ①, fused into the FFT-1 feeder for ② — because each sits next
-to a different producer. Same kernel, so an interpolator upgrade ports across: the 32-tap sinc is in
-① on silicon today, ② still runs 2-tap.
-
-Where the coefficients come from also differs — and both ended up on fabric, by different routes.
-
-**① is affine.** $t$ is linear in the query, so a whole line collapses to one fixed-point map that
-the gather core evaluates for itself:
-
-$$v \;=\; \bigl((Q[q]\cdot A)\gg S\bigr) + B,\qquad A \propto 1/\Delta x_i,\quad B \propto -x_{0,i}/\Delta x_i$$
-
-Three scalars per line replace 8192 $(k,\mu)$ pairs — the 32 KB $idx$ + 16 KB $wq$ that used to
-cross DDR every line.
-
-**② is a scan**, so there is no affine shortcut. But $\tan\phi$ and $K_C$ are row-invariant, and per
-row the scan needs only the scalar $K_R[r]$ — so it moved to fabric as its own generator streaming
-straight into the FFT-1 feeder: **147 µs/row against 1499 µs** on the U54, deleting the $idx$/$wq$
-load (6144 of 8961 read beats/row) and its L2 flush with it. It is bit-exact to the C, integer logic
-computing float32 values; the one divide stays on the CPU and arrives as a register.
-
-Twice over, the same lesson: coefficients were never interesting *data* — they are a pure function
-of geometry. Moving their generation next to their consumer deleted the traffic, not just the work.
-
----
-
 
 # ③ Window · ④ FFT · ⑤ Detect
 

@@ -77,7 +77,16 @@ The engineering approach is therefore *fewer passes over the data*, not faster m
 
 <br>
 
-`src/form_image_pfa.py` — python implementation of the Polar Format Algorithm (PFA), .
+`src/form_image_pfa.py` — python implementation of the **Polar Format Algorithm (PFA)**.
+
+---
+
+# PFA geometry — polar in, rectangular out
+
+![w:1120](diagrams/fig-sar-kspace.drawio.svg)
+
+Middle panel: after the **radial** interpolation $k_y$ no longer depends on the azimuth index, so the **rows line up** — but $k_x$ still carries an angular increment, leaving a **trapezoid**. 
+Right panel: a second resample stage using azimuth interpolation to map the trapezoid to a uniform grid.
 
 ---
 
@@ -99,18 +108,6 @@ what later makes on-fabric coefficient generation possible.
 
 ---
 
-# The PFA geometry — polar in, rectangular out
-
-![w:1120](diagrams/fig-sar-kspace.drawio.svg)
-
-Following Doerry, *Basics of Polar Format algorithm for processing SAR images* (Figures 3 and 5).
-The middle panel earns its place: after the **radial** interpolation $k_y$ no longer depends on the
-azimuth index, so the **rows line up** — but $k_x$ still carries an angular increment, leaving a
-**trapezoid**, not a rectangle. That is precisely why a second, azimuth interpolation is needed.
----
-
----
-
 # ② Azimuth resample — keystone, slow-time
 
 After a transpose, each range bin is resampled along the pulse axis onto a uniform
@@ -124,17 +121,9 @@ $k$ comes from a **monotone merge scan** rather than a division — one pointer 
 $q$ advances, $O(M+M_p)$ for the whole line rather than $O(M_p \log M)$.
 
 Together ① and ② map the polar-sampled phase history onto a **rectangular** $k$-space grid.
----
-
-# ② Azimuth resample — drawn
-
-![w:1120](diagrams/fig-sar-azimuth-resamp.drawio.svg)
-
-The kernel is **identical** to range — same 2-tap blend, same 32-tap sinc variant. Only the way
-`k` and `mu` are *found* differs, because the source abscissa is non-uniform. That is why one
-gather core can serve both passes.
 
 ---
+
 
 # ③ Window · ④ FFT · ⑤ Detect
 
@@ -151,14 +140,32 @@ $S[r,c]$ is the **windowed, rectangular $k$-space array** produced by stages ①
 range-frequency bin, column $c$ a cross-range (Doppler) bin, each entry a complex int16 sample.
 It is what the polar-to-rectangular resampling exists to construct — the FFT is only valid on a
 *uniformly* sampled grid, which the raw phase history is not.
-**Detect** — discard phase, keep brightness:
 
+**Detect** — discard phase, keep brightness: 
 $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
 
-# Part 3 — Mapping onto MPFS250T fabric
-![w:1150](diagrams/fig-sar-fabric.drawio.svg)
+# Part 3 — Mapping onto fabric: what "fusing" means
+
+Write the pipeline as a composition of operators on the $8192^2$ array:
+
+$$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
+
+Done naively, **every operator is one pass over 256 MB**. The budget is met by noticing that most
+of them need not be.
+
+**The criterion.** An operator fuses into a neighbouring streaming pass **iff it is local in the
+streaming index** — each output depends on $O(1)$ inputs, at a position known when that input is
+read. Then it costs combinational logic in the feeder or unloader and *no traffic at all*.
+
+| operator | form | local? |
+|---|---|---|
+| $W$ window | diagonal: $(Ws)[n]=w[n]s[n]$ | yes — pointwise |
+| $G$ gather | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support |
+| $D$ detect | $(Dz)[n]=\lvert z[n]\rvert$ | yes — pointwise |
+| $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
+| $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
 
 ---
 
@@ -256,14 +263,16 @@ Each arrow is a **full pass over 256 MB**. The count of arrows is the design.
 Four stages have **no independent pass** over DDR. Each fusion is justified by an algebraic
 identity, not by convenience:
 
-| fused into | why it is exact |
+| fusion | the identity that makes it exact |
 |---|---|
-| **window → FFT-1 feeder** | $\mathcal{F}\{w\odot s\}$ — scaling each sample as it is fed is identical to scaling the array first. Pointwise multiply commutes with the read. |
-| **azimuth gather → FFT-1 feeder** | The feeder chooses *which* sample to present. Gathering `in[k], in[k+1]` and blending costs the feeder nothing extra and removes a whole 256 MB round-trip. |
-| **detect → FFT-2 unloader** | $\sqrt{\Re^2+\Im^2}$ is pointwise on the transform output; computing it as samples drain avoids reading 256 MB back to square-and-add. |
-| **corner-turn #2 ∥ FFT-2** | Strip-pipelined: CT#2 transposes strip *s* while FFT-2 consumes strip *s−1*. Legal because the 1-D transforms of distinct rows are **independent**. |
+| **window → FFT-1 feeder** | $F_1(Ws)$ with $W$ diagonal. The feeder emits $w[n]s[n]$ as it reads $s[n]$: a diagonal operator commutes with the read order, so no reordering and no second pass. |
+| **azimuth gather → FFT-1 feeder** | $F_1(G_{az}s)$. The feeder is already an *addressing* engine; $G$ only changes **which** index it presents and adds a finite-tap blend. Support is $O(1)$ per output. |
+| **detect → FFT-2 unloader** | $D$ is pointwise on $F_2$'s output, so $\lvert z\rvert$ is computed as samples drain. Reading 256 MB back merely to square-and-add would be pure waste. |
+| **corner-turn #2 ∥ FFT-2** | $F_2=\bigoplus_r F_2^{(r)}$ — rows are **independent**, so strip $s$ may be transposed while strip $s-1$ transforms. Overlap, not elimination. |
 
-**Result: 3 DDR passes instead of 7.** The 15 s budget is met by deleting traffic.
+**What it buys.** Eight conceptual stages become **five** full-frame DDR passes, and four of them —
+window, azimuth gather, detect, CT#2 — cost **zero** extra traffic. Only the two FFTs and the two
+transposes, the operators that are *not* local, still need passes of their own.
 
 ---
 

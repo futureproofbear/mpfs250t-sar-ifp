@@ -21,7 +21,23 @@ catch { organize_tool_files -tool {PLACEROUTE}   -file $iopdc -file $dsdc -file 
 catch { organize_tool_files -tool {VERIFYTIMING} -file $dsdc -file $cdc -module {SAR_TOP::work} -input_type {constraint} }
 
 if {[catch { run_tool -name {SYNTHESIZE} } e]} { puts "SYN_RC: $e" } else { puts "SYN_OK" }
-catch { configure_tool -name {PLACEROUTE} -params {REPAIR_MIN_DELAY:true} }
+## HIGH EFFORT + MULTI-SEED. Added 2026-07-31: with the azimuth sinc integrated, the default
+## layout misses setup by 3 ps on COEFG_B/u_mul_inv (the coefficient generator's multiplier on
+## chain B). That is not a design problem, it is a placement one -- 3 ps is well inside the spread
+## between layout seeds -- so the flow now asks for high effort and several passes and keeps the
+## best. If a build ever needs MORE than this to close, the honest fix is to pipeline that
+## multiplier, not to keep re-rolling seeds.
+## DO NOT wrap this in a bare `catch`. On 2026-07-31 an illegal MULTI_PASS_CRITERIA value was
+## swallowed by catch, the tool silently fell back to "High-effort : OFF", and the rebuild produced
+## a byte-identical failing result -- looking exactly like "high effort did not help" when high
+## effort had never run. Legal criteria: SLOWEST_CLOCK, SPECIFIC_CLOCK, VIOLATIONS, TOTAL_POWER.
+if {[catch { configure_tool -name {PLACEROUTE}         -params {REPAIR_MIN_DELAY:true}         -params {EFFORT_LEVEL:true}         -params {TDPR:true}         -params {MULTI_PASS_LAYOUT:true}         -params {NUM_MULTI_PASSES:3}         -params {START_SEED_INDEX:1}         -params {MULTI_PASS_CRITERIA:VIOLATIONS} } e]} {
+    puts "PNR_CONFIG_FAIL: $e"
+    puts "FFV_BUILD_DONE"
+    return
+} else {
+    puts "PNR_CONFIG_OK (high effort + 3-seed multi-pass, criteria VIOLATIONS)"
+}
 if {[catch { run_tool -name {PLACEROUTE} } e]} { puts "PNR_RC: $e" } else { puts "PNR_OK" }
 if {[catch { run_tool -name {VERIFYTIMING} } e]} { puts "VT_RC: $e" } else { puts "VT_OK" }
 save_project

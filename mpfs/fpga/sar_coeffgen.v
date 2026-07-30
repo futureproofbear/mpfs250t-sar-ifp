@@ -72,7 +72,7 @@
 `timescale 1ns/1ps
 
 // ================================================================================================
-// sar_fp32_mul -- IEEE-754 binary32 multiply, round-to-nearest-even. Latency 2, 1/cycle.
+// sar_fp32_mul -- IEEE-754 binary32 multiply, round-to-nearest-even. Latency 3, 1/cycle.
 // Operands are normalized (checked upstream by err_fmt), so the product is in [2^46,2^48) and the
 // entire normalization is `if (p[47]) >>1`. That is what makes this ~1 MACC cluster + ~80 LUT.
 // Denormal/zero operand -> signed zero (the C's inv_tan[k]==0 degenerate span relies on this).
@@ -93,21 +93,43 @@ module sar_fp32_mul (
         s1_p <= {1'b1, a[22:0]} * {1'b1, b[22:0]};
     end
 
-    wire        msb   = s1_p[47];
-    wire [23:0] mant0 = msb ? s1_p[47:24] : s1_p[46:23];
-    wire        g     = msb ? s1_p[23]    : s1_p[22];
-    wire        st    = msb ? (|s1_p[22:0]) : (|s1_p[21:0]);
-    wire [24:0] mr    = {1'b0, mant0} + {24'd0, (g & (st | mant0[0]))};
+    // ---- stage 2: 48-bit normalise mux only ----------------------------------------------
+    // SPLIT 2026-07-31. This block and the round-add below used to be ONE combinational path from
+    // the MACC output register to y, and it was the design's critical path: three high-effort
+    // layout seeds gave 0.000 / -0.011 / -0.148 ns and the multi-corner gate refused to export.
+    // The cut is placed after the mux and before the round-add, so stage 2 carries the wide
+    // priority-mux and stage 3 the 25-bit add plus the exponent -- and only 27 bits cross the new
+    // boundary instead of the 48-bit product.
+    wire        msb_c   = s1_p[47];
+    wire [23:0] mant0_c = msb_c ? s1_p[47:24] : s1_p[46:23];
+    wire        g_c     = msb_c ? s1_p[23]    : s1_p[22];
+    wire        st_c    = msb_c ? (|s1_p[22:0]) : (|s1_p[21:0]);
+
+    reg        s2_s, s2_z, s2_msb, s2_g, s2_st;
+    reg [8:0]  s2_e;
+    reg [23:0] s2_mant0;
+    always @(posedge clk) begin
+        s2_s     <= s1_s;
+        s2_z     <= s1_z;
+        s2_e     <= s1_e;
+        s2_msb   <= msb_c;
+        s2_mant0 <= mant0_c;
+        s2_g     <= g_c;
+        s2_st    <= st_c;
+    end
+
+    // ---- stage 3: round-to-nearest-even + exponent + assemble --------------------------------
+    wire [24:0] mr    = {1'b0, s2_mant0} + {24'd0, (s2_g & (s2_st | s2_mant0[0]))};
     wire        rovf  = mr[24];
     wire [23:0] mant  = rovf ? mr[24:1] : mr[23:0];
     // exponent = ea + eb - 127 + msb + round-overflow   (signed, may underflow past 0)
-    wire signed [10:0] eo = $signed({2'b00, s1_e}) - 11'sd127
-                          + {10'd0, msb} + {10'd0, rovf};
+    wire signed [10:0] eo = $signed({2'b00, s2_e}) - 11'sd127
+                          + {10'd0, s2_msb} + {10'd0, rovf};
     always @(posedge clk) begin
-        if (s1_z)                    y <= {s1_s, 31'd0};
-        else if (eo <= 11'sd0)       y <= {s1_s, 31'd0};                 // underflow -> zero
-        else if (eo >= 11'sd255)     y <= {s1_s, 8'hFE, 23'h7FFFFF};     // saturate, never hit here
-        else                         y <= {s1_s, eo[7:0], mant[22:0]};
+        if (s2_z)                    y <= {s2_s, 31'd0};
+        else if (eo <= 11'sd0)       y <= {s2_s, 31'd0};                 // underflow -> zero
+        else if (eo >= 11'sd255)     y <= {s2_s, 8'hFE, 23'h7FFFFF};     // saturate, never hit here
+        else                         y <= {s2_s, eo[7:0], mant[22:0]};
     end
 endmodule
 
@@ -238,8 +260,12 @@ module sar_coeffgen #(
     input  wire        m_ready
 );
     // Issue -> output-FIFO write. Derived, not guessed:
-    //   sub(3) -> mul(2) -> sub(3) -> add(3) = 11 cycles, result valid in cycle 11.
-    localparam integer EMIT_LAT = 13;   // 11 for the pass-2 chain + 2 for pass-1's trunc/i2f.
+    //   sub(3) -> mul(3) -> sub(3) -> add(3) = 12 cycles, result valid in cycle 12.
+    localparam integer EMIT_LAT = 14;   // 12 for the pass-2 chain + 2 for pass-1's trunc/i2f.
+                                        // 13 -> 14 on 2026-07-31 when sar_fp32_mul gained a third
+                                        // stage to close 100 MHz timing. asc_d/vld_d/oor_d/kx_d/
+                                        // p1oor_d all size off this; the C_EDGE settle counts below
+                                        // are the only HAND-written depths and moved with it.
                                         // Uniform across modes on purpose -- see the emit-pipeline
                                         // note below; a mode-dependent depth would let a mode or
                                         // kr-sign change corrupt the tail of a row.
@@ -504,10 +530,12 @@ module sar_coeffgen #(
     // and `desc_edge` fail immediately if this is dropped.
     reg  [TAN_AW:0]   kp;              // next producer index (0 .. S-2)
     // Issue at T presents the RAM address; tan_q/itan_q are valid at T+1; the multiply samples
-    // them during T+1 and its output is valid at T+3. So the push tap is pv[2], NOT pv[3] --
-    // pv[3] would capture the NEXT issue's product and silently shift the whole SRC table by one
-    // bracket (x0 = SRC(1) for bracket 0), which reads as "all bracket-0 weights clamp to 0".
-    reg  [2:0]        pv;              // issue -> RAM(1) -> mul(2) -> push
+    // them during T+1 and its output is valid at T+4 (the multiply is 3 stages since 2026-07-31).
+    // So the push tap is pv[3]. One tap EITHER WAY is fatal and silent: too late captures the
+    // NEXT issue's product and shifts the whole SRC table by one bracket (x0 = SRC(1) for
+    // bracket 0), which reads as "all bracket-0 weights clamp to 0"; too early captures a stale
+    // product. This tap moves with sar_fp32_mul's latency and nothing else does it for you.
+    reg  [3:0]        pv;              // issue -> RAM(1) -> mul(3) -> push
     wire [TAN_AW:0]   kp_rev_t = j_s - 1'b1 - kp;
     wire [TAN_AW:0]   kp_rev_i = j_s - 2'd2 - kp;
     wire [TAN_AW-1:0] prod_tan_a  = j_asc ? kp[TAN_AW-1:0] : kp_rev_t[TAN_AW-1:0];
@@ -534,13 +562,13 @@ module sar_coeffgen #(
     wire [31:0] src_y, inv_y;
     sar_fp32_mul u_mul_src (.clk(clk), .a(j_kr),   .b(tan_q), .y(src_y));
     sar_fp32_mul u_mul_inv (.clk(clk), .a(itan_q), .b(j_rr),  .y(inv_y));
-    wire sf_push = pv[2];
+    wire sf_push = pv[3];
 
     always @(posedge clk or negedge resetn) begin
-        if (!resetn)                begin kp <= 0; pv <= 3'd0; p_infl <= 3'd0; sf_w <= 0; end
-        else if (cst == C_IDLE)     begin kp <= 0; pv <= 3'd0; p_infl <= 3'd0; sf_w <= 0; end
+        if (!resetn)                begin kp <= 0; pv <= 4'd0; p_infl <= 3'd0; sf_w <= 0; end
+        else if (cst == C_IDLE)     begin kp <= 0; pv <= 4'd0; p_infl <= 3'd0; sf_w <= 0; end
         else begin
-            pv <= {pv[1:0], p_issue};
+            pv <= {pv[2:0], p_issue};
             if (p_issue) kp <= kp + 1'b1;
             case ({p_issue, sf_push})
                 2'b10:   p_infl <= p_infl + 1'b1;
@@ -680,7 +708,7 @@ module sar_coeffgen #(
      * its own short delay line to the push point. */
     reg  [13:0] p1_idx_c6;
     reg  [31:0] p1_t_c6, p1_t_c7, p1_fidx_c7;
-    reg  [EMIT_LAT-6:0] p1oor_d;
+    reg  [EMIT_LAT-7:0] p1oor_d;   // NOT EMIT_LAT-6: source is post-mul, see note at res_oor
     wire        p1_t_neg = frac_y[31] & (|frac_y[30:0]);            // t < 0 (-0.0 is not negative)
     wire        p1_oor_c5 = p1_mode & (p1_t_neg | ~(fkey(frac_y) < fkey(p1_tmax)));
     always @(posedge clk or negedge resetn) begin
@@ -692,7 +720,7 @@ module sar_coeffgen #(
             p1_t_c6    <= frac_y;
             p1_t_c7    <= p1_t_c6;
             p1_fidx_c7 <= i2f_small(p1_idx_c6);
-            p1oor_d    <= {p1oor_d[EMIT_LAT-7:0], p1_oor_c5};
+            p1oor_d    <= {p1oor_d[EMIT_LAT-8:0], p1_oor_c5};
         end
     end
 
@@ -701,7 +729,11 @@ module sar_coeffgen #(
     wire [31:0] sub_b = p1_mode ? (p1_fidx_c7 ^ 32'h8000_0000) : (frac_d1 ^ 32'h8000_0000);
     // c10 taps. Pass 1's weight is the subtract result itself -- there is no ascending/descending
     // source order to undo, because the KR grid is uniform and always ascending.
-    wire [31:0] pw_w   = p1_mode ? one_y : (asc_d[9] ? frac_d4 : one_y);
+    // asc_d TAP: this is the one alignment that does NOT self-align when the multiplier's latency
+    // changes. frac_d4 and one_y both derive from frac_y, so they shift together; this tap is an
+    // absolute cycle index into the issue-time shift register and must be advanced by hand.
+    // 9 -> 10 with sar_fp32_mul's 2 -> 3 stage split (frac now valid c6, one_y c11).
+    wire [31:0] pw_w   = p1_mode ? one_y : (asc_d[10] ? frac_d4 : one_y);
     wire [31:0] pw_s   = fscale15(pw_w);
 
     sar_fp32_add u_sub_qx  (.clk(clk), .a(q_now),        .b(x0_cur ^ 32'h8000_0000), .y(d_y));
@@ -736,19 +768,25 @@ module sar_coeffgen #(
      * where p1oor_d[EMIT_LAT-6] and the pass-2 taps already land. One stage short paired each
      * output's fraction with the NEXT output's integer part: wq came out bit-exact and idx was
      * uniformly +1 (+2 across a gap). Caught 2026-07-27 by the model-gated p1 vectors. */
-    reg [13:0] p1_idxd [0:EMIT_LAT-7];
+    reg [13:0] p1_idxd [0:EMIT_LAT-8];
     integer    m;
     always @(posedge clk or negedge resetn) begin
-        if (!resetn) for (m = 0; m <= EMIT_LAT-7; m = m + 1) p1_idxd[m] <= 14'd0;
+        if (!resetn) for (m = 0; m <= EMIT_LAT-8; m = m + 1) p1_idxd[m] <= 14'd0;
         else begin
             p1_idxd[0] <= p1_idx_c6;
-            for (m = 1; m <= EMIT_LAT-7; m = m + 1) p1_idxd[m] <= p1_idxd[m-1];
+            for (m = 1; m <= EMIT_LAT-8; m = m + 1) p1_idxd[m] <= p1_idxd[m-1];
         end
     end
 
     wire        res_v   = vld_d[EMIT_LAT-1];
-    wire        res_oor = p1_mode ? p1oor_d[EMIT_LAT-6] : oor_d[EMIT_LAT-1];
-    wire [13:0] res_idx = p1_mode ? p1_idxd[EMIT_LAT-7] : kx_d[EMIT_LAT-1];
+        /* PASS-1 DELAY LINES DO NOT SCALE WITH EMIT_LAT THE WAY THE ISSUE-TIME ONES DO.
+     * asc_d / vld_d / oor_d / kx_d are loaded at ISSUE (c0), so when the datapath grows a cycle
+     * they must grow with it. p1oor_d / p1_idxd are loaded from frac_y, which is POST-multiplier
+     * -- their source slides by the same cycle the push point does, so the gap between them is
+     * unchanged. Scaling them off EMIT_LAT counts the extra cycle TWICE and reads the line one
+     * stage too late. Hence -7 / -8 here against -6 / -7 before the mul went 2 -> 3 stages. */
+    wire        res_oor = p1_mode ? p1oor_d[EMIT_LAT-7] : oor_d[EMIT_LAT-1];
+    wire [13:0] res_idx = p1_mode ? p1_idxd[EMIT_LAT-8] : kx_d[EMIT_LAT-1];
     wire [15:0] res_wq  = res_oor ? 16'd0 : fq15(half_y);
 
     wire        of_push = res_v | deg_push;
@@ -819,12 +857,16 @@ module sar_coeffgen #(
                       end
                   end
               end
-              // 8 cycles: RAM(1) + mul(2) settle for xlo, then again for xhi. Nothing against a
+              // 10 cycles: RAM(1) + mul(3) settle for xlo, then again for xhi. Nothing against a
               // ~14k-cycle row, and it keeps the tan address mux trivially correct.
+              // The +1 on each count tracks sar_fp32_mul's 2 -> 3 stage split; these are the only
+              // hand-written settle depths in the design, so they are where an off-by-one would
+              // hide. check_coeffgen_fixed.py GATE 2 (byte-identical vs sar_coeffs_pass2_range)
+              // is what catches it.
               C_EDGE: begin
                   ec <= ec + 1'b1;
-                  if (ec == 4'd3) j_xlo <= src_y;
-                  if (ec == 4'd7) begin j_xhi <= src_y; cst <= C_PRIME; end
+                  if (ec == 4'd4) j_xlo <= src_y;
+                  if (ec == 4'd9) begin j_xhi <= src_y; cst <= C_PRIME; end
               end
               C_PRIME: if (p1_mode || !sf_empty) cst <= C_RUN;
               C_RUN:   if ((qi >= j_qn) && pipe_empty) cst <= C_DRAIN;

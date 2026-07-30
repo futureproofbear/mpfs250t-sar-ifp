@@ -145,15 +145,20 @@ module tb_sar_coeffgen;
         for (v = 0; v < `FP_VECS; v = v + 1) begin
             @(posedge clk);
             fp_a = fpv[4*v + 0]; fp_b = fpv[4*v + 1];
+            // sar_fp32_mul is LATENCY 3 since 2026-07-31 (a third stage split the round-add off
+            // the 48-bit normalise mux to close 100 MHz timing), so mul and add are now BOTH valid
+            // 3 clocks after the inputs and are checked on the same edge. The expected VALUES are
+            // unchanged -- only when the bench samples them. Sampling a cycle early here produced
+            // 2656 "mismatches" that had nothing to do with the coefficient datapath.
             @(posedge clk);                       // stage 1 latches
-            @(posedge clk); #1;                   // mul y latched (latency 2)
+            @(posedge clk);                       // stage 2 latches
+            @(posedge clk); #1;                   // mul y and add y both latched (latency 3)
             if (fp_mul_y !== fpv[4*v + 2]) begin
                 if (fp_bad < 5)
                     $display("  fp32_mul(%h,%h) = %h  want %h",
                              fp_a, fp_b, fp_mul_y, fpv[4*v + 2]);
                 fp_bad = fp_bad + 1;
             end
-            @(posedge clk); #1;                   // add y latched (latency 3)
             if (fp_add_y !== fpv[4*v + 3]) begin
                 if (fp_bad < 5)
                     $display("  fp32_add(%h,%h) = %h  want %h",

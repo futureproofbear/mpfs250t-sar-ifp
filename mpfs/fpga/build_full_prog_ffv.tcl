@@ -20,6 +20,17 @@ set iopdc "$pd/constraint/io/sar_io.pdc"
 catch { organize_tool_files -tool {PLACEROUTE}   -file $iopdc -file $dsdc -file $cdc -module {SAR_TOP::work} -input_type {constraint} }
 catch { organize_tool_files -tool {VERIFYTIMING} -file $dsdc -file $cdc -module {SAR_TOP::work} -input_type {constraint} }
 
+## RETIMING. The failing path is one combinational block -- normalise mux + round-add + exponent --
+## between the MACC output register and y inside COEFG's sar_fp32_mul. Retiming lets the synthesiser
+## move register boundaries across that logic, which is the same rebalancing a hand pipeline would
+## do but WITHOUT changing latency, so no emit-pipeline alignment shifts and nothing needs
+## re-verifying. Tried before hand-pipelining because it is functionally equivalent by construction.
+## NOT wrapped in a bare catch -- an unknown param must fail loudly, not silently disable itself.
+if {[catch { configure_tool -name {SYNTHESIZE} -params {RETIMING:false} } e]} {
+    puts "SYN_CONFIG_FAIL: $e"
+} else {
+    puts "SYN_CONFIG_OK (retiming enabled)"
+}
 if {[catch { run_tool -name {SYNTHESIZE} } e]} { puts "SYN_RC: $e" } else { puts "SYN_OK" }
 ## HIGH EFFORT + MULTI-SEED. Added 2026-07-31: with the azimuth sinc integrated, the default
 ## layout misses setup by 3 ps on COEFG_B/u_mul_inv (the coefficient generator's multiplier on

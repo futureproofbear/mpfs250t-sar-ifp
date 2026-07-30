@@ -276,6 +276,42 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
 #define K_FFT_GATHER_CTRL 0x20u              /* [0] = gather enable, [1] = coefficients from the fabric stream */
 #define K_FFT_GC_GATHER   0x1u
 #define K_FFT_GC_CSTREAM  0x2u               /* 0 = idx/wq from DDR (default), 1 = from sar_coeffgen */
+#define K_FFT_GC_SINC     0x4u               /* 0 = 2-tap lerp (default), 1 = 32-tap polyphase sinc */
+#define K_FFT_GC_SCTRWND  0x8u               /* one-shot: rewind the sinc table write pointer */
+#define K_FFT_SINC_TAB    0x30u              /* one Q15 tap per write, pointer auto-increments */
+
+/* ---- AZIMUTH 32-TAP SINC (fft_feeder_v GATHER_CTRL[2]) -------------------------------------
+ * The pass-2 twin of the range sinc. Legal here despite tau = tan(phi) being NON-uniform: measured
+ * on the real Umbra NDSU CPHD (mpfs/host/check_pass2_sinc_uniformity.py), tau's spacing varies by
+ * max/min = 1.00045 within any 32-tap window, so the kernel's equal-spacing assumption holds
+ * locally and reconstruction matches a uniform-grid control to within a dB.
+ *
+ * FAIL-SAFE ENCODING, same discipline as SAR_CGENMODE: this word is uninitialised DDR on a cold
+ * boot, so accept ONLY the exact magic. Anything else means OFF and the 2-tap lerp runs unchanged.
+ *
+ * The 16 KB table lives in FABRIC RAM, one copy PER CHAIN, and does not survive a fabric reprogram
+ * or a power-cycle -- so it is pushed per power cycle, before the first armed row, and pushed to
+ * BOTH chains. An unloaded table is all zeros: every phase would weight the same tap and the image
+ * would be wrong in a way that looks like an interpolation bug rather than a missing load. */
+#define SAR_AZSINCMODE_ADDR 0xB0059168u      /* free: 0x164 = SAR_SINCMODE (range sinc) */
+#define SAR_AZSINC_ENABLE   0x41534E31u      /* 'ASN1' -- the ONLY accepted value */
+#define SAR_AZSINC_TAB_ADDR 0xB0059200u      /* host-staged 256x32 Q15 table, 16 KB, phase-major */
+
+static int sar_azsinc_enabled(void)
+{
+    return *(volatile uint32_t *)(uintptr_t)SAR_AZSINCMODE_ADDR == SAR_AZSINC_ENABLE;
+}
+
+/* Push the 256x32 Q15 sinc table into ONE chain's feeder. Rewinds first so a re-push cannot append
+ * to a stale pointer. `tab` is phase-major, 8192 int16 -- the order the core's ct_we pointer
+ * expects; it is staged in DDR by the host because it does not fit the L2 scratchpad image. */
+static void sar_azsinc_load(uint32_t feed, const int16_t *tab)
+{
+    sar_reg_w(feed, K_FFT_GATHER_CTRL, K_FFT_GC_SCTRWND);
+    for (uint32_t i = 0; i < 256u * 32u; i++)
+        sar_reg_w(feed, K_FFT_SINC_TAB, (uint32_t)(uint16_t)tab[i]);
+    sar_reg_w(feed, K_FFT_GATHER_CTRL, 0u);
+}
 #define K_FFT_IDX_BASE    0x24u              /* DDR byte addr of this row's idx[] */
 #define K_FFT_WQ_BASE     0x28u              /* DDR byte addr of this row's wq[] */
 #define K_FFT_GATHER_DIMS 0x2cu              /* [15:0]=SRC_LEN (source samples), [31:16]=QN (outputs) */
@@ -812,7 +848,9 @@ static void fft1_arm_row_gather(const sar_chain_t *ch, uint32_t s, uint32_t d,
     sar_reg_w(ch->feed, K_FFT_IDX_BASE,    idxb);
     sar_reg_w(ch->feed, K_FFT_WQ_BASE,     wqb);
     sar_reg_w(ch->feed, K_FFT_GATHER_DIMS, (Mp << 16) | (M & 0xFFFFu));
-    sar_reg_w(ch->feed, K_FFT_GATHER_CTRL, K_FFT_GC_GATHER | (cgen_en ? K_FFT_GC_CSTREAM : 0u));
+    sar_reg_w(ch->feed, K_FFT_GATHER_CTRL, K_FFT_GC_GATHER
+                                           | (cgen_en ? K_FFT_GC_CSTREAM : 0u)
+                                           | (sar_azsinc_enabled() ? K_FFT_GC_SINC : 0u));
     sar_reg_w(ch->feed, K_FFT_WIN_CTRL,    (1u << 16) | (uint16_t)hamr_row);
     sar_reg_w(ch->feed, HLS_ARG0,          s);          /* source row (Mp-wide, M valid) */
     sar_k_start(ch->feed);
@@ -863,6 +901,14 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
         if (bad) { cgen_en = 0; nch = 1u; }
     } else {
         RPROF[11] = 0xC0EF0000ull | ((uint64_t)nch << 8) | 0x1000ull;   /* CPU coefficient path */
+    }
+
+    /* 32-tap sinc table -> BOTH chains, once per scene. Each feeder holds its own copy in fabric
+     * RAM, so this must run for every chain that will be armed, and it must precede the first
+     * armed row: the core reads the table per query and an unloaded one is all zeros. */
+    if (sar_azsinc_enabled()) {
+        const int16_t *stab = (const int16_t *)(uintptr_t)SAR_AZSINC_TAB_ADDR;
+        for (uint32_t c = 0; c < nch; c++) sar_azsinc_load(SAR_CHAIN[c].feed, stab);
     }
 
     fft_win_load_taper(nch);

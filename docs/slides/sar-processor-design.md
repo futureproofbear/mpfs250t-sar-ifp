@@ -187,8 +187,17 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 Every term the rest of Part 3 uses is named here: **MSS**, **U54**, **FIC_0**, **CIC**, **LSRAM**,
 **MACC**, **CoreFFT**, **SIG/SCRATCH/OUT**.
 
----
+Colour carries the same meaning in every figure of this deck — what a block *is*, not what it does:
 
+| | | | |
+|---|---|---|---|
+| <span style="color:#C77700">■</span> **amber** — MSS / CPU | <span style="color:#2E8B57">■</span> **green** — fabric RTL we wrote | <span style="color:#6A4CA5">■</span> **purple** — hard IP | <span style="color:#666666">■</span> **grey** — memory |
+| U54, E51 | RES, CT, COEFG, FEED, UNLD | FIC_0, CIC, CoreFFT | L2, eNVM, LSRAM, DDR |
+
+Arrows: **double-headed** = a bidirectional data path, **dashed** = AXI4-Lite control (arm a kernel,
+read status), plain = one-way. The green/purple split is the one to keep: purple blocks are fixed and
+we integrate them, green blocks are ours to change — which is why every optimisation in Part 3 lands
+on a green box.
 
 ---
 

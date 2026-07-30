@@ -101,9 +101,9 @@ where $j$ = **input** sample within a pulse, $q$ = **output** sample on the comm
 
 | symbol | implementation | meaning |
 |---|---|---|
-| $f_0[i]$ | `freq[i,0]` | first RF frequency of pulse $i$ |
-| $\Delta f[i]$ | `freq[i,1]-freq[i,0]` | frequency step per sample |
-| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos()$ of its aspect angle. $p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up. |
+| $f_0[i]$ | `freq[i][0]` &nbsp;(sample index **zero**) | first RF frequency of pulse $i$ |
+| $\Delta f[i]$ | `freq[i][1] - freq[i][0]` | frequency step per sample — the ramp is linear, so one difference defines it |
+| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos\phi_i$. $p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up. |
 **On the notation.** $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so
 $p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2).
 

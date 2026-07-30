@@ -124,51 +124,61 @@ interpolation point:
 
 $$c_n(\mu) \;=\; \frac{\operatorname{sinc}(n-15-\mu)}{\sum_{m=0}^{31}\operatorname{sinc}(m-15-\mu)}$$
 
-The denominator is not cosmetic — it forces **unity DC gain at every $\mu$**. Without it each
-fractional position would have a slightly different gain, which appears in the image as amplitude
-ripple that no downstream scaling removes.
-
----
-
-### The gather kernel — identical in both passes
-
-The input samples are an *arithmetic progression* in $j$, so inverting the map is algebra, not search: . One subtract, one multiply by a precomputed $1/\Delta x_i$, one floor — $O(1)$, no branching, and independent of every
-other query. Pass ② cannot do this: its abscissa $\tau$ is non-uniform, so $k$ must be *found*.
-
-**And that is what puts the coefficients on fabric.** $t$ is affine in the query value, so the whole
-per-line coefficient set collapses to one fixed-point map
-
-$$v \;=\; \bigl((Q[q]\cdot A)\gg S\bigr) + B,\qquad A \propto 1/\Delta x_i,\quad B \propto -x_{0,i}/\Delta x_i$$
-
-The CPU sends **three scalars per line** instead of 8192 $(k,\mu)$ pairs — the 32 KB $idx$ + 16 KB
-$wq$ per line that used to cross DDR. Measured: 5.21 s → 3.74 s. ($Q[q]$ is tabulated once per
-scene, so the *query* grid need not be uniform — only the source.)
-
-Only $(k,\mu)$ are derived differently by ① and ②. **The blend is the same operation** — which is
-why one gather core serves both, and why an interpolator upgrade applies to both at once.
-
 ---
 
 # ② Azimuth resample — finding $(k,\mu)$
 
-After the transpose a row is one **range bin** $r$, holding $M$ pulses. Its source abscissa is the
-aspect-angle tangent sorted ascending, $\tau[m]=\tan\phi_{\sigma(m)}$ for $m=0\ldots M-1$; the
-query grid is the uniform cross-range grid $K_C[q]$:
+After the transpose a row is one range bin $r$: $M$ pulses, resampled onto the uniform cross-range
+grid $K_C[q]$. The source abscissa is the sorted aspect-angle tangent $\tau[0\ldots M{-}1]$ — and
+unlike ①, it is **not uniform**.
 
 $$u \;=\; \frac{K_C[q]}{K_R[r]},\qquad
 k \;=\; \max\{\,m : \tau[m] \le u\,\},\qquad
 \mu \;=\; \frac{u - \tau[k]}{\tau[k{+}1]-\tau[k]}$$
 
-then the same gather kernel as above.
+$K_R[r]$, not a per-pulse $k_r$: after ① every pulse shares one range grid. Its reciprocal is the
+**only divide in the row**.
 
-Note $K_R[r]$ — after pass 1 **every pulse shares one range grid**, so the divisor is that bin's
-single $K_R$ value, not a per-pulse $k_r$.
+So $k$ must be *found*, not computed — but $\tau$ and $K_C$ are both sorted, which turns the search
+into a merge scan: one pointer that only ever moves forward.
 
-The structural difference: $\tau$ is **non-uniform**, so $k$ cannot be divided out. It comes from a
-**monotone merge scan** — one pointer walking forward as $q$ advances, $O(M+M_p)$ per row rather
-than $O(M_p\log M)$. Both sequences are sorted, so the pointer never goes back.
+```c
+while (k+2 < M && tau[k+1] <= u) k++;   /* never retreats */
+```
 
-Together ① and ② map the polar-sampled phase history onto a **rectangular** $k$-space grid.
+$O(M+M_p)$ per row rather than $O(M_p\log M)$. A query outside $[\tau_0,\tau_{M-1})$ emits
+$idx=-1$ — the sentinel the gather reads as a zero sample, so the row edges need no special case.
+
+Then the same gather kernel as ①. Together the two passes map the polar-sampled phase history onto
+a **rectangular** $k$-space grid.
+
+---
+
+# Same kernel, two implementations
+
+Only $(k,\mu)$ are derived differently by ① and ②; **the blend is the same operation**. It is built
+twice, though — `sar_resample_v` for ①, fused into the FFT-1 feeder for ② — because each sits next
+to a different producer. Same kernel, so an interpolator upgrade ports across: the 32-tap sinc is in
+① on silicon today, ② still runs 2-tap.
+
+Where the coefficients come from also differs — and both ended up on fabric, by different routes.
+
+**① is affine.** $t$ is linear in the query, so a whole line collapses to one fixed-point map that
+the gather core evaluates for itself:
+
+$$v \;=\; \bigl((Q[q]\cdot A)\gg S\bigr) + B,\qquad A \propto 1/\Delta x_i,\quad B \propto -x_{0,i}/\Delta x_i$$
+
+Three scalars per line replace 8192 $(k,\mu)$ pairs — the 32 KB $idx$ + 16 KB $wq$ that used to
+cross DDR every line.
+
+**② is a scan**, so there is no affine shortcut. But $\tan\phi$ and $K_C$ are row-invariant, and per
+row the scan needs only the scalar $K_R[r]$ — so it moved to fabric as its own generator streaming
+straight into the FFT-1 feeder: **147 µs/row against 1499 µs** on the U54, deleting the $idx$/$wq$
+load (6144 of 8961 read beats/row) and its L2 flush with it. It is bit-exact to the C, integer logic
+computing float32 values; the one divide stays on the CPU and arrives as a register.
+
+Twice over, the same lesson: coefficients were never interesting *data* — they are a pure function
+of geometry. Moving their generation next to their consumer deleted the traffic, not just the work.
 
 ---
 

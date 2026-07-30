@@ -338,6 +338,27 @@ By this point you must have, in the **current power cycle**:
 1. A programmed, timing-clean fabric (§5).
 2. A freshly re-flashed, running application (§5.3, confirmed via §3.2).
 3. A scene loaded into DDR **this power cycle** (§4) — SIG does not survive a power-cycle.
+4. *If you want the 32-tap sinc range interpolator* — its coefficient table loaded, **before the
+   first PIPE** (see 6.1a). Skip this and you get the 2-tap lerp arm, which is the cold-boot
+   default and a perfectly valid run.
+
+### 6.1a Arming the 32-tap sinc interpolator (optional, per power cycle)
+```bash
+bash mpfs/host/run_sinc_table_load.sh          # load 16 KB table + arm SAR_SINCMODE
+bash mpfs/host/run_sinc_table_load.sh --off    # back to the 2-tap lerp
+```
+Expect `>>> tab_wptr after load = 0 (expect 0)` — after exactly 8192 word writes the pointer must
+have wrapped, which is the cheap proof every write landed rather than a prefix. It takes ~15 min
+over JTAG; do not interrupt it.
+
+> **Order matters.** The table is read per query. An unloaded table is all zeros, so every query
+> maps to the same source sample and the image is wrong in a way that looks like an interpolation
+> bug rather than a missing load. Load it BEFORE the first PIPE.
+>
+> The table lives in fabric RAM and `SAR_SINCMODE` (`0xB0059164` = `0x534E4331`) lives in DDR, so
+> **both are wiped by a power-cycle or a fabric reprogram** — it is a per-power-cycle step, not a
+> one-time provisioning step. Measured 2026-07-30, same bitstream, same scene: sinc **14.964 s /
+> corr 0.985**, lerp **14.943 s / corr 0.976**.
 
 ### 6.2 Run the pipeline
 From `mpfs/host`, using the generic mailbox runner:

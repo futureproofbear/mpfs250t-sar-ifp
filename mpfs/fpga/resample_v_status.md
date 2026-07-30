@@ -152,6 +152,60 @@ scene-independent, so `bash mpfs/host/run_sinc_table_load.sh` is a one-time push
 been made in sinc mode. Load the table *before* the first PIPE — an unloaded table is all zeros and
 every query maps to the same place.
 
+## BASELINE 2026-07-30 — 32-tap sinc range interpolation, on silicon
+
+Same bitstream, both arms measured back to back on the Centerfield scene, one ELOD per PIPE.
+
+| measure | 2-tap lerp | 32-tap sinc |
+|---|---|---|
+| Frame | 14.943 s | **14.964 s**  (+21 ms, +0.14%) |
+| resample stage | 3.740373 s | 3.740419 s  (+46 us) |
+| range-FFT / azimuth-FFT | 5.419 / 5.784 s | 5.401 / 5.823 s |
+| Top-left 1024x1024 vs `crop_topleft.bin` | corr 0.976397 | **corr 0.985491** |
+| crop max / mean | 3028 / 68.11 | 3235 / 69.37 |
+| crop CRC (top-left) | `0xf7fb0e92` | — |
+
+**32 taps cost 46 us over 2 taps in a 3.74 s stage.** That is the design bet paying off: the gather
+is DDR-read-latency-bound, so 16x the arithmetic hides entirely under the memory wait. The sinc core
+also costs the lerp path nothing — the lerp arm of THIS bitstream matches the 2026-07-29 lerp-only
+bitstream to 1.4e-4 in correlation (0.976397 vs 0.976535).
+
+### Read the correlation improvement carefully
+
+Correlation rose 0.976 -> 0.985, but this is NOT yet proof that sinc is more accurate, for two
+reasons, and the project's own rule (`CLAUDE.md`: prefer value-level testing over correlation)
+applies:
+
+  1. `crop_topleft.bin` is itself a 2-tap image from the float32 era. "Closer to the reference" is
+     not "closer to truth", and a 32-tap kernel scoring HIGHER against a 2-tap reference than a
+     2-tap kernel does is surprising enough to want explaining rather than celebrating.
+  2. The difference is broad, not a targeted peak recovery: mean |sinc - lerp| is 8-10 counts in
+     EVERY brightness band against a mean pixel of 57. On the top 0.1% brightest pixels lerp
+     recovers 99.6% of the reference's energy and sinc 103.1% — a 3% OVERSHOOT, which is the
+     expected Gibbs signature of the deliberately NON-WINDOWED kernel.
+
+OPEN: value-level diff of the silicon sinc output against the bit-accurate model, the way pass 1 was
+checked to 99.19%. Until that runs, the honest claim is "sinc works on silicon, costs 21 ms, and
+moves the image" — not "sinc is more accurate".
+
+### Operational: the sinc arm is not the cold-boot state
+
+256 phases x 32 taps x int16 = 16 KB. It does not fit the image (linking it overflowed the L2
+scratchpad by 15,584 bytes) and cannot be recomputed on the U54 (needs `sin()`; this firmware links
+without libm). So it is pushed over JTAG and armed:
+
+```bash
+bash mpfs/host/run_sinc_table_load.sh      # 8192 word writes; ends by proving tab_wptr wrapped to 0
+```
+
+Both the table and `SAR_SINCMODE` (`0xB0059164` = `0x534E4331`) are wiped by a power-cycle or a
+fabric reprogram, so a cold boot runs the 2-tap lerp arm. **Load the table BEFORE the first PIPE** —
+an unloaded table is all zeros, every query then maps to the same place, and the image is wrong in a
+way that looks like an interpolation bug rather than a missing load. `tab_wptr == 0` on readback is
+the cheap proof that all 8192 writes landed rather than a prefix.
+
+---
+
 ## BASELINE 2026-07-29 — SHIPPING, and it works
 
 | measure | value |

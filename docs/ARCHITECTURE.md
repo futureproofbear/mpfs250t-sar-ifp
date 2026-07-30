@@ -82,8 +82,20 @@ timer reports CT#2 as 0 and FFT-2 as the merged wall time.
 Non-shipping configurations move these buffers around (`gather_fused` and `det_fused` each flip a
 source or destination). The table above is the one that produces CRC `0x319037b2`.
 
-Current shipping baseline runtime: **14.92 s** (2026-07-29, 100 MHz fabric clock) — resample
-3.740 s · range-FFT 5.417 s · azimuth-FFT 5.769 s. Set by `sar_resample_v`, which fuses range-gather
+Current shipping baseline runtime: **14.96 s** (2026-07-30, 100 MHz fabric clock, 32-tap sinc
+range interpolation) — resample 3.740 s · range-FFT 5.401 s · azimuth-FFT 5.823 s, correlation
+**0.985** against the top-left crop.
+
+> **The sinc baseline is not the cold-boot state.** The 256x32 Q15 coefficient table is 16 KB, does
+> not fit the L2-scratchpad image, and is pushed over JTAG
+> (`mpfs/host/run_sinc_table_load.sh`); `SAR_SINCMODE` (`0xB0059164`) must then be armed with
+> `0x534E4331`. Both are wiped by a power-cycle or a fabric reprogram. A cold boot therefore runs
+> the 2-tap lerp path, measured the same session at **14.94 s / correlation 0.976** — which is also
+> the fallback if the table load is skipped. Load the table BEFORE the first PIPE: an unloaded table
+> is all zeros and every query maps to the same place.
+
+The 2-tap lerp arm of that same bitstream: 14.94 s — resample
+3.740 s · range-FFT 5.419 s · azimuth-FFT 5.784 s. Set by `sar_resample_v`, which fuses range-gather
 coefficient generation into the fabric so 32 KB `idx` + 16 KB `wq` per line never reach DDR.
 Verified by **correlation 0.977** against the known-good top-left crop, plus a value-level check of
 pass 1 on silicon (99.19% exact against the bit-accurate model). **Not** by CRC equality: this

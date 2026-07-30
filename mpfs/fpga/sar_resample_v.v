@@ -852,7 +852,7 @@ module sar_resample_v #(
                          | (cf_idx16 < S_HALF[15:0])
                          | (cf_idx16 > (r_sn - (S_TAPS - S_HALF)));        // > SN-17
 
-    wire        s_ov;
+    wire        s_ov, s_busy;
     wire [31:0] s_odata;
 
     sar_sinc32_gather #(.IDX_W(IDX_W), .WQ_W(WQ_W)) u_sinc (
@@ -862,30 +862,33 @@ module sar_resample_v #(
         .sw_we(lo_ok),  .sw_idx(n_lo[IDX_W-1:0]),  .sw_data(m_rdata[31:0]),
         .sw2_we(hi_ok), .sw2_idx(n_hi[IDX_W-1:0]), .sw2_data(m_rdata[63:32]),
         .en(gen), .g_v(g0_v), .g_idx(cf_idx), .g_wq(cf_q[WQ_W-1:0]), .g_edge(s_edge),
-        .o_v(s_ov), .o_data(s_odata)
+        .o_v(s_ov), .o_data(s_odata), .o_busy(s_busy)
     );
 
-    // lerp delayed by 4 (4 -> 8), and the edge flag delayed by 8 from g0_v
-    reg  [3:0]  d_v;
-    reg  [31:0] d_out [0:3];
-    reg  [7:0]  e_pipe;
+    // lerp delayed by 5 (4 -> 9), and the edge flag delayed by 9 from g0_v.
+    // The sinc core gained a stage when its bank-address generation was registered to break a
+    // RAM-output-to-RAM-address path, so it is 9 cycles from g_v, not 8. These two depths are the
+    // only thing that has to track that.
+    reg  [4:0]  d_v;
+    reg  [31:0] d_out [0:4];
+    reg  [8:0]  e_pipe;
     integer di;
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin
-            d_v <= 4'd0; e_pipe <= 8'd0;
-            for (di = 0; di < 4; di = di + 1) d_out[di] <= 32'd0;
+            d_v <= 5'd0; e_pipe <= 9'd0;
+            for (di = 0; di < 5; di = di + 1) d_out[di] <= 32'd0;
         end else if (gen) begin
-            d_v      <= {d_v[2:0], g4_v};
+            d_v      <= {d_v[3:0], g4_v};
             d_out[0] <= g_out;
-            for (di = 1; di < 4; di = di + 1) d_out[di] <= d_out[di-1];
-            e_pipe   <= {e_pipe[6:0], s_edge & g0_v};
+            for (di = 1; di < 5; di = di + 1) d_out[di] <= d_out[di-1];
+            e_pipe   <= {e_pipe[7:0], s_edge & g0_v};
         end
     end
 
     // ONE output per query either way: in sinc mode the valid comes from the DELAYED LERP (which
     // is asserted for every query, edge or not); only the DATA is switched.
-    wire        gsel_v   = sinc_en ? d_v[3] : g4_v;
-    wire [31:0] gsel_out = sinc_en ? (e_pipe[7] ? d_out[3] : s_odata) : g_out;
+    wire        gsel_v   = sinc_en ? d_v[4] : g4_v;
+    wire [31:0] gsel_out = sinc_en ? (e_pipe[8] ? d_out[4] : s_odata) : g_out;
 
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin gi <= 0; g_left <= 16'd0; end
@@ -1052,13 +1055,13 @@ module sar_resample_v #(
     // ---------------------------------------------------------------------------------
     // top-level sequencer
     // ---------------------------------------------------------------------------------
-    // The 4-deep alignment delay and the sinc core's own 8 stages are IN FLIGHT after g4_v
+    // The alignment delay and the sinc core's own stages are IN FLIGHT after g4_v
     // clears, so the drain has to wait for them too -- otherwise the line is declared done
     // while its last outputs are still in the pipe. d_v covers the delay in both modes;
     // s_ov covers the sinc core. Included unconditionally: in lerp mode they simply drain
     // a few cycles later, which costs nothing and removes a mode-dependent drain rule.
     wire gather_drained = (g_left == 16'd0) && !g0_v && !g1_v && !g2_v && !g3_v && !g4_v
-                          && (d_v == 4'd0) && !s_ov
+                          && (d_v == 5'd0) && !s_busy
                           && !g_word_v && wf_empty && !wsv;
 
     always @(posedge clk or negedge resetn) begin

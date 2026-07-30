@@ -89,9 +89,15 @@ module sar_sinc32_gather #(
     input  wire [WQ_W-1:0]      g_wq,      // Q15 fraction; phase = top LOG2P bits
     input  wire                 g_edge,    // 1 = window not fully in range -> caller supplies lerp
 
-    // ---- result, LAT cycles later ----
+    // ---- result, 9 cycles after g_v (a0, sq, mult, 5 adder levels, out) ----
     output reg                  o_v,
-    output reg  [31:0]          o_data
+    output reg  [31:0]          o_data,
+
+    // High while ANY stage holds a live request. The caller must not declare a line finished until
+    // this clears. Exported rather than left for the caller to infer from o_v, because o_v only
+    // covers the last stage: when the address generation gained its own stage the caller's
+    // hand-written drain condition silently went stale and re-armed lines stalled.
+    output wire                 o_busy
 );
     localparam integer HALF = TAPS/2 - 1;      // 15: taps span idx-HALF .. idx-HALF+TAPS-1
 
@@ -121,10 +127,34 @@ module sar_sinc32_gather #(
     wire [LOG2T-1:0]   sw2_bank = sw2_idx[LOG2T-1:0];
     wire [BANK_AW-1:0] sw2_addr = sw2_idx[LOG2T+BANK_AW-1:LOG2T];
 
-    // window base and its rotation
-    wire signed [IDX_W:0] base  = {1'b0, g_idx} - HALF;
-    wire [LOG2T-1:0]      rot   = base[LOG2T-1:0];
-    wire [BANK_AW-1:0]    baseA = base[LOG2T+BANK_AW-1:LOG2T];
+    // Window base and rotation -- REGISTERED into their own stage (a0) before the bank reads.
+    //
+    // WHY A WHOLE STAGE FOR AN ADD. Combinationally this is base = g_idx-15, then a compare and an
+    // increment per bank. Cheap in isolation: the standalone trial synthesis closed at +1.083 ns.
+    // But standalone, g_idx is a top-level INPUT, so the tool assumes a registered boundary. Inside
+    // sar_resample_v it comes from the coefficient RAM OUTPUT, and the path becomes
+    //     cf_mem read -> cf_idx -> base -> rot/baseA -> 32 comparators -> 32 RAM address inputs
+    // i.e. RAM output to 32 RAM address inputs in one cycle. That measured -11.302 ns on the
+    // 100 MHz domain (46.9 MHz achieved) when the integrated design was synthesised. Registering
+    // here makes every bank address a register output, which is what a RAM address wants.
+    wire signed [IDX_W:0] base_c = {1'b0, g_idx} - HALF;
+
+    reg  [LOG2T-1:0]   rot0;
+    reg  [BANK_AW-1:0] baseA0;
+    reg                v0;
+    reg  [LOG2P-1:0]   ph0;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin v0 <= 1'b0; rot0 <= 0; baseA0 <= 0; ph0 <= 0; end
+        else if (en) begin
+            v0     <= g_v & ~g_edge;
+            rot0   <= base_c[LOG2T-1:0];
+            baseA0 <= base_c[LOG2T+BANK_AW-1:LOG2T];
+            ph0    <= g_wq[WQ_W-1 -: LOG2P];
+        end
+    end
+
+    wire [LOG2T-1:0]   rot   = rot0;
+    wire [BANK_AW-1:0] baseA = baseA0;
 
     reg  [31:0]        sq   [0:TAPS-1];    // bank read data, registered
     reg  [LOG2T-1:0]   rot1;               // rotation, aligned with sq
@@ -149,9 +179,9 @@ module sar_sinc32_gather #(
     always @(posedge clk or negedge resetn) begin
         if (!resetn) begin v1 <= 1'b0; rot1 <= 0; ph1 <= 0; end
         else if (en) begin
-            v1   <= g_v & ~g_edge;
-            rot1 <= rot;
-            ph1  <= g_wq[WQ_W-1 -: LOG2P];      // top LOG2P bits of the Q15 fraction
+            v1   <= v0;                          // stage 0 already applied g_edge
+            rot1 <= rot0;
+            ph1  <= ph0;
         end
     end
 
@@ -210,6 +240,8 @@ module sar_sinc32_gather #(
             s5_lo <= s4_lo[0] + s4_lo[1];
         end
     end
+
+    assign o_busy = v0 | v1 | v2 | (|vv) | o_v;
 
     // ============================ round, saturate, pack ============================
     // >>> 15 to undo Q15, with round-to-nearest, then clamp to int16. Saturation is REQUIRED:

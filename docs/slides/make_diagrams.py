@@ -983,19 +983,24 @@ def fig_sar_kspace(out):
     d.box("c51", 1042.5, 296.5, 7, 7, "", "ip")
     d.box("c52", 1066.5, 296.5, 7, 7, "", "ip")
     d.box("c53", 1090.5, 296.5, 7, 7, "", "ip")
+    # Notation follows the IMPLEMENTATION (serialize_inputs.py / the range-resample slide), not
+    # Doerry's, so the deck says one thing throughout. They describe the same operation: pr[i] is
+    # the projection onto the mean look direction, so kr IS the k_y component and pass 1 lining up
+    # the rows is exactly Doerry's radial stage.
     d.note("m1", 40, 350, 370, 104,
-           "k_r[i,n] = (2/c)(f0 + i dF), at aspect angle theta_n\n\n"
-           "Each pulse is an arc; i steps outward in range\nfrequency. NEITHER k_x nor k_y lands "
-           "on the\nlattice, so no FFT applies yet.", fs=11)
+           "kr[i,j] = (2 pr[i]/c) (f0[i] + j df[i])\n\n"
+           "Pulse i is an arc at aspect angle phi_i. pr[i] is\nthe projection on the MEAN look "
+           "direction, so kr\nIS the k_y component. Neither axis lands on\nthe lattice yet.", fs=11)
     d.note("m2", 450, 350, 390, 104,
-           "RADIAL interpolate:  T_s i' = T_s i cos(theta_n)\n\n"
-           "k_y becomes independent of azimuth index, so\nROWS now sit on the lattice rows. k_x "
-           "still carries\nan angular increment, so COLUMNS still miss --\na trapezoid. Hence a "
-           "second interpolation.", fs=11)
+           "PASS 1 (range):  t = (KR[q] - x0_i) / dx_i\n"
+           "   x0_i = 2 pr[i] f0[i]/c,   dx_i = 2 pr[i] df[i]/c\n\n"
+           "Every pulse resampled onto the COMMON grid KR.\nSince kr is the k_y component this "
+           "makes k_y\nuniform -- ROWS line up. k_x still carries an\nangular increment: a "
+           "trapezoid.", fs=11)
     d.note("m3", 870, 350, 300, 104,
-           "AZIMUTH interpolate:\n   T_s i' d_n tan(theta_n) = d_n'\n\n"
-           "Both axes uniform: every sample is on an\nintersection. A separable 2-D FFT applies, "
-           "so\nthe hardware runs two 1-D passes with a\ntranspose -- the corner-turn -- between.", fs=11)
+           "PASS 2 (azimuth):  u = KC[q] / kr\n   bracket k by a merge scan on tan(phi)\n\n"
+           "k_x uniform too: every sample on an\nintersection. A separable 2-D FFT applies, so\n"
+           "the hardware runs two 1-D passes with a\ntranspose -- the corner-turn -- between.", fs=11)
     return d.write(out / "fig-sar-kspace.drawio.svg")
 
 

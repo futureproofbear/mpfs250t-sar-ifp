@@ -85,9 +85,10 @@ The engineering approach is therefore *fewer passes over the data*, not faster m
 
 ![w:1120](diagrams/fig-sar-kspace.drawio.svg)
 
-Middle panel: after the **radial** interpolation $k_y$ no longer depends on the azimuth index, so the **rows line up** — but $k_x$ still carries an angular increment, leaving a **trapezoid**. 
-Right panel: a second resample stage using azimuth interpolation to map the trapezoid to a uniform grid.
-
+Middle panel — **pass 1** resamples every pulse onto the common grid $K_R$. Because $p_r[i]$ is a
+projection onto the mean look direction, $k_r$ *is* the $k_y$ component, so this makes $k_y$
+uniform: the **rows line up**. $k_x$ still carries an angular increment, leaving a **trapezoid**.
+Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_x$ uniform too.
 ---
 
 # ① Range resample — keystone, fast-time
@@ -97,11 +98,23 @@ sensor's range to scene centre changes pulse to pulse:
 
 $$k_r[i,j] \;=\; \frac{2\,p_r[i]}{c}\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
 
-with $p_r[i]$ the radial unit-projection, $f_0$ the start RF frequency and $\Delta f$ the
-frequency step. Resample each pulse onto the **common** grid $K_R[q]$:
+taken straight from the CPHD per-vector parameters (`serialize_inputs.py`):
+
+| symbol | implementation | meaning |
+|---|---|---|
+| $f_0[i]$ | `freq[i,0]` | first RF frequency of pulse $i$ |
+| $\Delta f[i]$ | `freq[i,1]-freq[i,0]` | frequency step per sample |
+| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos$ of its aspect angle |
+
+$p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up.
+Resample each pulse onto the **common** grid $K_R[q]$:
 
 $$t = \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
 $$\text{out}[q] = (1-\mu)\,\text{in}[k] + \mu\,\text{in}[k{+}1]$$
+
+Indices: $i$ = pulse, $j$ = **input** sample within a pulse, $q$ = **output** sample on the common
+grid, $q = 0\ldots N_p-1$ with $N_p = 8192$. $j$ and $q$ count different things — that is the whole
+point of the resample.
 
 **The grid is uniform in $j$**, so no search is needed — $k$ and $\mu$ are closed-form. That is
 what later makes on-fabric coefficient generation possible.
@@ -152,9 +165,8 @@ Write the pipeline as a composition of operators on the $8192^2$ array:
 
 $$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
 
-Done naively, **every operator is one pass over 256 MB**. The budget is met by noticing that most
-of them need not be.
-
+Done naively, **every operator is one pass over 256 MB**. The budget is met by noticing that most of them need not be.
+<!- Not clear what is "budget met"-->
 **The criterion.** An operator fuses into a neighbouring streaming pass **iff it is local in the
 streaming index** — each output depends on $O(1)$ inputs, at a position known when that input is
 read. Then it costs combinational logic in the feeder or unloader and *no traffic at all*.
@@ -166,7 +178,7 @@ read. Then it costs combinational logic in the feeder or unloader and *no traffi
 | $D$ detect | $(Dz)[n]=\lvert z[n]\rvert$ | yes — pointwise |
 | $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
 | $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
-
+<!-- the term gather is used for first time. it is previously referred to as resample.-->
 ---
 
 # Two compute domains, one narrow bridge

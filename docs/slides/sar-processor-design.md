@@ -94,7 +94,7 @@ Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_
 # ① Range resample — keystone, fast-time
 
 Each pulse $i$ samples the range-frequency axis on its **own non-uniform grid**, because the
-sensor's range to scene centre changes pulse to pulse, with $j$ = **input** sample within a pulse:
+sensor's range to scene centre changes pulse to pulse, with $j^{th}$ input sample location within a pulse at:
 
 $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
 
@@ -102,21 +102,37 @@ $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,
 |---|---|---|
 | $f_0[i]$ | `freq[i][0]` &nbsp;(sample index **zero**) | first RF frequency of pulse $i$ |
 | $\Delta f[i]$ | `freq[i][1] - freq[i][0]` | frequency step per sample — the ramp is linear, so one difference defines it |
-| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos\phi_i$. $p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up. |
-**On the notation.** $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so
-$p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2).
+| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos\phi_i$. $p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up. $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so $p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2). |
 
 ---
 
 # ① Range resample — finding $(k,\mu)$
 
-Resample pulse $i$ onto the common grid $K_R[q]$, $q = 0\ldots N_p-1$, $N_p = 8192$:
+For each pulse $i$, we want to find the data value at the output sample location $K_R[q]$, where $q = 0\ldots N_p-1$, $N_p = 8192$. By setting $K_R[q]=x_{0,i}+t\,\Delta x_i$, and solving for $t$:
 
 $$t \;=\; \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
 
-**Why closed-form?** The source samples are an *arithmetic progression* in $j$, so inverting the
-map is algebra, not search: set $K_R[q]=x_{0,i}+t\,\Delta x_i$ and solve for $t$. One subtract, one
-multiply by a precomputed $1/\Delta x_i$, one floor — $O(1)$, no branching, and independent of every
+We can then find the $q^{th}$ output sample value:
+
+$$\text{out}[q] \;=\; (1-\mu)\,\text{in}[k] \;+\; \mu\,\text{in}[k{+}1]
+\qquad\text{(2-tap, baseline)}$$
+$$\text{out}[q] \;=\; \textstyle\sum_{n=0}^{31} c_n(\mu)\,\text{in}[k{-}15{+}n]
+\qquad\text{(32-tap sinc, variant)}$$
+
+with the taps spanning $k{-}15 \ldots k{+}16$, so tap $n$ sits at offset $n-15-\mu$ from the
+interpolation point:
+
+$$c_n(\mu) \;=\; \frac{\operatorname{sinc}(n-15-\mu)}{\sum_{m=0}^{31}\operatorname{sinc}(m-15-\mu)}$$
+
+The denominator is not cosmetic — it forces **unity DC gain at every $\mu$**. Without it each
+fractional position would have a slightly different gain, which appears in the image as amplitude
+ripple that no downstream scaling removes.
+
+---
+
+### The gather kernel — identical in both passes
+
+The input samples are an *arithmetic progression* in $j$, so inverting the map is algebra, not search: . One subtract, one multiply by a precomputed $1/\Delta x_i$, one floor — $O(1)$, no branching, and independent of every
 other query. Pass ② cannot do this: its abscissa $\tau$ is non-uniform, so $k$ must be *found*.
 
 **And that is what puts the coefficients on fabric.** $t$ is affine in the query value, so the whole
@@ -127,13 +143,6 @@ $$v \;=\; \bigl((Q[q]\cdot A)\gg S\bigr) + B,\qquad A \propto 1/\Delta x_i,\quad
 The CPU sends **three scalars per line** instead of 8192 $(k,\mu)$ pairs — the 32 KB $idx$ + 16 KB
 $wq$ per line that used to cross DDR. Measured: 5.21 s → 3.74 s. ($Q[q]$ is tabulated once per
 scene, so the *query* grid need not be uniform — only the source.)
-
-### The gather kernel — identical in both passes
-
-$$\text{out}[q] \;=\; (1-\mu)\,\text{in}[k] \;+\; \mu\,\text{in}[k{+}1]
-\qquad\text{(2-tap, baseline)}$$
-$$\text{out}[q] \;=\; \textstyle\sum_{t=0}^{31} c_t(\mu)\,\text{in}[k{-}15{+}t]
-\qquad\text{(32-tap sinc, variant)}$$
 
 Only $(k,\mu)$ are derived differently by ① and ②. **The blend is the same operation** — which is
 why one gather core serves both, and why an interpolator upgrade applies to both at once.

@@ -83,38 +83,44 @@ The engineering approach is therefore *fewer passes over the data*, not faster m
 
 # PFA geometry — polar in, rectangular out
 
-![w:1120](diagrams/fig-sar-kspace.drawio.svg)
+![w:1020](diagrams/fig-sar-kspace.drawio.svg)
 
 Middle panel — **pass 1** resamples every pulse onto the common grid $K_R$. Because $p_r[i]$ is a
-projection onto the mean look direction, $k_r$ *is* the $k_y$ component, so this makes $k_y$
-uniform: the **rows line up**. $k_x$ still carries an angular increment, leaving a **trapezoid**.
+projection onto the mean look direction, $k_r$ is the $k_y$ component, so this makes $k_y$ uniform. $k_x$ still carries an angular increment, leaving a **trapezoid**.
 Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_x$ uniform too.
+
 ---
 
 # ① Range resample — keystone, fast-time
 
-Each pulse *i* samples the range-frequency axis on its **own non-uniform grid**, because the
+Each pulse $i$ samples the range-frequency axis on its **own non-uniform grid**, because the
 sensor's range to scene centre changes pulse to pulse:
 
 $$k_r[i,j] \;=\; \frac{2\,p_r[i]}{c}\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
-
-taken straight from the CPHD per-vector parameters (`serialize_inputs.py`):
+where $j$ = **input** sample within a pulse, $q$ = **output** sample on the common grid
 
 | symbol | implementation | meaning |
 |---|---|---|
 | $f_0[i]$ | `freq[i,0]` | first RF frequency of pulse $i$ |
 | $\Delta f[i]$ | `freq[i,1]-freq[i,0]` | frequency step per sample |
-| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos$ of its aspect angle |
+| $p_r[i]$ | `ax[i]*(dx/dn) + ay[i]*(dy/dn)` | $\hat a_i\cdot\hat d$ — pulse $i$'s unit vector projected on the **mean** look direction $\hat d = (dx,dy)/dn$, i.e. $\cos()$ of its aspect angle. $p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up. |
+**On the notation.** $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so
+$p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2).
 
-$p_r[i]$ is what makes $k_r$ the $k_y$ component — which is why pass 1 lines the rows up.
+**And yes, the $2\pi$ is deliberately absent.** A two-way angular wavenumber would be
+$4\pi f/c$ rad/m; the implementation uses $k_r = 2f p_r/c$ — **cycles** per metre, not radians.
+The factor is dropped because the resample only ever forms the *ratio*
+$(K_R[q]-x_{0,i})/\Delta x_i$, in which any common scale cancels exactly, and the $2\pi$ that
+does matter lives in the FFT's own exponent $e^{-2\pi i(\cdot)}$. Carrying it here would change
+no computed value and cost precision in fixed point.
+
+
 Resample each pulse onto the **common** grid $K_R[q]$:
 
 $$t = \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
 $$\text{out}[q] = (1-\mu)\,\text{in}[k] + \mu\,\text{in}[k{+}1]$$
 
-Indices: $i$ = pulse, $j$ = **input** sample within a pulse, $q$ = **output** sample on the common
-grid, $q = 0\ldots N_p-1$ with $N_p = 8192$. $j$ and $q$ count different things — that is the whole
-point of the resample.
+Indices: $q = 0\ldots N_p-1$ with $N_p = 8192$. $j$ and $q$ count different things
 
 **The grid is uniform in $j$**, so no search is needed — $k$ and $\mu$ are closed-form. That is
 what later makes on-fabric coefficient generation possible.
@@ -165,8 +171,10 @@ Write the pipeline as a composition of operators on the $8192^2$ array:
 
 $$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
 
-Done naively, **every operator is one pass over 256 MB**. The budget is met by noticing that most of them need not be.
-<!- Not clear what is "budget met"-->
+Done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s
+each pass costs roughly 0.6 s of pure transfer even before any stall. That is how the **15 s
+wall-clock target** from slide 1 is spent or saved: the design meets it by making most of these
+operators cost *no pass at all*.
 **The criterion.** An operator fuses into a neighbouring streaming pass **iff it is local in the
 streaming index** — each output depends on $O(1)$ inputs, at a position known when that input is
 read. Then it costs combinational logic in the feeder or unloader and *no traffic at all*.
@@ -174,11 +182,15 @@ read. Then it costs combinational logic in the feeder or unloader and *no traffi
 | operator | form | local? |
 |---|---|---|
 | $W$ window | diagonal: $(Ws)[n]=w[n]s[n]$ | yes — pointwise |
-| $G$ gather | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support |
+| $G$ **gather** — the resample's inner op | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support |
 | $D$ detect | $(Dz)[n]=\lvert z[n]\rvert$ | yes — pointwise |
 | $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
 | $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
-<!-- the term gather is used for first time. it is previously referred to as resample.-->
+
+**"Gather" is the hardware name for what stages ①–② do.** *Resample* names the intent — put the
+samples on a new grid; *gather* names the operation the fabric performs — an indexed read of a few
+neighbouring samples plus a weighted blend, $2$ taps for the linear kernel, $32$ for sinc. Same
+thing, one word for the algorithm and one for the datapath.
 ---
 
 # Two compute domains, one narrow bridge

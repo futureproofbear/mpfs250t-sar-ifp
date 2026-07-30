@@ -1065,50 +1065,47 @@ def fig_sar_mpfs(out):
 
 
 def fig_axi_packing(out):
-    """Same bus cycles, twice the samples -- drawn to scale so the waste is visible."""
-    L, GAP, NB = 130, 16, 3                  # 32-bit lane (to scale), gap, beats shown
-    d = Diagram(1180, 470, "AXI beat packing", draw_title=False)
-    d.note("t", 24, 12, 1130, 22,
-           "The FIC_0 bus is 64 bits = two 32-bit lanes. Each lane holds one complex sample.", fs=13)
+    """Per-stream DDR bus time for one pass-1 line, as shipped."""
+    d = Diagram(1180, 500, "AXI beat packing", draw_title=False)
+    d.note("t", 24, 10, 1130, 22,
+           "DDR traffic for ONE pass-1 line   (SN = 4319 source samples, Np = 8192 outputs)", fs=13)
+    d.box("k1", 700, 36, 150, 22, "useful payload", "fab", fs=11)
+    d.box("k2", 862, 36, 150, 22, "eliminated", "gate", fs=11, dashed=True)
 
-    # ---------- OLD: ar_size = 2 ----------
-    d.note("h1", 24, 48, 300, 20, "SmartHLS   ar_size = 2", fs=13)
-    d.note("h1b", 24, 68, 300, 34, "one sample per bus cycle", fs=11)
-    for i in range(NB):
-        x = 340 + i * (2 * L + GAP)
-        d.box("o%d" % i, x, 52, L, 46, "s%d" % i, "fab", fs=13, bold=True)
-        d.box("ow%d" % i, x + L, 52, L, 46, "idle", "bad", fs=12, dashed=True)
-    d.note("n1", 24, 104, 1130, 20,
-           "3 bus cycles  ->  3 samples.   Half of every beat is dead, on all 2160 beats of the row.",
-           fs=12)
+    SCALE = 1000.0 / 4096.0          # px per beat, longest bar = out
+    ROW, TOP = 74, 70
 
-    # ---------- NEW: ar_size = 3 ----------
-    d.note("h2", 24, 152, 300, 20, "gather   ar_size = 3", fs=13)
-    d.note("h2b", 24, 172, 300, 34, "two samples per bus cycle", fs=11)
-    for i in range(NB):
-        x = 340 + i * (2 * L + GAP)
-        lo = "DISCARD" if i == 0 else "s%d" % (2 * i - 1)
-        d.box("nl%d" % i, x, 156, L, 46, lo, "gate" if i == 0 else "fab",
-              fs=12 if i == 0 else 13, bold=(i != 0))
-        d.box("nh%d" % i, x + L, 156, L, 46, "s%d" % (2 * i), "fab", fs=13, bold=True)
-    d.note("n2", 24, 208, 1130, 20,
-           "3 bus cycles  ->  5 samples.   One word is thrown away, ONCE, at the start of the row.",
-           fs=12)
+    def stream(i, name, kind, beats, size, note):
+        y = TOP + i * ROW
+        d.note("l%d" % i, 24, y + 6, 92, 22, name, fs=13)
+        d.note("s%d" % i, 24, y + 28, 92, 18, kind, fs=10.5)
+        if beats:
+            w = max(60, int(beats * SCALE))
+            d.box("b%d" % i, 124, y, w, 40,
+                  "%s beats  x  8 B" % format(beats, ","), "fab", fs=12, bold=True)
+            d.note("n%d" % i, 124 + w + 12, y + 4, 1150 - (124 + w + 12), 34, note, fs=11)
+        else:
+            d.box("b%d" % i, 124, y, 300, 40, "0 beats -- never crosses DDR", "gate",
+                  fs=12, dashed=True)
+            d.note("n%d" % i, 440, y + 4, 700, 34, note, fs=11)
 
-    # ---------- why the first word is thrown away ----------
-    d.box("w", 24, 254, 1130, 60,
-          "A row is N x 4 bytes with N ODD, so every other row starts halfway through a beat.\n"
-          "Rather than narrow the bus to fit, the gather reads from IN_BASE & ~7 and drops the "
-          "leading word: the offset moves into the sample INDEX, not the beat width.", "ip", fs=12)
+    stream(0, "in", "uint32", 2160, 3,
+           "AxSIZE 3'd3 = 8 B. Two samples per beat; one leading word dropped on odd rows.")
+    stream(1, "idx", "int32", 0, 3,
+           "Generated ON FABRIC from three scalars per line (A, B, SH) sent over AXI4-Lite.")
+    stream(2, "wq", "int16", 0, 3,
+           "Same -- the 32 KB idx + 16 KB wq that used to cross DDR every line are gone.")
+    stream(3, "out", "uint32", 4096, 3,
+           "AxSIZE 3'd3 = 8 B. Two samples per beat, fully packed.")
 
-    d.note("f", 24, 330, 1130, 40,
-           "n_lo = 2*beat - rd_odd      n_hi = n_lo + 1      beats = (SN + rd_odd + 1) >> 1"
-           "          (rd_odd = IN_BASE[2])", fs=12)
-    d.note("f2", 24, 380, 1130, 42,
-           "The two lanes also go to SEPARATE banks by sample parity, which is what lets the gather "
-           "read src[k] and src[k+1] in one cycle from single-port RAM.\n"
-           "Measured: pass 1 5.21 s -> 3.74 s (full-width read plus on-fabric coefficients). "
-           "Source: sar_resample_v.v:627-696.", fs=11)
+    d.box("sum", 24, TOP + 4 * ROW + 8, 1130, 56,
+          "6,256 beats/line, carrying 50,044 useful bytes in 50,048 bytes of bus time  =  99.99% "
+          "packing efficiency.\n"
+          "Every remaining stream runs at the full 64-bit width, and the two coefficient streams "
+          "were not made faster -- they were deleted.", "ip", fs=12)
+    d.note("f", 24, TOP + 4 * ROW + 74, 1130, 20,
+           "Source: sar_resample_v.v:696 (m_arsize), :970 (m_awsize); on-fabric coefficients via "
+           "SAR_CGENMODE.", fs=10.5)
     return d.write(out / "fig-axi-packing.drawio.svg")
 
 

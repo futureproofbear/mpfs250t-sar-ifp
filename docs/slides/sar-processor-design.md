@@ -235,10 +235,12 @@ independent kernels on the shared port is ~81%, not 2×.
 
 ![w:1080](diagrams/fig-axi-packing.drawio.svg)
 
-A pulse row is `N·4` bytes with `N` odd, so consecutive row bases alternate between 8- and
-4-byte alignment. SmartHLS handled that by dropping every beat to `ar_size=2`; the gather keeps
-`ar_size=3` always, absorbs the offset into the sample **index**, and throws away one leading word
-per row.
+Every remaining DDR stream runs at the full 64-bit width. A pulse row is `N·4` bytes with `N` odd,
+so alternate rows start mid-beat — the gather still reads `AxSIZE 3'd3` from `IN_BASE & ~7` and
+absorbs the offset into the sample **index**, discarding one leading word per row.
+
+The coefficient streams were not made faster — they were **deleted**. `idx` and `wq` are generated
+on fabric from three scalars per line, so 48 KB per line no longer crosses DDR at all.
 
 ---
 

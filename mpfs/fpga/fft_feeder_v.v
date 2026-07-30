@@ -205,6 +205,14 @@ module fft_feeder_v #(
     // NOT a rebuild: a fabric build takes hours, so both coefficient paths stay in the SAME
     // bitstream and can be A/B'd on silicon. IDX_BASE/WQ_BASE keep their decode for that reason.
     reg                  cstream_en;    // GATHER_CTRL[1]  @0x20
+    // GATHER_CTRL[2]: 32-tap polyphase-sinc gather instead of the 2-tap lerp. Same "add beside,
+    // never replace" rule as pass 1 -- both kernels are in the bitstream, this resets LOW, so a
+    // cold boot gets exactly today's silicon-verified 2-tap behaviour and the two can be A/B'd on
+    // one board run. GATHER_CTRL[3] rewinds the sinc coefficient-table write pointer.
+    reg                  sinc_en;       // GATHER_CTRL[2]  @0x20
+    reg                  sct_rewind;    // GATHER_CTRL[3]  @0x20 (one-shot)
+    reg                  sct_we;        // SINC_TAB        @0x30 (one-shot)
+    reg [15:0]           sct_data;
     reg [AXI_ADDR_W-1:0] idx_base;      // IDX_BASE        @0x24  DDR byte addr of this row's idx[]
     reg [AXI_ADDR_W-1:0] wq_base;       // WQ_BASE         @0x28  DDR byte addr of this row's wq[]
     reg [15:0]           src_len;       // GATHER_DIMS[15:0] @0x2c  S = source SAMPLE count
@@ -217,10 +225,13 @@ module fft_feeder_v #(
             src_base <= 0; nbeats <= 0; s_bvalid <= 0; start_pulse <= 0;
             win_scale <= 16'sd0; win_en <= 1'b0; tab_wptr <= 0; tab_we <= 1'b0;
             gath_en <= 1'b0; cstream_en <= 1'b0;
+            sinc_en <= 1'b0; sct_rewind <= 1'b0; sct_we <= 1'b0; sct_data <= 16'd0;
             idx_base <= 0; wq_base <= 0; src_len <= 16'd0; q_n <= 16'd0;
         end else begin
             start_pulse <= 0;
             tab_we      <= 1'b0;
+            sct_rewind  <= 1'b0;
+            sct_we      <= 1'b0;
             if (s_awready) begin
                 case (s_awaddr[11:0])
                     12'h008: start_pulse <= s_wdata[0];    // write 1 -> start
@@ -240,10 +251,16 @@ module fft_feeder_v #(
                     12'h020: begin                          // GATHER_CTRL
                         gath_en    <= s_wdata[0];
                         cstream_en <= s_wdata[1];
+                        sinc_en    <= s_wdata[2];
+                        sct_rewind <= s_wdata[3];
                     end
                     12'h024: idx_base <= s_wdata[AXI_ADDR_W-1:0];
                     12'h028: wq_base  <= s_wdata[AXI_ADDR_W-1:0];
                     12'h02c: begin src_len <= s_wdata[15:0]; q_n <= s_wdata[31:16]; end
+                    12'h030: begin                          // SINC_TAB, pointer auto-increments
+                        sct_data <= s_wdata[15:0];
+                        sct_we   <= 1'b1;
+                    end
                     default: ;
                 endcase
                 s_bvalid <= 1'b1;
@@ -516,6 +533,11 @@ module fft_feeder_v #(
     reg [15:0]           gr_srclen, gr_qn;
     reg [AXI_ADDR_W-1:0] gr_srcbase, gr_idxbase, gr_wqbase;
     reg                  gr_cstream;    // GATHER_CTRL[1] latched at START (same rule)
+    // Latched for a HARDER reason than the others: sinc_en changes the gather pipeline DEPTH
+    // (9 vs 4). A mid-row change would leave results from two different latencies interleaved in
+    // the output FIFO -- a misordered row, not a wrong sample, and it would not look like a
+    // coefficient bug at all.
+    reg                  gr_sinc;
 
     // gather load master (own copy; the legacy feed master stays idle while gath_busy)
     reg [31:0]           g_beats_left;
@@ -670,11 +692,93 @@ module fft_feeder_v #(
     wire signed [17:0] r_hi = {{2{g3_ahi[15]}}, g3_ahi} + g3_mh[32:15];
     wire signed [17:0] r_lo = {{2{g3_alo[15]}}, g3_alo} + g3_ml[32:15];
 
+    // =============================================================================================
+    // 32-TAP SINC GATHER (GATHER_CTRL[2]) -- the azimuth-pass twin of pass 1's sar_resample_v
+    // integration. Runs BESIDE the lerp: both kernels stay in the bitstream, gr_sinc resets LOW.
+    //
+    // WHY A SINC KERNEL IS EVEN LEGAL HERE. Pass 1's source grid is x0 + j*dx, so sinc(n-15-mu) is
+    // exact. THIS pass gathers along tau = tan(phi), which is NOT uniform -- a sinc indexed by mu
+    // assumes the 32 taps under the window are equally spaced, and they are not. Measured on the
+    // real Umbra NDSU CPHD by mpfs/host/check_pass2_sinc_uniformity.py: within any 32-tap window
+    // tau's spacing varies by max/min = 1.00045 (0.05%), even though it varies 3.1% across a whole
+    // row. Locally flat is all the kernel needs, and reconstruction error matches a uniform-grid
+    // control to within a dB (-34 dB sinc vs -13..-22 dB lerp). Without that measurement this
+    // would be an unfalsifiable build: RTL and model would share the same wrong kernel and every
+    // bit-exactness bench would pass.
+    //
+    // LATENCY, and it is the whole difficulty. The sinc core is 9 cycles from g_v; the lerp result
+    // lands in g4 at 4. So the lerp and its window coefficient delay by 5 to meet it, and the edge
+    // flag delays by 9 from g0_v so the select lands on the RIGHT query. Get this wrong and the row
+    // comes out misordered or short -- a hang or a truncated row, not a wrong value.
+    //
+    // EDGE queries are NOT answered by the sinc core (g_edge tells it so); they fall back to the
+    // delayed lerp, which is asserted for every query. That matters more here than in pass 1: a
+    // pass-2 row is M pulses (2042 at deci=4) against pass 1's 8192, so the 31-sample edge band is
+    // 1.52% of the row rather than 0.38%.
+    // =============================================================================================
+    localparam integer S_TAPS = 32;
+    localparam integer S_HALF = S_TAPS/2 - 1;                  // 15
+    localparam integer S_IDXW = 14;
+
+    // window wholly in range?  idx >= 15  AND  idx <= S-17.  g_inr1 already covers idx<0 / idx>=S-1.
+    wire signed [31:0] s_lo_lim = 32'sd15;
+    wire signed [31:0] s_hi_lim = $signed({16'd0, gr_srclen}) - 32'sd17;
+    wire        s_edge = ~g_inr1 | (idx1 < s_lo_lim) | (idx1 > s_hi_lim);
+
+    // fill: one 64-bit beat carries two consecutive samples -> both write ports, different banks.
+    // Sample index is 2*g_wn (even half) and 2*g_wn+1 (odd half), matching buf_e/buf_o above.
+    wire [S_IDXW-1:0] s_wn_lo = {g_wn[S_IDXW-2:0], 1'b0};
+    wire [S_IDXW-1:0] s_wn_hi = {g_wn[S_IDXW-2:0], 1'b1};
+    wire s_lo_ok = buf_we && ({16'd0, s_wn_lo} < {16'd0, gr_srclen});
+    wire s_hi_ok = buf_we && ({16'd0, s_wn_hi} < {16'd0, gr_srclen});
+
+    wire        s_ov, s_busy;
+    wire [31:0] s_odata;
+
+    sar_sinc32_gather #(.IDX_W(S_IDXW), .WQ_W(15)) u_sinc (
+        .clk(clk), .resetn(resetn),
+        .ct_we(sct_we), .ct_data($signed(sct_data)), .ct_rewind(sct_rewind),
+        .sw_we (s_lo_ok), .sw_idx (s_wn_lo), .sw_data (m_rdata[31:0]),
+        .sw2_we(s_hi_ok), .sw2_idx(s_wn_hi), .sw2_data(m_rdata[63:32]),
+        .en(gen), .g_v(g0_v), .g_idx(idx1[S_IDXW-1:0]), .g_wq(wq1[14:0]), .g_edge(s_edge),
+        .o_v(s_ov), .o_data(s_odata), .o_busy(s_busy)
+    );
+
+    // lerp + window coefficient delayed by 5 (4 -> 9); edge flag delayed by 9 from g0_v.
+    reg  [4:0]         d_v;
+    reg signed [15:0]  d_hi [0:4];
+    reg signed [15:0]  d_lo [0:4];
+    reg signed [15:0]  d_cw [0:4];
+    reg  [8:0]         e_pipe;
+    integer di;
+    always @(posedge clk or negedge resetn) begin
+        if (!resetn) begin
+            d_v <= 5'd0; e_pipe <= 9'd0;
+            for (di = 0; di < 5; di = di + 1) begin
+                d_hi[di] <= 16'sd0; d_lo[di] <= 16'sd0; d_cw[di] <= 16'sd0;
+            end
+        end else if (gen) begin
+            d_v      <= {d_v[3:0], g4_v};
+            d_hi[0]  <= g4_hi;  d_lo[0] <= g4_lo;  d_cw[0] <= g4_cw;
+            for (di = 1; di < 5; di = di + 1) begin
+                d_hi[di] <= d_hi[di-1]; d_lo[di] <= d_lo[di-1]; d_cw[di] <= d_cw[di-1];
+            end
+            e_pipe   <= {e_pipe[7:0], s_edge & g0_v};
+        end
+    end
+
+    // ONE output per query either way: in sinc mode the VALID comes from the delayed lerp (which is
+    // asserted for every query, edge or not); only the DATA is switched.
+    wire               gsel_v  = gr_sinc ? d_v[4] : g4_v;
+    wire signed [15:0] gsel_hi = gr_sinc ? (e_pipe[8] ? d_hi[4] : $signed(s_odata[31:16])) : g4_hi;
+    wire signed [15:0] gsel_lo = gr_sinc ? (e_pipe[8] ? d_lo[4] : $signed(s_odata[15:0]))  : g4_lo;
+    wire signed [15:0] gsel_cw = gr_sinc ? d_cw[4] : g4_cw;
+
     // ---- stage-5 combinational: window multiply  (gathered * cw) >>> 15 ----------------------
-    wire signed [31:0] wm_i = $signed(g4_hi) * $signed(g4_cw);
-    wire signed [31:0] wm_q = $signed(g4_lo) * $signed(g4_cw);
+    wire signed [31:0] wm_i = $signed(gsel_hi) * $signed(gsel_cw);
+    wire signed [31:0] wm_q = $signed(gsel_lo) * $signed(gsel_cw);
     wire [31:0] g5_win  = {wm_i[30:15], wm_q[30:15]};   // windowed {I,Q}
-    wire [31:0] g5_pass = {g4_hi, g4_lo};               // gathered  {I,Q} (window disabled)
+    wire [31:0] g5_pass = {gsel_hi, gsel_lo};           // gathered  {I,Q} (window disabled)
 
     // ---- gather + window pipeline (all stages frozen together by `gen` backpressure) ---------
     always @(posedge clk or negedge resetn) begin
@@ -720,7 +824,7 @@ module fft_feeder_v #(
             g4_lo   <= g3_val ? r_lo[15:0] : 16'sd0;
             g4_cw   <= g3_cw;
 
-            g5_v    <= g4_v;
+            g5_v    <= gsel_v;
             g5_samp <= win_en ? g5_win : g5_pass;
         end
     end
@@ -775,7 +879,11 @@ module fft_feeder_v #(
     end
 
     // ---- gather sequencer: 3 read passes, then gather/stream, then drain --------------------
-    wire g_pipe_empty = !g0_v && !g1_v && !g2_v && !g3_v && !g4_v && !g5_v && !g_word_v;
+    // Must include the sinc core and the 5-deep delay chain. Without them the row completes while
+    // sinc results are still in flight: the FIFO gets fewer samples than QN and the FFT is armed on
+    // a short row -- which presents as a hang or a truncated line, never as a wrong sample value.
+    wire g_pipe_empty = !g0_v && !g1_v && !g2_v && !g3_v && !g4_v && !g5_v && !g_word_v
+                        && (d_v == 5'd0) && !s_busy;
     wire gather_done  = (g_left == 16'd0) && g_pipe_empty;
     wire g_drained    = g_sempty && !g_svalid;
 
@@ -786,7 +894,7 @@ module fft_feeder_v #(
             g_beats_left <= 32'd0; g_next_addr <= 0; g_cur_len <= 32'd0; g_burst_rem <= 9'd0;
             g_wn <= 16'd0;
             g_err_extra <= 1'b0; g_err_rlast <= 1'b0; g_err_align <= 1'b0;
-            gr_srclen <= 16'd0; gr_qn <= 16'd0; gr_cstream <= 1'b0;
+            gr_srclen <= 16'd0; gr_qn <= 16'd0; gr_cstream <= 1'b0; gr_sinc <= 1'b0;
             gr_srcbase <= 0; gr_idxbase <= 0; gr_wqbase <= 0;
         end else begin
             // sticky: a stray/misrouted R beat during a load pass must not silently shift a bank
@@ -798,6 +906,7 @@ module fft_feeder_v #(
                       gr_srclen  <= src_len;   gr_qn      <= q_n;
                       gr_srcbase <= src_base;  gr_idxbase <= idx_base;  gr_wqbase <= wq_base;
                       gr_cstream <= cstream_en;
+                      gr_sinc    <= sinc_en;
                       gath_busy  <= 1'b1;
                       gpass      <= 2'd0;
                       g_next_addr  <= src_base;

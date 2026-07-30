@@ -59,12 +59,16 @@
 module tb_fft_feeder_gather;
 
     // DUT sized down for the toy frame (QN=32, S<=36).
-    localparam integer TAB_AW    = 4;    // 16 taper words == `TAB_WORDS
-    localparam integer G_TAB_AW  = 6;    // 64 idx/wq entries (idx bank 2^5, wq bank 2^4)
-    localparam integer G_BUF_AW  = 6;    // 64 source samples/bank -> 128 samples max
-    localparam integer G_SFIFO_AW= 5;    // 32-beat gather stream FIFO
-    localparam integer FIFO_AW   = 5;
-    localparam integer MAX_BURST = 8;
+    // SILICON PARAMETERS. These were 4/6/6/5/5/8 until 2026-07-30 -- every earlier pass of this
+    // bench described a DIFFERENT module than the bitstream. fft_feeder_top.v overrides only the
+    // three AXI widths, so synthesis builds fft_feeder_v's module defaults, and those are these.
+    // Registered in check_tb_params.py at the same time; the gate now enforces it.
+    localparam integer TAB_AW    = 12;   // taper table 4096 words
+    localparam integer G_TAB_AW  = 13;   // 8192 idx/wq entries
+    localparam integer G_BUF_AW  = 12;   // 4096 source samples/bank -> 8192 samples max
+    localparam integer G_SFIFO_AW= 9;    // 512-beat gather stream FIFO
+    localparam integer FIFO_AW   = 9;
+    localparam integer MAX_BURST = 64;
 
     reg clk = 0, resetn = 0;
     always #8 clk = ~clk;                // 62.5 MHz fabric clock

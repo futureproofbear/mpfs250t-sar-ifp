@@ -46,6 +46,9 @@ REGISTRY = [
     # synthesis would build. Registered from the start so it can never reach a bitstream with the
     # bench validating a different parameterisation, which is the failure this gate exists for.
     ("sar_sinc32_gather.v", None,                 "tb/tb_sar_sinc32.v"),
+    # Added 2026-07-30 when the 32-tap sinc gather was integrated here. It was UNREGISTERED until
+    # then -- i.e. ungated -- and registering it immediately exposed a full silicon divergence.
+    ("fft_feeder_v.v",   "fft_feeder_top.v",     "tb/tb_fft_feeder_gather.v"),
 ]
 
 # WAIVERS. A core whose bench genuinely cannot run at silicon parameters, with the reason and what

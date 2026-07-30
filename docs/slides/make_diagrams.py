@@ -1064,6 +1064,64 @@ def fig_sar_mpfs(out):
     return d.write(out / "fig-sar-mpfs.drawio.svg")
 
 
+def fig_axi_packing(out):
+    """4-byte-aligned rows on a 64-bit bus: what the gather does instead of halving ar_size."""
+    d = Diagram(1180, 640, "AXI beat packing -- a 4-byte-aligned row on a 64-bit bus", draw_title=False)
+    d.note("t", 24, 14, 1130, 34,
+           "A pulse row is N x 4 bytes with N ODD, so consecutive row bases alternate between "
+           "8-byte and 4-byte alignment. The bus is 64 bits.", fs=12)
+
+    # ---- the problem ----
+    d.box("p", 24, 58, 360, 96,
+          "SmartHLS resample\nar_size = 2 (4 bytes/beat)\n\ncorrect, but HALF the bus idles", "bad",
+          bold=True)
+    d.note("pn", 24, 160, 360, 54,
+           "Alignment is a property of the ADDRESS, not the data. Narrowing every beat to fix "
+           "the first one pays the cost on all 4319 of them.", fs=11)
+
+    # ---- case A: even row, rd_odd = 0 ----
+    d.note("ha", 420, 58, 730, 18, "CASE A   IN_BASE[2] = 0  (rd_odd = 0)  -- row starts on a beat boundary", fs=12)
+    d.box("a0", 420, 80, 170, 44, "beat 0\n[63:32] s1   [31:0] s0", "fab", fs=11)
+    d.box("a1", 600, 80, 170, 44, "beat 1\n[63:32] s3   [31:0] s2", "fab", fs=11)
+    d.box("a2", 780, 80, 170, 44, "beat 2\n[63:32] s5   [31:0] s4", "fab", fs=11)
+    d.note("an", 960, 80, 190, 44, "every 32-bit lane\ncarries a sample", fs=11)
+
+    # ---- case B: odd row, rd_odd = 1 ----
+    d.note("hb", 420, 146, 730, 18, "CASE B   IN_BASE[2] = 1  (rd_odd = 1)  -- row starts MID-beat", fs=12)
+    d.box("b0", 420, 168, 170, 44, "beat 0\n[63:32] s0   [31:0] DISCARD", "gate", fs=11)
+    d.box("b1", 600, 168, 170, 44, "beat 1\n[63:32] s2   [31:0] s1", "fab", fs=11)
+    d.box("b2", 780, 168, 170, 44, "beat 2\n[63:32] s4   [31:0] s3", "fab", fs=11)
+    d.note("bn", 960, 168, 190, 44, "ONE word thrown away,\nonce per row", fs=11)
+
+    # ---- the arithmetic ----
+    d.box("m", 420, 236, 530, 92,
+          "read from  IN_BASE & ~7        ar_size = 3'b011  (8 bytes) ALWAYS\n"
+          "n_lo = 2*beat - rd_odd         n_hi = n_lo + 1\n"
+          "beats = (SN + rd_odd + 1) >> 1", "ip", fs=12)
+    d.note("mn", 960, 236, 190, 92,
+           "The offset is absorbed\ninto the sample INDEX,\nnot into the beat width.", fs=11)
+
+    # ---- bank routing ----
+    d.note("hr", 420, 340, 730, 18, "and the two lanes land in different BANKS, by sample parity", fs=12)
+    d.box("be", 420, 362, 250, 52, "buf_e   even samples\nrd_odd ? rdata[63:32] : rdata[31:0]", "mem", fs=11)
+    d.box("bo", 686, 362, 264, 52, "buf_o   odd samples\nrd_odd ? rdata[31:0] : rdata[63:32]", "mem", fs=11)
+    d.note("rn", 960, 362, 190, 52, "so buf[j] and buf[j+1]\nread in ONE cycle,\nsingle-port RAMs", fs=11)
+
+    d.note("f1", 24, 430, 1130, 56,
+           "WHY IT MATTERS: the gather needs src[k] and src[k+1] together for every output. Split by "
+           "PARITY, one address into each bank gives both -- no dual-port RAM, no second read cycle. "
+           "The 64-bit read and the parity split are the same decision.", fs=11)
+    d.note("f2", 24, 492, 1130, 70,
+           "MEASURED: pass 1 fell from 5.21 s to 3.74 s. The full-width read is part of that; the "
+           "rest is on-fabric coefficient generation. The discarded word costs one beat per row -- "
+           "1 in 2160 for a 4319-sample row -- against the 2x the narrow path was giving up on "
+           "every beat.", fs=11)
+    d.note("f3", 24, 570, 1130, 40,
+           "Source: sar_resample_v.v:627-696. Alignment is handled ONCE at the row base; nothing "
+           "downstream of the bank write knows the row was ever misaligned.", fs=10.5)
+    return d.write(out / "fig-axi-packing.drawio.svg")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
@@ -1082,7 +1140,7 @@ def main():
                fig_fabric, fig_dataflow, fig_timing, fig_bug,
                fig_sar_python, fig_sar_fabric, fig_sar_dataflow,
                fig_sar_range_resamp, fig_sar_azimuth_resamp, fig_sar_kspace,
-               fig_sar_mpfs):
+               fig_sar_mpfs, fig_axi_packing):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()

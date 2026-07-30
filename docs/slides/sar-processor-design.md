@@ -194,68 +194,20 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
 
-# The MPFS250T — and the vocabulary
+# Part 3 — MPFS250T Architecture and Resources
 
 ![w:1080](diagrams/fig-sar-mpfs.drawio.svg)
 
-
 ---
+# DDR memory map — the allocation
 
-Every term the rest of Part 3 uses is named here: **MSS**, **U54**, **FIC_0**, **CIC**, **LSRAM**,
-**MACC**, **CoreFFT**, **SIG/SCRATCH/OUT**.
-
-Colour carries the same meaning in every figure of this deck — what a block *is*, not what it does:
-
-| | | | |
-|---|---|---|---|
-| <span style="color:#C77700">■</span> **amber** — MSS / CPU | <span style="color:#2E8B57">■</span> **green** — fabric RTL we wrote | <span style="color:#6A4CA5">■</span> **purple** — hard IP | <span style="color:#666666">■</span> **grey** — memory |
-| U54, E51 | RES, CT, COEFG, FEED, UNLD | FIC_0, CIC, CoreFFT | L2, eNVM, LSRAM, DDR |
-
-Arrows: **double-headed** = a bidirectional data path, **dashed** = AXI4-Lite control (arm a kernel,
-read status), plain = one-way. The green/purple split is the one to keep: purple blocks are fixed and
-we integrate them, green blocks are ours to change — which is why every optimisation in Part 3 lands
-on a green box.
-
----
-
-# Part 3 — Mapping onto fabric: what "fusing" means
-
-Write the pipeline as a composition of operators on the $8192^2$ array:
-
-$$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
-
-If done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s
-each pass costs at least 0.6 s of data transfer.
-
-**Design approach.** An operator fuses into a neighbouring streaming pass **iff it is local in the
-streaming index** — each output depends on $O(1)$ inputs, at a position known when that input is
-read. Then it costs combinational logic in the feeder or unloader and *no traffic at all*.
-
-| operator | form | local? |
-|---|---|---|
-| $W$ window | diagonal: $(Ws)[n]=w[n]s[n]$ | yes — pointwise |
-| $G$ **gather** — the resample's inner op | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support. Note: *Resample* is the intent — put the samples on a new grid; *gather* names the operation the fabric performs — an indexed read of a few neighbouring samples plus a weighted blend, $2$ taps for the linear kernel, $32$ for sinc. |
-| $D$ detect | $(Dz)[n]=\lvert z[n]\rvert$ | yes — pointwise |
-| $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
-| $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
-
----
-
-# Two compute domains, one narrow bridge
-
-
-| | |
-|---|---|
-| **MSS** | 4× U54 @ 600 MHz — orchestration, geometry, block-exponent bookkeeping |
-| **Fabric** | resample · corner-turn · CoreFFT ×2 chains · coefficient generator |
-| **Bridge** | **FIC_0**, 64-bit @ 100 MHz — *the* bottleneck, ~800 MB/s |
-| **Control** | CIC, 9 AXI4-Lite targets — kernel arm/status |
-
-Fabric runs at **100 MHz**; CoreFFT's `SLOWCLK` domain at **12.5 MHz** (CLK/8).
+![w:900](../img/sar_ddr_map.svg)
 
 ---
 
 # DDR memory map and why it is laid out this way
+
+SIG and SCRATCH are 256 MB as the complex data is 4 B/sample. `OUT` is half the size of the others because the detected image is **uint16**, 2 B/px, plus a small geometry/telemetry block .  
 
 | buffer | address | size | role |
 |---|---|---|---|
@@ -265,19 +217,7 @@ Fabric runs at **100 MHz**; CoreFFT's `SLOWCLK` domain at **12.5 MHz** (CLK/8).
 | geometry | `0xB000_0000`+ | ~1 MB | `f0`, `df`, `pr`, `tan_s`, `KR`, `KC`, `invorder` |
 | knobs / telemetry | `0xB005_9xxx` | words | runtime mode + per-stage timing |
 
-**Buffers are 256 MB apart on purpose.** An in-place FFT stalls: the DMA is still flushing
-transform *t* while the feeder pulls *t+1* over the shared interconnect, CoreFFT drops
-`BUF_READY` and the pipeline locks. Ping-ponging `SCRATCH`↔`SIG` keeps read and write on
-**separate 256 MB pages** — validated on silicon after an in-place build hung at transform 1.
-
----
-
-# DDR memory map — the allocation
-
-![w:900](../img/sar_ddr_map.svg)
-
-Three 256 MB-aligned regions plus a small geometry/telemetry block. `OUT` is half the size of the
-others because the detected image is **uint16**, 2 B/px, where the complex buffers are 4 B/sample.
+**Buffers are 256 MB apart on purpose.** An in-place FFT stalls: the DMA is still flushing transform *t* while the feeder pulls *t+1* over the shared interconnect, CoreFFT drops `BUF_READY` and the pipeline locks. Ping-ponging `SCRATCH`↔`SIG` keeps read and write on  **separate 256 MB pages** — validated on silicon after an in-place build hung at transform 1.
 
 ---
 
@@ -293,12 +233,12 @@ independent kernels on the shared port is ~81%, not 2×.
 
 # AXI beat packing — why the gather reads full-width
 
-![w:1000](../img/sar_axi_packing.svg)
+![w:1080](diagrams/fig-axi-packing.drawio.svg)
 
-A pulse row is `N·4` bytes with `N` odd, so a row base is only **4-byte aligned**. The SmartHLS
-resample handled that by dropping to `ar_size=2` and wasting half the 64-bit bus. The hand-written
-gather instead always reads full 64-bit beats from `IN_BASE & ~7` and discards the odd leading
-word — so pass 1 gets the whole bus.
+A pulse row is `N·4` bytes with `N` odd, so consecutive row bases alternate between 8- and
+4-byte alignment. SmartHLS handled that by dropping every beat to `ar_size=2`; the gather keeps
+`ar_size=3` always, absorbs the offset into the sample **index**, and throws away one leading word
+per row.
 
 ---
 
@@ -317,6 +257,27 @@ unloader is where detect is fused. Two such chains run in parallel, splitting ro
 ![w:1150](diagrams/fig-sar-dataflow.drawio.svg)
 
 Each arrow is a full pass over 256 MB. The count of arrows is the design.
+
+---
+
+# Mapping onto fabric
+
+Write the pipeline as a composition of operators on the $8192^2$ array:
+
+$$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
+
+If done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s. Each pass costs at least 0.6 s of data transfer.
+
+**Design approach.** An operator can be **fused** into a neighbouring streaming pass iff it is local in the streaming index.
+
+| operator | form | local? |
+|---|---|---|
+| $W$ window | diagonal: $(Ws)[n]=w[n]s[n]$ | yes — pointwise |
+| $G$ **gather** — the resample's inner op | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support. Note: *Resample* is the intent — put the samples on a new grid; *gather* names the operation the fabric performs — an indexed read of a few neighbouring samples plus a weighted blend, $2$ taps for the linear kernel, $32$ for sinc. |
+| $D$ detect | $(Dz)[n]=\lvert z[n]\rvert$ | yes — pointwise |
+| $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
+| $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
+
 
 ---
 

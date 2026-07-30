@@ -120,7 +120,10 @@ module sar_sinc32_gather #(
 
     // ============================ source banks ============================
     // bank b holds samples with index[LOG2T-1:0] == b, at address index >> LOG2T
-    reg [31:0] sbank [0:TAPS-1][0:(1<<BANK_AW)-1];
+    // syn_ramstyle is not decoration: without it, and without the single-write-port form below,
+    // synthesis built these 32 x 512 x 32-bit banks out of LUTs -- 985,998 of them -- and the
+    // resulting 512:1 mux per bank cost -6.061 ns on the 100 MHz domain (2026-07-30).
+    (* syn_ramstyle = "lsram" *) reg [31:0] sbank [0:TAPS-1][0:(1<<BANK_AW)-1];
 
     wire [LOG2T-1:0]   sw_bank  = sw_idx[LOG2T-1:0];
     wire [BANK_AW-1:0] sw_addr  = sw_idx[LOG2T+BANK_AW-1:LOG2T];
@@ -166,12 +169,26 @@ module sar_sinc32_gather #(
         for (b = 0; b < TAPS; b = b + 1) begin : g_bank
             // b < rot -> this bank's window sample lives in the NEXT row of the bank
             wire [BANK_AW-1:0] ra = baseA + ((b < rot) ? 1'b1 : 1'b0);
+            // ONE write port per bank. The two fill ports are muxed into a SINGLE
+            // enable/address/data triple before the memory, because two distinct write-address
+            // expressions on one array defeats RAM inference -- the tool cannot give a RAM two
+            // write addresses, so it builds registers instead. Writing it as if/else inside the
+            // always block looks equivalent and is not.
+            wire               wsel = sw_we && (sw_bank == b[LOG2T-1:0]);
+            wire               wen  = wsel || (sw2_we && (sw2_bank == b[LOG2T-1:0]));
+            wire [BANK_AW-1:0] wadr = wsel ? sw_addr : sw2_addr;
+            wire [31:0]        wdat = wsel ? sw_data : sw2_data;
+
+            // NO READ/WRITE CONFLICT CHECK (synthesis FX107). Sim and hardware would disagree
+            // if the same bank address were written and read in the SAME cycle. They never are:
+            // the caller fills the line, then gathers from it -- the phases do not overlap, and
+            // the bench drives them in that order. If a future caller ever overlaps them, this
+            // memory needs syn_ramstyle = rw_check and the mismatch becomes a real risk.
             always @(posedge clk) begin
                 // the source WRITE is not part of the gather pipeline: it runs while the core is
                 // idle between lines, so it is deliberately NOT gated by en.
-                if (sw_we  && sw_bank  == b[LOG2T-1:0]) sbank[b][sw_addr]  <= sw_data;
-                else if (sw2_we && sw2_bank == b[LOG2T-1:0]) sbank[b][sw2_addr] <= sw2_data;
-                if (en) sq[b] <= sbank[b][ra];
+                if (wen) sbank[b][wadr] <= wdat;
+                if (en)  sq[b] <= sbank[b][ra];
             end
         end
     endgenerate

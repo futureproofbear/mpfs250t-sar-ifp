@@ -1008,6 +1008,59 @@ def fig_sar_kspace(out):
     return d.write(out / "fig-sar-kspace.drawio.svg")
 
 
+def fig_sar_mpfs(out):
+    """MPFS250T orientation: what the parts are called, before later slides use the names."""
+    d = Diagram(1180, 600, "MPFS250T -- the parts, and what they are called", draw_title=False)
+    d.note("t", 24, 16, 1130, 30,
+           "One die: a hard RISC-V subsystem and FPGA fabric, joined by a narrow bridge. Every "
+           "term the later slides use is named here.", fs=12)
+
+    # ---- MSS ----
+    d.box("mss",  30, 68, 330, 150, "MSS  --  Microprocessor SubSystem", "mss", bold=True)
+    d.box("u54",  48, 110, 140, 44, "4 x U54\nRISC-V, 600 MHz", "mss", fs=11)
+    d.box("e51",  200, 110, 142, 44, "1 x E51\nmonitor core", "mss", fs=11)
+    d.box("l2",   48, 162, 294, 44, "L2 cache / scratchpad  --  2 MiB\nthe application runs here", "mem", fs=11)
+    d.box("envm", 30, 232, 330, 42, "eNVM  --  128 KB non-volatile, holds the application", "mem", fs=11)
+
+    # ---- bridges ----
+    d.box("fic", 400, 92, 150, 92,
+          "FIC_0\n64-bit AXI4 @ 100 MHz\n~ 800 MB/s\nTHE bottleneck", "ip", bold=True)
+    d.box("cic", 400, 206, 150, 68, "CIC\nAXI4-Lite, 9 targets\narm / status / tables", "ip", fs=11)
+
+    # ---- fabric ----
+    d.box("fab", 590, 68, 340, 300, "FPGA fabric  --  100 MHz", "fab", bold=True)
+    d.box("res", 606, 108, 150, 52, "RES\nresample gather", "fab", fs=11)
+    d.box("ct",  770, 108, 146, 52, "CT\ncorner-turn", "fab", fs=11)
+    d.box("cg",  606, 172, 150, 52, "COEFG\ncoefficient gen", "fab", fs=11)
+    d.box("fft", 770, 172, 146, 52, "CoreFFT x2\nSLOWCLK 12.5 MHz", "ip", fs=11)
+    d.box("prim", 606, 236, 310, 52,
+          "built from: LSRAM (20 Kb blocks) . uSRAM . MACC (18x18)", "mem", fs=11)
+    d.box("kn", 606, 300, 310, 52,
+          "FEED = feeder (window + gather fused in)\nUNLD = unloader (detect fused in)", "fab", fs=11)
+
+    # ---- DDR ----
+    d.box("ddr", 960, 92, 196, 200,
+          "DDR (LPDDR4)\n\nSIG      256 MB\nSCRATCH  256 MB\nOUT      128 MB\n\n"
+          "one 8192x8192 complex\nframe = 256 MB", "mem", bold=True)
+
+    d.edge("mss", "fic"); d.edge("mss", "cic", dashed=True)
+    d.edge("fic", "fab", double=True); d.edge("cic", "fab", dashed=True)
+    d.edge("fab", "ddr", double=True)
+    d.edge("mss", "ddr", double=True, label="cached")
+
+    d.note("n1", 30, 400, 520, 76,
+           "MSS and fabric BOTH reach DDR, but not coherently: FIC_0 is outside the cache, so\n"
+           "anything the CPU writes for a kernel must be flushed first, and anything a kernel\n"
+           "writes must be invalidated before the CPU reads it. That single fact shapes most of\n"
+           "the firmware.", fs=11)
+    d.note("n2", 590, 400, 566, 76,
+           "SCALE, so the later numbers land: the whole device holds ~4.4 MB on chip against a\n"
+           "256 MB frame. 784 MACC blocks, of which the shipping design uses 74. It is BANDWIDTH\n"
+           "-bound, not compute-bound -- which is why the architecture is about deleting DDR\n"
+           "passes rather than adding arithmetic.", fs=11)
+    return d.write(out / "fig-sar-mpfs.drawio.svg")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default="diagrams")
@@ -1025,7 +1078,8 @@ def main():
     for fn in (fig_loop, fig_orchestration, fig_gates, fig_pfa, fig_python,
                fig_fabric, fig_dataflow, fig_timing, fig_bug,
                fig_sar_python, fig_sar_fabric, fig_sar_dataflow,
-               fig_sar_range_resamp, fig_sar_azimuth_resamp, fig_sar_kspace):
+               fig_sar_range_resamp, fig_sar_azimuth_resamp, fig_sar_kspace,
+               fig_sar_mpfs):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()

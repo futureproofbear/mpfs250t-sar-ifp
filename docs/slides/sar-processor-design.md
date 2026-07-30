@@ -174,7 +174,15 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
 
-<!-- One slide on the mpfs250t architecture, draw with drawio, introducing the terms used in the subsequent slides like FIC0 etc-->
+# The MPFS250T — and the vocabulary
+
+![w:1080](diagrams/fig-sar-mpfs.drawio.svg)
+
+Every term the rest of Part 3 uses is named here: **MSS**, **U54**, **FIC_0**, **CIC**, **LSRAM**,
+**MACC**, **CoreFFT**, **SIG/SCRATCH/OUT**.
+
+---
+
 
 ---
 

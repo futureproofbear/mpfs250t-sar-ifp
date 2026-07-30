@@ -1045,7 +1045,10 @@ def fig_sar_mpfs(out):
 
     d.edge("mss", "fic"); d.edge("mss", "cic", dashed=True)
     d.edge("fic", "fab", double=True); d.edge("cic", "fab", dashed=True)
-    d.edge("fab", "ddr", double=True)
+    # Fabric reaches DDR ONLY through FIC_0 (via the DIC) -- see ARCHITECTURE.md "Fabric-to-DDR
+    # routing". Drawing fab->ddr direct contradicts this figure's own FIC_0 = "THE bottleneck"
+    # label: a direct path would mean the 800 MB/s ceiling did not apply.
+    d.edge("fic", "ddr", double=True, label="all fabric traffic")
     d.edge("mss", "ddr", double=True, label="cached")
 
     d.note("n1", 30, 400, 520, 76,

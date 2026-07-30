@@ -137,7 +137,7 @@ $$c_n(\mu) \;=\; \frac{\operatorname{sinc}(n-15-\mu)}{\sum_{m=0}^{31}\operatorna
 # ② Azimuth resample — finding $(k,\mu)$
 
 After the transpose a row is one range bin $r$: $M$ pulses, resampled onto the uniform cross-range
-grid $K_C[q]$. The source abscissa is the sorted aspect-angle tangent $\tau[0\ldots M{-}1]$ — and
+grid $K_C[q]$. The source abscissa is the sorted aspect-angle tangent τ = tan φ = $\tau[0\ldots M{-}1]$ — and
 unlike ①, it is **not uniform**.
 
 $$u \;=\; \frac{K_C[q]}{K_R[r]},\qquad
@@ -156,6 +156,20 @@ while (k+2 < M && tau[k+1] <= u) k++;   /* never retreats */
 
 Then the same gather kernel as ①. Together the two passes map the polar-sampled phase history onto
 a **rectangular** $k$-space grid.
+
+---
+
+Why u = K_C[q]/K_R[r] — it's a change of units that makes the source table row-invariant.
+
+After pass ①, a sample from pulse i sits in k-space at
+
+k_y = k·cos φᵢ → resampled onto the uniform grid, so for row r it is exactly K_R[r]
+k_x = k·sin φᵢ = k_y·tan φᵢ = K_R[r]·tan φᵢ
+So along row r the source abscissa in k_x units is K_R[r]·τ[m], where τ = tan φ sorted. Pass ② wants output at uniform K_C[q], so solve K_C[q] = K_R[r]·tan φ → tan φ = K_C[q]/K_R[r] ≡ u. u is just the desired location expressed as a tangent instead of a frequency — which lets the search run against τ directly.
+
+That matters because τ is row-invariant: the same 705-entry table for all 8192 rows. Search in k_x units instead and the source abscissa K_R[r]·τ[m] changes every row, so you'd rebuild or rescale the whole table 8192 times.
+
+One wrinkle worth knowing: the code doesn't literally divide. sar_coeffs_pass2_range brackets in k_x — SRC(k) = kr*tan_s[k] against KC[q] — and forms μ = (q − x0)·inv with inv = s_inv_tan[k]·(1/kr). Expand it and you get (u − τ[k])/(τ[k+1] − τ[k]), identical to the slide. The rearrangement is the point: s_inv_tan[k] = 1/(τ[k+1] − τ[k]) stays line-invariant and precomputed once per scene, so the row costs one divide (1/kr) instead of one per query — sar_resample_coeffs.c:11-14 records that as 46M divides collapsing to 8192.
 
 ---
 
@@ -183,6 +197,9 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 # The MPFS250T — and the vocabulary
 
 ![w:1080](diagrams/fig-sar-mpfs.drawio.svg)
+
+
+---
 
 Every term the rest of Part 3 uses is named here: **MSS**, **U54**, **FIC_0**, **CIC**, **LSRAM**,
 **MACC**, **CoreFFT**, **SIG/SCRATCH/OUT**.

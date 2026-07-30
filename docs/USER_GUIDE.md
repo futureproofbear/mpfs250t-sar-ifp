@@ -360,6 +360,27 @@ over JTAG; do not interrupt it.
 > one-time provisioning step. Measured 2026-07-30, same bitstream, same scene: sinc **14.964 s /
 > corr 0.985**, lerp **14.943 s / corr 0.976**.
 
+### 6.1b Arming the AZIMUTH 32-tap sinc (optional, per power cycle)
+Independent of 6.1a — the two passes have separate kernels and separate knobs, so either, both or
+neither can be armed.
+```bash
+bash mpfs/host/run_azsinc_table_load.sh          # stage 16 KB in DDR + arm SAR_AZSINCMODE
+bash mpfs/host/run_azsinc_table_load.sh --off    # back to the 2-tap lerp
+```
+Expect `tab[0] = 1 (expect 1)`, `tab[15] = 32767 (expect 32767, the peak)`. Those two words catch a
+wrong tap order or a byte swap on sight: at `μ = 0` the kernel is `sinc(n−15)`, exactly zero at
+every integer offset except `n = 15`.
+
+> **Seconds, not the ~15 minutes 6.1a takes.** The range table has to be pushed one AXI4-Lite write
+> at a time (8192 of them) because `sar_resample_v`'s table sits behind a CIC register. The azimuth
+> table does not: the firmware reads it from DDR at `0xB0059200` and pushes it into **both** feeder
+> chains itself, on-chip, so the host only lands a 16 KB `restore`.
+>
+> Same ordering trap as 6.1a — run it **before** the PIPE that should use it, and re-run it after
+> every power-cycle (the DDR blob, the mode word at `0xB0059168`, and the fabric-RAM copies are all
+> wiped). Both chains matter: they split *rows*, so a table in only one chain gives an image where
+> alternate rows are wrong, which reads as a corner-turn or BFP fault rather than a missing load.
+
 ### 6.2 Run the pipeline
 From `mpfs/host`, using the generic mailbox runner:
 ```bash

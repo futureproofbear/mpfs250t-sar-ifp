@@ -1065,60 +1065,50 @@ def fig_sar_mpfs(out):
 
 
 def fig_axi_packing(out):
-    """4-byte-aligned rows on a 64-bit bus: what the gather does instead of halving ar_size."""
-    d = Diagram(1180, 640, "AXI beat packing -- a 4-byte-aligned row on a 64-bit bus", draw_title=False)
-    d.note("t", 24, 14, 1130, 34,
-           "A pulse row is N x 4 bytes with N ODD, so consecutive row bases alternate between "
-           "8-byte and 4-byte alignment. The bus is 64 bits.", fs=12)
+    """Same bus cycles, twice the samples -- drawn to scale so the waste is visible."""
+    L, GAP, NB = 130, 16, 3                  # 32-bit lane (to scale), gap, beats shown
+    d = Diagram(1180, 470, "AXI beat packing", draw_title=False)
+    d.note("t", 24, 12, 1130, 22,
+           "The FIC_0 bus is 64 bits = two 32-bit lanes. Each lane holds one complex sample.", fs=13)
 
-    # ---- the problem ----
-    d.box("p", 24, 58, 360, 96,
-          "SmartHLS resample\nar_size = 2 (4 bytes/beat)\n\ncorrect, but HALF the bus idles", "bad",
-          bold=True)
-    d.note("pn", 24, 160, 360, 54,
-           "Alignment is a property of the ADDRESS, not the data. Narrowing every beat to fix "
-           "the first one pays the cost on all 4319 of them.", fs=11)
+    # ---------- OLD: ar_size = 2 ----------
+    d.note("h1", 24, 48, 300, 20, "SmartHLS   ar_size = 2", fs=13)
+    d.note("h1b", 24, 68, 300, 34, "one sample per bus cycle", fs=11)
+    for i in range(NB):
+        x = 340 + i * (2 * L + GAP)
+        d.box("o%d" % i, x, 52, L, 46, "s%d" % i, "fab", fs=13, bold=True)
+        d.box("ow%d" % i, x + L, 52, L, 46, "idle", "bad", fs=12, dashed=True)
+    d.note("n1", 24, 104, 1130, 20,
+           "3 bus cycles  ->  3 samples.   Half of every beat is dead, on all 2160 beats of the row.",
+           fs=12)
 
-    # ---- case A: even row, rd_odd = 0 ----
-    d.note("ha", 420, 58, 730, 18, "CASE A   IN_BASE[2] = 0  (rd_odd = 0)  -- row starts on a beat boundary", fs=12)
-    d.box("a0", 420, 80, 170, 44, "beat 0\n[63:32] s1   [31:0] s0", "fab", fs=11)
-    d.box("a1", 600, 80, 170, 44, "beat 1\n[63:32] s3   [31:0] s2", "fab", fs=11)
-    d.box("a2", 780, 80, 170, 44, "beat 2\n[63:32] s5   [31:0] s4", "fab", fs=11)
-    d.note("an", 960, 80, 190, 44, "every 32-bit lane\ncarries a sample", fs=11)
+    # ---------- NEW: ar_size = 3 ----------
+    d.note("h2", 24, 152, 300, 20, "gather   ar_size = 3", fs=13)
+    d.note("h2b", 24, 172, 300, 34, "two samples per bus cycle", fs=11)
+    for i in range(NB):
+        x = 340 + i * (2 * L + GAP)
+        lo = "DISCARD" if i == 0 else "s%d" % (2 * i - 1)
+        d.box("nl%d" % i, x, 156, L, 46, lo, "gate" if i == 0 else "fab",
+              fs=12 if i == 0 else 13, bold=(i != 0))
+        d.box("nh%d" % i, x + L, 156, L, 46, "s%d" % (2 * i), "fab", fs=13, bold=True)
+    d.note("n2", 24, 208, 1130, 20,
+           "3 bus cycles  ->  5 samples.   One word is thrown away, ONCE, at the start of the row.",
+           fs=12)
 
-    # ---- case B: odd row, rd_odd = 1 ----
-    d.note("hb", 420, 146, 730, 18, "CASE B   IN_BASE[2] = 1  (rd_odd = 1)  -- row starts MID-beat", fs=12)
-    d.box("b0", 420, 168, 170, 44, "beat 0\n[63:32] s0   [31:0] DISCARD", "gate", fs=11)
-    d.box("b1", 600, 168, 170, 44, "beat 1\n[63:32] s2   [31:0] s1", "fab", fs=11)
-    d.box("b2", 780, 168, 170, 44, "beat 2\n[63:32] s4   [31:0] s3", "fab", fs=11)
-    d.note("bn", 960, 168, 190, 44, "ONE word thrown away,\nonce per row", fs=11)
+    # ---------- why the first word is thrown away ----------
+    d.box("w", 24, 254, 1130, 60,
+          "A row is N x 4 bytes with N ODD, so every other row starts halfway through a beat.\n"
+          "Rather than narrow the bus to fit, the gather reads from IN_BASE & ~7 and drops the "
+          "leading word: the offset moves into the sample INDEX, not the beat width.", "ip", fs=12)
 
-    # ---- the arithmetic ----
-    d.box("m", 420, 236, 530, 92,
-          "read from  IN_BASE & ~7        ar_size = 3'b011  (8 bytes) ALWAYS\n"
-          "n_lo = 2*beat - rd_odd         n_hi = n_lo + 1\n"
-          "beats = (SN + rd_odd + 1) >> 1", "ip", fs=12)
-    d.note("mn", 960, 236, 190, 92,
-           "The offset is absorbed\ninto the sample INDEX,\nnot into the beat width.", fs=11)
-
-    # ---- bank routing ----
-    d.note("hr", 420, 340, 730, 18, "and the two lanes land in different BANKS, by sample parity", fs=12)
-    d.box("be", 420, 362, 250, 52, "buf_e   even samples\nrd_odd ? rdata[63:32] : rdata[31:0]", "mem", fs=11)
-    d.box("bo", 686, 362, 264, 52, "buf_o   odd samples\nrd_odd ? rdata[31:0] : rdata[63:32]", "mem", fs=11)
-    d.note("rn", 960, 362, 190, 52, "so buf[j] and buf[j+1]\nread in ONE cycle,\nsingle-port RAMs", fs=11)
-
-    d.note("f1", 24, 430, 1130, 56,
-           "WHY IT MATTERS: the gather needs src[k] and src[k+1] together for every output. Split by "
-           "PARITY, one address into each bank gives both -- no dual-port RAM, no second read cycle. "
-           "The 64-bit read and the parity split are the same decision.", fs=11)
-    d.note("f2", 24, 492, 1130, 70,
-           "MEASURED: pass 1 fell from 5.21 s to 3.74 s. The full-width read is part of that; the "
-           "rest is on-fabric coefficient generation. The discarded word costs one beat per row -- "
-           "1 in 2160 for a 4319-sample row -- against the 2x the narrow path was giving up on "
-           "every beat.", fs=11)
-    d.note("f3", 24, 570, 1130, 40,
-           "Source: sar_resample_v.v:627-696. Alignment is handled ONCE at the row base; nothing "
-           "downstream of the bank write knows the row was ever misaligned.", fs=10.5)
+    d.note("f", 24, 330, 1130, 40,
+           "n_lo = 2*beat - rd_odd      n_hi = n_lo + 1      beats = (SN + rd_odd + 1) >> 1"
+           "          (rd_odd = IN_BASE[2])", fs=12)
+    d.note("f2", 24, 380, 1130, 42,
+           "The two lanes also go to SEPARATE banks by sample parity, which is what lets the gather "
+           "read src[k] and src[k+1] in one cycle from single-port RAM.\n"
+           "Measured: pass 1 5.21 s -> 3.74 s (full-width read plus on-fabric coefficients). "
+           "Source: sar_resample_v.v:627-696.", fs=11)
     return d.write(out / "fig-axi-packing.drawio.svg")
 
 

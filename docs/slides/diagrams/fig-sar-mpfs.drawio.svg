@@ -1,71 +1,572 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1180" height="600" viewBox="0 0 1180 600" content="&lt;mxfile host=&quot;make_diagrams.py&quot; type=&quot;device&quot;&gt;&lt;diagram name=&quot;MPFS250T -- the parts, and what they are called&quot; id=&quot;d0&quot;&gt;&lt;mxGraphModel dx=&quot;800&quot; dy=&quot;600&quot; grid=&quot;1&quot; gridSize=&quot;10&quot; guides=&quot;1&quot; tooltips=&quot;1&quot; connect=&quot;1&quot; arrows=&quot;1&quot; fold=&quot;1&quot; page=&quot;1&quot; pageScale=&quot;1&quot; pageWidth=&quot;1180&quot; pageHeight=&quot;600&quot; math=&quot;0&quot; shadow=&quot;0&quot;&gt;&lt;root&gt;&lt;mxCell id=&quot;0&quot; /&gt;&lt;mxCell id=&quot;1&quot; parent=&quot;0&quot; /&gt;&lt;mxCell id=&quot;t&quot; value=&quot;One die: a hard RISC-V subsystem and FPGA fabric, joined by a narrow bridge. Every term the later slides use is named here.&quot; style=&quot;text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=12;fontFamily=Helvetica;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;24&quot; y=&quot;16&quot; width=&quot;1130&quot; height=&quot;30&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;mss&quot; value=&quot;MSS  --  Microprocessor SubSystem&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#C77700;fontSize=13;fontFamily=Helvetica;align=center;verticalAlign=middle;fontStyle=1;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;30&quot; y=&quot;68&quot; width=&quot;330&quot; height=&quot;150&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;u54&quot; value=&quot;4 x U54&amp;#10;RISC-V, 600 MHz&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#C77700;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;48&quot; y=&quot;110&quot; width=&quot;140&quot; height=&quot;44&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e51&quot; value=&quot;1 x E51&amp;#10;monitor core&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#C77700;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;200&quot; y=&quot;110&quot; width=&quot;142&quot; height=&quot;44&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;l2&quot; value=&quot;L2 cache / scratchpad  --  2 MiB&amp;#10;the application runs here&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;48&quot; y=&quot;162&quot; width=&quot;294&quot; height=&quot;44&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;envm&quot; value=&quot;eNVM  --  128 KB non-volatile, holds the application&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;30&quot; y=&quot;232&quot; width=&quot;330&quot; height=&quot;42&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;fic&quot; value=&quot;FIC_0&amp;#10;64-bit AXI4 @ 100 MHz&amp;#10;~ 800 MB/s&amp;#10;THE bottleneck&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE7F6;strokeColor=#6A4CA5;fontSize=13;fontFamily=Helvetica;align=center;verticalAlign=middle;fontStyle=1;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;400&quot; y=&quot;92&quot; width=&quot;150&quot; height=&quot;92&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;cic&quot; value=&quot;CIC&amp;#10;AXI4-Lite, 9 targets&amp;#10;arm / status / tables&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE7F6;strokeColor=#6A4CA5;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;400&quot; y=&quot;206&quot; width=&quot;150&quot; height=&quot;68&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;fab&quot; value=&quot;FPGA fabric  --  100 MHz&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#E7F5EC;strokeColor=#2E8B57;fontSize=13;fontFamily=Helvetica;align=center;verticalAlign=middle;fontStyle=1;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;590&quot; y=&quot;68&quot; width=&quot;340&quot; height=&quot;300&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;res&quot; value=&quot;RES&amp;#10;resample gather&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#E7F5EC;strokeColor=#2E8B57;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;606&quot; y=&quot;108&quot; width=&quot;150&quot; height=&quot;52&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;ct&quot; value=&quot;CT&amp;#10;corner-turn&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#E7F5EC;strokeColor=#2E8B57;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;770&quot; y=&quot;108&quot; width=&quot;146&quot; height=&quot;52&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;cg&quot; value=&quot;COEFG&amp;#10;coefficient gen&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#E7F5EC;strokeColor=#2E8B57;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;606&quot; y=&quot;172&quot; width=&quot;150&quot; height=&quot;52&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;fft&quot; value=&quot;CoreFFT x2&amp;#10;SLOWCLK 12.5 MHz&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#EDE7F6;strokeColor=#6A4CA5;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;770&quot; y=&quot;172&quot; width=&quot;146&quot; height=&quot;52&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;prim&quot; value=&quot;built from: LSRAM (20 Kb blocks) . uSRAM . MACC (18x18)&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;606&quot; y=&quot;236&quot; width=&quot;310&quot; height=&quot;52&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;kn&quot; value=&quot;FEED = feeder (window + gather fused in)&amp;#10;UNLD = unloader (detect fused in)&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#E7F5EC;strokeColor=#2E8B57;fontSize=11;fontFamily=Helvetica;align=center;verticalAlign=middle;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;606&quot; y=&quot;300&quot; width=&quot;310&quot; height=&quot;52&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;ddr&quot; value=&quot;DDR (LPDDR4)&amp;#10;&amp;#10;SIG      256 MB&amp;#10;SCRATCH  256 MB&amp;#10;OUT      128 MB&amp;#10;&amp;#10;one 8192x8192 complex&amp;#10;frame = 256 MB&quot; style=&quot;rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;fontFamily=Helvetica;align=center;verticalAlign=middle;fontStyle=1;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;960&quot; y=&quot;92&quot; width=&quot;196&quot; height=&quot;200&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;n1&quot; value=&quot;MSS and fabric BOTH reach DDR, but not coherently: FIC_0 is outside the cache, so&amp;#10;anything the CPU writes for a kernel must be flushed first, and anything a kernel&amp;#10;writes must be invalidated before the CPU reads it. That single fact shapes most of&amp;#10;the firmware.&quot; style=&quot;text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontFamily=Helvetica;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;30&quot; y=&quot;400&quot; width=&quot;520&quot; height=&quot;76&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;n2&quot; value=&quot;SCALE, so the later numbers land: the whole device holds ~4.4 MB on chip against a&amp;#10;256 MB frame. 784 MACC blocks, of which the shipping design uses 74. It is BANDWIDTH&amp;#10;-bound, not compute-bound -- which is why the architecture is about deleting DDR&amp;#10;passes rather than adding arithmetic.&quot; style=&quot;text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontFamily=Helvetica;&quot; vertex=&quot;1&quot; parent=&quot;1&quot;&gt;&lt;mxGeometry x=&quot;590&quot; y=&quot;400&quot; width=&quot;566&quot; height=&quot;76&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e0&quot; value=&quot;&quot; style=&quot;edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;strokeColor=#444444;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;mss&quot; target=&quot;fic&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e1&quot; value=&quot;&quot; style=&quot;edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;strokeColor=#444444;dashed=1;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;mss&quot; target=&quot;cic&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e2&quot; value=&quot;&quot; style=&quot;edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;strokeColor=#444444;startArrow=classic;startFill=1;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;fic&quot; target=&quot;fab&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e3&quot; value=&quot;&quot; style=&quot;edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;strokeColor=#444444;dashed=1;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;cic&quot; target=&quot;fab&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e4&quot; value=&quot;all fabric traffic&quot; style=&quot;edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;strokeColor=#444444;startArrow=classic;startFill=1;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;fic&quot; target=&quot;ddr&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;mxCell id=&quot;e5&quot; value=&quot;cached&quot; style=&quot;edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;fontSize=11;strokeColor=#444444;startArrow=classic;startFill=1;&quot; edge=&quot;1&quot; parent=&quot;1&quot; source=&quot;mss&quot; target=&quot;ddr&quot;&gt;&lt;mxGeometry relative=&quot;1&quot; as=&quot;geometry&quot; /&gt;&lt;/mxCell&gt;&lt;/root&gt;&lt;/mxGraphModel&gt;&lt;/diagram&gt;&lt;/mxfile&gt;">
-<rect width="100%" height="100%" fill="#FFFFFF"/>
-<defs><marker id="ah" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L10,4 L0,8 z" fill="#444444"/></marker><marker id="ahr" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M10,0 L0,4 L10,8 z" fill="#444444"/></marker></defs>
-<line x1="360" y1="143.0" x2="400" y2="138.0" stroke="#444444" stroke-width="1.8" marker-end="url(#ah)"/>
-<line x1="360" y1="143.0" x2="400" y2="240.0" stroke="#444444" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ah)"/>
-<line x1="550" y1="138.0" x2="590" y2="218.0" stroke="#444444" stroke-width="1.8" marker-end="url(#ah)" marker-start="url(#ahr)"/>
-<line x1="550" y1="240.0" x2="590" y2="218.0" stroke="#444444" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#ah)"/>
-<line x1="550" y1="138.0" x2="960" y2="192.0" stroke="#444444" stroke-width="1.8" marker-end="url(#ah)" marker-start="url(#ahr)"/>
-<text x="755.0" y="158.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#333"><tspan style="paint-order:stroke;stroke:#FFFFFF;stroke-width:4px">all fabric traffic</tspan></text>
-<line x1="360" y1="143.0" x2="960" y2="192.0" stroke="#444444" stroke-width="1.8" marker-end="url(#ah)" marker-start="url(#ahr)"/>
-<text x="660.0" y="160.5" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#333"><tspan style="paint-order:stroke;stroke:#FFFFFF;stroke-width:4px">cached</tspan></text>
-<text x="589.0" y="35.5" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="12" font-weight="400" fill="#444">One die: a hard RISC-V subsystem and FPGA fabric, joined by a narrow bridge. Every term the later slides use is named here.</text>
-<rect x="30" y="68" width="330" height="150" rx="6" fill="#FFF3E0" stroke="#C77700" stroke-width="1.6"/>
-<text x="195.0" y="148.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">MSS  --  Microprocessor SubSystem</text>
-<rect x="48" y="110" width="140" height="44" rx="6" fill="#FFF3E0" stroke="#C77700" stroke-width="1.6"/>
-<text x="118.0" y="129.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">4 x U54</text>
-<text x="118.0" y="143.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">RISC-V, 600 MHz</text>
-<rect x="200" y="110" width="142" height="44" rx="6" fill="#FFF3E0" stroke="#C77700" stroke-width="1.6"/>
-<text x="271.0" y="129.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">1 x E51</text>
-<text x="271.0" y="143.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">monitor core</text>
-<rect x="48" y="162" width="294" height="44" rx="6" fill="#F5F5F5" stroke="#666666" stroke-width="1.6"/>
-<text x="195.0" y="181.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">L2 cache / scratchpad  --  2 MiB</text>
-<text x="195.0" y="195.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">the application runs here</text>
-<rect x="30" y="232" width="330" height="42" rx="6" fill="#F5F5F5" stroke="#666666" stroke-width="1.6"/>
-<text x="195.0" y="257.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">eNVM  --  128 KB non-volatile, holds the application</text>
-<rect x="400" y="92" width="150" height="92" rx="6" fill="#EDE7F6" stroke="#6A4CA5" stroke-width="1.6"/>
-<text x="475.0" y="119.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">FIC_0</text>
-<text x="475.0" y="135.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">64-bit AXI4 @ 100 MHz</text>
-<text x="475.0" y="151.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">~ 800 MB/s</text>
-<text x="475.0" y="167.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">THE bottleneck</text>
-<rect x="400" y="206" width="150" height="68" rx="6" fill="#EDE7F6" stroke="#6A4CA5" stroke-width="1.6"/>
-<text x="475.0" y="230.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">CIC</text>
-<text x="475.0" y="244.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">AXI4-Lite, 9 targets</text>
-<text x="475.0" y="258.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">arm / status / tables</text>
-<rect x="590" y="68" width="340" height="300" rx="6" fill="#E7F5EC" stroke="#2E8B57" stroke-width="1.6"/>
-<text x="760.0" y="223.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">FPGA fabric  --  100 MHz</text>
-<rect x="606" y="108" width="150" height="52" rx="6" fill="#E7F5EC" stroke="#2E8B57" stroke-width="1.6"/>
-<text x="681.0" y="131.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">RES</text>
-<text x="681.0" y="145.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">resample gather</text>
-<rect x="770" y="108" width="146" height="52" rx="6" fill="#E7F5EC" stroke="#2E8B57" stroke-width="1.6"/>
-<text x="843.0" y="131.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">CT</text>
-<text x="843.0" y="145.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">corner-turn</text>
-<rect x="606" y="172" width="150" height="52" rx="6" fill="#E7F5EC" stroke="#2E8B57" stroke-width="1.6"/>
-<text x="681.0" y="195.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">COEFG</text>
-<text x="681.0" y="209.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">coefficient gen</text>
-<rect x="770" y="172" width="146" height="52" rx="6" fill="#EDE7F6" stroke="#6A4CA5" stroke-width="1.6"/>
-<text x="843.0" y="195.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">CoreFFT x2</text>
-<text x="843.0" y="209.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">SLOWCLK 12.5 MHz</text>
-<rect x="606" y="236" width="310" height="52" rx="6" fill="#F5F5F5" stroke="#666666" stroke-width="1.6"/>
-<text x="761.0" y="266.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">built from: LSRAM (20 Kb blocks) . uSRAM . MACC (18x18)</text>
-<rect x="606" y="300" width="310" height="52" rx="6" fill="#E7F5EC" stroke="#2E8B57" stroke-width="1.6"/>
-<text x="761.0" y="323.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">FEED = feeder (window + gather fused in)</text>
-<text x="761.0" y="337.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#111">UNLD = unloader (detect fused in)</text>
-<rect x="960" y="92" width="196" height="200" rx="6" fill="#F5F5F5" stroke="#666666" stroke-width="1.6"/>
-<text x="1058.0" y="141.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">DDR (LPDDR4)</text>
-<text x="1058.0" y="157.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111"></text>
-<text x="1058.0" y="173.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">SIG      256 MB</text>
-<text x="1058.0" y="189.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">SCRATCH  256 MB</text>
-<text x="1058.0" y="205.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">OUT      128 MB</text>
-<text x="1058.0" y="221.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111"></text>
-<text x="1058.0" y="237.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">one 8192x8192 complex</text>
-<text x="1058.0" y="253.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="13" font-weight="600" fill="#111">frame = 256 MB</text>
-<text x="290.0" y="421.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">MSS and fabric BOTH reach DDR, but not coherently: FIC_0 is outside the cache, so</text>
-<text x="290.0" y="435.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">anything the CPU writes for a kernel must be flushed first, and anything a kernel</text>
-<text x="290.0" y="449.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">writes must be invalidated before the CPU reads it. That single fact shapes most of</text>
-<text x="290.0" y="463.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">the firmware.</text>
-<text x="873.0" y="421.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">SCALE, so the later numbers land: the whole device holds ~4.4 MB on chip against a</text>
-<text x="873.0" y="435.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">256 MB frame. 784 MACC blocks, of which the shipping design uses 74. It is BANDWIDTH</text>
-<text x="873.0" y="449.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">-bound, not compute-bound -- which is why the architecture is about deleting DDR</text>
-<text x="873.0" y="463.0" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="11" font-weight="400" fill="#444">passes rather than adding arithmetic.</text>
+<svg host="65bd71144e" xmlns="http://www.w3.org/2000/svg" style="background: transparent; background-color: transparent;" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="1130px" height="441px" viewBox="-0.5 -0.5 1130 441" content="&lt;mxfile&gt;&lt;diagram name=&quot;MPFS250T -- the parts, and what they are called&quot; id=&quot;d0&quot;&gt;7VtbU9s4FP41mWkfwsiX3B6DSYAptAyBdt92FFtONNhWVpYh9KG/fXVkxbEtA+ngbKALLUQ+uvjofOeiIykdx4vXpxyvlpcsIFHHRsG645x0bPkztOQHUB5zymAwygkLToOcZG0JM/qTaCLS1IwGJK00FIxFgq6qRJ8lCfFFhYY5Zw/VZiGLqm9d4QUxCDMfRyb1Bw3EUlOtIdpWnBG6WOpX95GuiPGmsSakSxywhxLJmXQcjzMm8lK89kgEwtvIJe83faK2YIyTROzSQeQd7nGU6bl17H4kux7PZWEBhQ0hZHJIybF41GLo/5OxTUU3VSCNZQPLXa3zbrp+M9Dl1XRm99CNAiZecZrSZCEfrs9nXvc7DJ3N08dUkBhgSgL5d3p1CkOGeM6pv2FEzibnpcqfJJd4tius2oKsgb4UcSQJliymgrM74rGIcUlJWEJgKjSKaiQc0UUiH30pUSLpx/eECyp1YawrYhoEEdFy0Lpq2fp5imMagZafkeieQL+CuzJIGjcYmqxLJA3aKWExEfxRNtG13ZFWIG1BG316KKujo4nLkipuaFibwKIYeqslsqAVpVlp4jQ11OZyNusAE6jbzT8vqc/ZijOfpKmUp41m2Xym0c0BC+h9HcM5b0C1od1H1/11rVkOZ1kSkEBbzcOSCjJbYR9qH6R3rxpV2X46tjOdTp0JMoxN1niDwQChmtE4zxnNb9qhnoDVjrk5VWuzbMcwN6fJ2qxeC+aW9VzD3FzFm41uoa4vBWqBMDeeVA6JVMxBl2c/D4mo1Q6iLSDoDqsI9l3TYboNCLru6wEkPcsA0NIATqCuADBmCRXKW/qMkw/k8tCGdoDO3g90kW0gd6FWlthfEhXopgCRz7HwlyscVGOgreLgcQlgoXrh1SqS4hKUJfKJZ0mqWG8b8R78a0K8r37eLOI1W5WIG4DbI3dPtprcxwbk5Ov3yyqyli15RF/kbJFcJ3bvWSTRlPNXrncp8wlAtAHsD3iNYNof7hZLNyb+GnRDyCKeSHh2zm+sJ/Kb6bn3N3p2ndWUtqQrnDz92gctgLFSNB7jqPHVrc2h73bnFIYY/3UOa4yOq7R9u5aoz+6XrBjm1TDD9IXZNoolF8Ee1p+Tk8lg2m80kbHrjXvvZv3p1mPg0DZjYK/BaEYtGI3fYDTeuVeKaqAs3QuJTO7/RuD7MF8QkZYaYR5vA6bAIkuLR4HnEUkPCf3b8Y51qBvcYyPSm3avco94biBd24KpBMG6W3hHWe5H14+u/+OubXrawbQ38Zo8rT0ZHvcG7ybI9kYvL0ybtggc1MImDyfmnur1ZFaKn7IFjleQY6AFlqkFPySKbyde9lG/ujRCOwbMXhtLI/P8xLspYeYznhDeFRlvN/d7t2gNBuhltNz+ntBamGh9m0xPK4CRUCaJlKg8akE+YGs2ssGO+UcbsIVhg5UxTqZTOEpc2yX4ZhfffngXX9QGzVGv0/7+97tNKwzDa0JwX4a34tTcVJtnNAIjCzmL812Ji9n1GPbZPqns4ovMRdA8Yv5d+lmWjuRvphtA+XLsQa75yRqureHnVkF+tztrdTOVDJtLGGtPZnqXmLnjZHICqSI8oJCQABYt6NMDTeDSA6B8XFrNoDBLCeyg0+RzyaZvv15sB8mSiGE9TEAEXO6o9ftw16YeFCvU/0IPgoAbinBycg2IXVzJgvv56TTFpLSyPTo7P813LMr/7V6/k+9a1t89867HN97ZS82+3d6Yo+YHA03NTQpcMLHR0BrZa/jTye/FRBJjo2nIcUwKK6jztM891MM4wz2kd7ZbjYDFIUM5Ao4aIqDVxp2ZxDwCzq/M5Bediu21OZO82IgT7MOnMhyIc/NMKB0XSkvgrDARIF/QfH3wgCjsqLJMpDQAXcmPn/RJJYyRMvW+R7HML17lDbyrWxACl0oB/UN1/Izl7x2RyQvMIc5SeO0cWodRli6Vtw0pB7JXzKE0cqV7MXR5HJpISdAACzXWnITqvLvCkpSBOkaj4sjQ6Nff54pIKF7UwF32LJrMqQV1rZ2SOT1TW4uT8bK2DvotKKttKOuNAuZhydQGREDuqQ+FzVHnL/fI1S4JqUNtf0lXORe5V5OiAKAF09qxdWFIKgFQlIuTSPdxDCJM5umqyZf9+cjX96GcQR9ymXr8brzdN3g9+AQZ4BsgkGBBNu6ZcbFkC5bgaLKlHldDTjm81IKFEVZc9fOcKFOWcV9zUtxFzA+cdMa4ObECPp8VOSdwcH9PKuO/Snqmnz+M9AKs/PQL4fNFUfoHFKXphQ4jylQKRIzh3jisXSKcplIomjylUfQ7Qi5Us6Kvm3O3AwjZeSNC/n199d+aKM1rmlg1KBZ3guOwUIA/TouLxK890auukmf8WGqwYjQRaWnkKyBs46c76FXjJ6p9B6LW3nGGz7WXhZyDrRIUU9nx+qehF2pRHrx/PWgMGbvrgQYAHdmOpY1nv6phjfaoGtveG3ZYGKZEGD7kWfWRj9uv/+TNt1+icib/Ag==&lt;/diagram&gt;&lt;/mxfile&gt;">
+    <defs/>
+    <g>
+        <g>
+            <rect x="0" y="0" width="1130" height="30" fill="none" stroke="none" pointer-events="all"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 1px; height: 1px; padding-top: 15px; margin-left: 565px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 12px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: nowrap; ">
+                                    <b>
+                                        <font style="font-size: 14px;">
+                                            MPFS250T comprising RISC-V subsystem and FPGA fabric
+                                        </font>
+                                    </b>
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="565" y="19" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="12px" text-anchor="middle">
+                        MPFS250T comprising RISC-V subsystem and FPGA fabric
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="120" y="103" width="330" height="150" rx="22.5" ry="22.5" fill="#fff3e0" stroke="#c77700" pointer-events="all" style="fill: light-dark(rgb(255, 243, 224), rgb(36, 26, 9)); stroke: light-dark(rgb(199, 119, 0), rgb(189, 120, 18));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 328px; height: 1px; padding-top: 178px; margin-left: 121px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 13px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; font-weight: bold; white-space: normal; word-wrap: normal; ">
+                                    MSS  --  Microprocessor SubSystem
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="285" y="182" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="13px" text-anchor="middle" font-weight="bold">
+                        MSS  --  Microprocessor SubSystem...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="138" y="144" width="140" height="44" rx="6.6" ry="6.6" fill="#fff3e0" stroke="#c77700" pointer-events="all" style="fill: light-dark(rgb(255, 243, 224), rgb(36, 26, 9)); stroke: light-dark(rgb(199, 119, 0), rgb(189, 120, 18));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 138px; height: 1px; padding-top: 166px; margin-left: 139px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    4 x U54
+                                    <br/>
+                                    RISC-V, 600 MHz
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="208" y="169" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        4 x U54...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="290" y="144" width="142" height="44" rx="6.6" ry="6.6" fill="#fff3e0" stroke="#c77700" pointer-events="all" style="fill: light-dark(rgb(255, 243, 224), rgb(36, 26, 9)); stroke: light-dark(rgb(199, 119, 0), rgb(189, 120, 18));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 140px; height: 1px; padding-top: 166px; margin-left: 291px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    1 x E51
+                                    <br/>
+                                    monitor core
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="361" y="169" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        1 x E51...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="138" y="196" width="294" height="44" rx="6.6" ry="6.6" fill="#f5f5f5" stroke="#666666" pointer-events="all" style="fill: light-dark(rgb(245, 245, 245), rgb(26, 26, 26)); stroke: light-dark(rgb(102, 102, 102), rgb(149, 149, 149));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 292px; height: 1px; padding-top: 218px; margin-left: 139px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    L2 cache / scratchpad  --  2 MiB
+                                    <br/>
+                                    the application runs here
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="285" y="221" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        L2 cache / scratchpad  --  2 MiB...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="120" y="48" width="330" height="42" rx="6.3" ry="6.3" fill="#f5f5f5" stroke="#666666" pointer-events="all" style="fill: light-dark(rgb(245, 245, 245), rgb(26, 26, 26)); stroke: light-dark(rgb(102, 102, 102), rgb(149, 149, 149));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 328px; height: 1px; padding-top: 69px; margin-left: 121px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    eNVM  --  128 KB non-volatile, holds the application
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="285" y="72" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        eNVM  --  128 KB non-volatile, holds the application
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="490" y="162" width="150" height="92" rx="13.8" ry="13.8" fill="#ede7f6" stroke="#6a4ca5" pointer-events="all" style="fill: light-dark(rgb(237, 231, 246), rgb(39, 34, 46)); stroke: light-dark(rgb(106, 76, 165), rgb(176, 150, 227));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 148px; height: 1px; padding-top: 208px; margin-left: 491px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 13px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; font-weight: bold; white-space: normal; word-wrap: normal; ">
+                                    <font style="font-size: 11px;">
+                                        FIC_0
+                                        <br/>
+                                    </font>
+                                    <span style="font-weight: normal;">
+                                        <font style="font-size: 11px;">
+                                            64-bit AXI4 @ 100 MHz
+                                            <br/>
+                                            ~ 800 MB/s
+                                        </font>
+                                        <br/>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="565" y="212" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="13px" text-anchor="middle" font-weight="bold">
+                        FIC_0...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="490" y="48" width="150" height="68" rx="10.2" ry="10.2" fill="#ede7f6" stroke="#6a4ca5" pointer-events="all" style="fill: light-dark(rgb(237, 231, 246), rgb(39, 34, 46)); stroke: light-dark(rgb(106, 76, 165), rgb(176, 150, 227));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 148px; height: 1px; padding-top: 82px; margin-left: 491px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    CIC
+                                    <br/>
+                                    AXI4-Lite, 9 targets
+                                    <br/>
+                                    arm / status / tables
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="565" y="85" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        CIC...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="680" y="48" width="340" height="300" rx="45" ry="45" fill="#e7f5ec" stroke="#2e8b57" pointer-events="all" style="fill: light-dark(rgb(231, 245, 236), rgb(20, 32, 24)); stroke: light-dark(rgb(46, 139, 87), rgb(78, 158, 114));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 338px; height: 1px; padding-top: 198px; margin-left: 681px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 13px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; font-weight: bold; white-space: normal; word-wrap: normal; ">
+                                    FPGA fabric  --  100 MHz
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                    <div>
+                                        <br/>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="850" y="202" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="13px" text-anchor="middle" font-weight="bold">
+                        FPGA fabric  --  100 MHz...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="696" y="88" width="150" height="52" rx="7.8" ry="7.8" fill="#e7f5ec" stroke="#2e8b57" pointer-events="all" style="fill: light-dark(rgb(231, 245, 236), rgb(20, 32, 24)); stroke: light-dark(rgb(46, 139, 87), rgb(78, 158, 114));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 148px; height: 1px; padding-top: 114px; margin-left: 697px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    RES
+                                    <br/>
+                                    resample gather
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="771" y="117" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        RES...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="860" y="88" width="146" height="52" rx="7.8" ry="7.8" fill="#e7f5ec" stroke="#2e8b57" pointer-events="all" style="fill: light-dark(rgb(231, 245, 236), rgb(20, 32, 24)); stroke: light-dark(rgb(46, 139, 87), rgb(78, 158, 114));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 144px; height: 1px; padding-top: 114px; margin-left: 861px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    CT
+                                    <br/>
+                                    corner-turn
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="933" y="117" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        CT...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="696" y="152" width="150" height="52" rx="7.8" ry="7.8" fill="#e7f5ec" stroke="#2e8b57" pointer-events="all" style="fill: light-dark(rgb(231, 245, 236), rgb(20, 32, 24)); stroke: light-dark(rgb(46, 139, 87), rgb(78, 158, 114));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 148px; height: 1px; padding-top: 178px; margin-left: 697px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    COEFG
+                                    <br/>
+                                    coefficient gen
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="771" y="181" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        COEFG...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="860" y="152" width="146" height="52" rx="7.8" ry="7.8" fill="#ede7f6" stroke="#6a4ca5" pointer-events="all" style="fill: light-dark(rgb(237, 231, 246), rgb(39, 34, 46)); stroke: light-dark(rgb(106, 76, 165), rgb(176, 150, 227));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 144px; height: 1px; padding-top: 178px; margin-left: 861px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    CoreFFT x2
+                                    <br/>
+                                    SLOWCLK 12.5 MHz
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="933" y="181" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        CoreFFT x2...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="696" y="216" width="310" height="52" rx="7.8" ry="7.8" fill="#f5f5f5" stroke="#666666" pointer-events="all" style="fill: light-dark(rgb(245, 245, 245), rgb(26, 26, 26)); stroke: light-dark(rgb(102, 102, 102), rgb(149, 149, 149));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 308px; height: 1px; padding-top: 242px; margin-left: 697px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    built from: LSRAM (20 Kb blocks) . uSRAM . MACC (18x18)
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="851" y="245" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        built from: LSRAM (20 Kb blocks) . uSRAM . MACC (18x18)
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="696" y="280" width="310" height="52" rx="7.8" ry="7.8" fill="#e7f5ec" stroke="#2e8b57" pointer-events="all" style="fill: light-dark(rgb(231, 245, 236), rgb(20, 32, 24)); stroke: light-dark(rgb(46, 139, 87), rgb(78, 158, 114));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 308px; height: 1px; padding-top: 306px; margin-left: 697px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    FEED = feeder (window + gather fused in)
+                                    <br/>
+                                    UNLD = unloader (detect fused in)
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="851" y="309" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        FEED = feeder (window + gather fused in)...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="330" y="310" width="196" height="130" rx="19.5" ry="19.5" fill="#f5f5f5" stroke="#666666" pointer-events="all" style="fill: light-dark(rgb(245, 245, 245), rgb(26, 26, 26)); stroke: light-dark(rgb(102, 102, 102), rgb(149, 149, 149));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 194px; height: 1px; padding-top: 375px; margin-left: 331px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; font-weight: bold; white-space: normal; word-wrap: normal; ">
+                                    DDR (LPDDR4)
+                                    <br/>
+                                    <br/>
+                                    <span style="font-weight: normal;">
+                                        SIG      256 MB
+                                        <br/>
+                                        SCRATCH  256 MB
+                                        <br/>
+                                        OUT      128 MB
+                                        <br/>
+                                        <br/>
+                                        one 8192x8192 complex
+                                        <br/>
+                                        frame = 256 MB
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="428" y="378" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle" font-weight="bold">
+                        DDR (LPDDR4)...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="120" y="330" width="200" height="76" fill="none" stroke="none" pointer-events="all"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe flex-start; width: 198px; height: 1px; padding-top: 368px; margin-left: 122px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: left; color: #000000; ">
+                                <div style="display: inline-block; font-size: 13px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    MSS and fabric both reach DDR, but not coherently: FIC_0 is outside the cache, so anything the CPU writes for a kernel must be flushed first, and anything a kernel writes must be invalidated before the CPU reads it.
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="122" y="372" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="13px">
+                        MSS and fabric both reach DDR,...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <rect x="680" y="356.5" width="330" height="37" fill="none" stroke="none" pointer-events="all"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe flex-start; width: 328px; height: 1px; padding-top: 375px; margin-left: 682px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: left; color: #000000; ">
+                                <div style="display: inline-block; font-size: 13px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: normal; word-wrap: normal; ">
+                                    The whole device holds ~4.4 MB on chip as compared to a 256 MB data frame.
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="682" y="379" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="13px">
+                        The whole device holds ~4.4 MB on chip as compared...
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <path d="M 450 178 L 460 178 Q 470 178 470 188 L 470 198 Q 470 208 476.82 208 L 483.63 208" fill="none" stroke="#444444" stroke-miterlimit="10" pointer-events="stroke" style="stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 488.88 208 L 481.88 211.5 L 483.63 208 L 481.88 204.5 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+        </g>
+        <g>
+            <path d="M 450 178 L 460 178 Q 470 178 470 168 L 470 92 Q 470 82 476.82 82 L 483.63 82" fill="none" stroke="#444444" stroke-miterlimit="10" stroke-dasharray="3 3" pointer-events="stroke" style="stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 488.88 82 L 481.88 85.5 L 483.63 82 L 481.88 78.5 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+        </g>
+        <g>
+            <path d="M 646.37 208 L 653.18 208 Q 660 208 660 203 L 660 200.5 Q 660 198 666.82 198 L 673.63 198" fill="none" stroke="#444444" stroke-miterlimit="10" pointer-events="stroke" style="stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 641.12 208 L 648.12 204.5 L 646.37 208 L 648.12 211.5 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 678.88 198 L 671.88 201.5 L 673.63 198 L 671.88 194.5 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+        </g>
+        <g>
+            <path d="M 640 82 L 650 82 Q 660 82 660 92 L 660 188 Q 660 198 666.82 198 L 673.63 198" fill="none" stroke="#444444" stroke-miterlimit="10" stroke-dasharray="3 3" pointer-events="stroke" style="stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 678.88 198 L 671.88 201.5 L 673.63 198 L 671.88 194.5 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+        </g>
+        <g>
+            <path d="M 565 260.37 L 565 270.18 Q 565 280 555 280 L 438 280 Q 428 280 428 290 L 428 303.63" fill="none" stroke="#444444" stroke-miterlimit="10" pointer-events="stroke" style="stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 565 255.12 L 568.5 262.12 L 565 260.37 L 561.5 262.12 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 428 308.88 L 424.5 301.88 L 428 303.63 L 431.5 301.88 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 1px; height: 1px; padding-top: 280px; margin-left: 494px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; background-color: #ffffff; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; background-color: light-dark(#ffffff, var(--ge-dark-color, #121212)); white-space: nowrap; ">
+                                    all fabric traffic
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="494" y="283" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        all fabric traffic
+                    </text>
+                </switch>
+            </g>
+        </g>
+        <g>
+            <path d="M 285 259.37 L 285 270 Q 285 280 295 280 L 418 280 Q 428 280 428 290 L 428 303.63" fill="none" stroke="#444444" stroke-miterlimit="10" pointer-events="stroke" style="stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 285 254.12 L 288.5 261.12 L 285 259.37 L 281.5 261.12 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+            <path d="M 428 308.88 L 424.5 301.88 L 428 303.63 L 431.5 301.88 Z" fill="#444444" stroke="#444444" stroke-miterlimit="10" pointer-events="all" style="fill: light-dark(rgb(68, 68, 68), rgb(179, 179, 179)); stroke: light-dark(rgb(68, 68, 68), rgb(179, 179, 179));"/>
+        </g>
+        <g>
+            <g transform="translate(-0.5 -0.5)">
+                <switch>
+                    <foreignObject style="overflow: visible; text-align: left;" pointer-events="none" width="100%" height="100%" requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility">
+                        <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex; align-items: unsafe center; justify-content: unsafe center; width: 1px; height: 1px; padding-top: 280px; margin-left: 381px;">
+                            <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; background-color: #ffffff; ">
+                                <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; background-color: light-dark(#ffffff, var(--ge-dark-color, #121212)); white-space: nowrap; ">
+                                    cached
+                                </div>
+                            </div>
+                        </div>
+                    </foreignObject>
+                    <text x="381" y="283" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
+                        cached
+                    </text>
+                </switch>
+            </g>
+        </g>
+    </g>
+    <switch>
+        <g requiredFeatures="http://www.w3.org/TR/SVG11/feature#Extensibility"/>
+        <a transform="translate(0,-5)" xlink:href="https://www.drawio.com/doc/faq/svg-export-text-problems" target="_blank">
+            <text text-anchor="middle" font-size="10px" x="50%" y="100%">
+                Text is not SVG - cannot display
+            </text>
+        </a>
+    </switch>
 </svg>

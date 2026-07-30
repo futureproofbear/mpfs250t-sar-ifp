@@ -44,8 +44,17 @@ def prepare_tables(reader, meta, deci_pulse=1, deci_sample=1, crop_sample=0):
     crop_sample > 0 keeps only that many (post-decimation) range samples, centred.
     Needed for scenes whose sample axis exceeds the fixed 8192 fabric grid -- the
     pulse axis pads up to the grid, but the sample axis cannot: it must come down.
-    Cropping preserves range RESOLUTION and gives up swath; decimating would do the
-    reverse. `samp0` (a RAW sample offset) is returned so the caller reads exactly
+    Cropping gives up range RESOLUTION and preserves swath; decimating does the
+    reverse. (Shortening the frequency span cuts BANDWIDTH, and resolution is
+    c/2B; the sample spacing df is untouched, and unambiguous range is c/2df.
+    Decimating doubles df, halving the swath, while the span -- so the resolution
+    -- survives.) Measured on Umbra NDSU, 8999 samples, B = 293.3 MHz:
+        full  8999   0.511 m res   4598.5 m unambiguous
+        crop  8192   0.561 m res   4598.5 m      <- -9.9% resolution, swath intact
+        deci2 4500   0.511 m res   2299.2 m      <- resolution intact, HALF the swath
+    So crop is the right lever for a scene that overruns the grid by ~10%, which is
+    why it is the default here -- but for the opposite reason to the one this
+    docstring gave until 2026-07-30. `samp0` (a RAW sample offset) is returned so the caller reads exactly
     the samples these tables describe -- freq is rebased to match, so a caller that
     ignores samp0 gets geometry that silently disagrees with its data.
     """

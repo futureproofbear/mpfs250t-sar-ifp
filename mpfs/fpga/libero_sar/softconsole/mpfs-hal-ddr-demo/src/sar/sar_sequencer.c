@@ -295,7 +295,15 @@ __attribute__((used)) volatile uint64_t sar_resample_ts[4];
  * would be wrong in a way that looks like an interpolation bug rather than a missing load. */
 #define SAR_AZSINCMODE_ADDR 0xB0059168u      /* free: 0x164 = SAR_SINCMODE (range sinc) */
 #define SAR_AZSINC_ENABLE   0x41534E31u      /* 'ASN1' -- the ONLY accepted value */
-#define SAR_AZSINC_TAB_ADDR 0xB0059200u      /* host-staged 256x32 Q15 table, 16 KB, phase-major */
+/* 16 KB, host-staged, phase-major. MUST live clear of the 0xB0059xxx knob/telemetry block: the
+ * first choice, 0xB0059200, SPANNED 0xB0059200..0xB005D1FF and swallowed SAR_FICMON (0x9240),
+ * SAR_CWRK (0x9300), SAR_EMMC_RESULT (0xA000) and SAR_EMMC_PROV_RESULT (0xD000). FICMON and CWRK
+ * are written DURING a run, so the first PIPE after a load was clean and every later one re-read a
+ * partly-overwritten table; the eMMC overlap would have corrupted provisioning records outright.
+ * 0xB006_0000 is unused all the way to GEOM_BASE at 0xB010_0000. */
+#define SAR_AZSINC_TAB_ADDR 0xB0060000u
+/* Range sinc table, same deal, 16 KB clear of the azimuth one. */
+#define SAR_SINC_TAB_ADDR   0xB0064000u
 
 static int sar_azsinc_enabled(void)
 {
@@ -305,6 +313,28 @@ static int sar_azsinc_enabled(void)
 /* Push the 256x32 Q15 sinc table into ONE chain's feeder. Rewinds first so a re-push cannot append
  * to a stale pointer. `tab` is phase-major, 8192 int16 -- the order the core's ct_we pointer
  * expects; it is staged in DDR by the host because it does not fit the L2 scratchpad image. */
+/* Push the RANGE 32-tap table into sar_resample_v, from a host-staged DDR blob.
+ *
+ * WHY: the host loader had to issue 8192 separate AXI4-Lite writes over JTAG -- one gdb round trip
+ * each, ~15 MINUTES at the 6 MHz clock ceiling, and repeated every power cycle. The payload is only
+ * 16 KB; at 6 MHz that is ~22 ms of actual bits, so >99% of that wall clock was per-transaction
+ * latency, not data. Doing the same 8192 writes from the U54 costs microseconds because they never
+ * leave the die. Exactly the trick the azimuth table already used; the asymmetry was historical.
+ *
+ * Protocol per sar_resample_v.h:84-86 and gen_sinc_table_gdb.py: TAB_CTRL select is SPLIT --
+ * {bit3, bits[1:0]} picks the table and bit2 rewinds the SHARED write pointer -- so table 4 (SINC)
+ * with a rewind is 0x8 | 0x4 = 0xc. Then one 16-bit tap per TAB_DATA write, pointer auto-incrementing.
+ * Reading TAB_DATA back returns the pointer, which must have wrapped to 0 after exactly 8192 writes:
+ * that is the cheap proof every write landed rather than a prefix. */
+static int sar_sinc_load_range(const int16_t *tab)
+{
+    sar_reg_w(K_RESAMPLE, RSV_TAB_CTRL, 0xcu);            /* select SINC table + rewind pointer */
+    for (uint32_t i = 0; i < 256u * 32u; i++)
+        sar_reg_w(K_RESAMPLE, RSV_TAB_DATA, (uint32_t)(uint16_t)tab[i]);
+    return (int)(sar_reg_r(K_RESAMPLE, RSV_TAB_DATA) & 0x3FFFu);   /* 0 == wrapped == all landed */
+}
+
+
 static void sar_azsinc_load(uint32_t feed, const int16_t *tab)
 {
     sar_reg_w(feed, K_FFT_GATHER_CTRL, K_FFT_GC_SCTRWND);
@@ -906,6 +936,18 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
     /* 32-tap sinc table -> BOTH chains, once per scene. Each feeder holds its own copy in fabric
      * RAM, so this must run for every chain that will be armed, and it must precede the first
      * armed row: the core reads the table per query and an unloaded one is all zeros. */
+    /* RANGE table: pushed here for the same reason as the azimuth one -- from DDR, on-chip, in
+     * microseconds instead of the host's 15-minute JTAG walk. Guarded by the same knob the datapath
+     * uses, so an unarmed run does not touch the table at all. */
+    if (sar_rsv_sinc_enabled()) {
+        /* Non-zero write pointer means the table landed as a PREFIX, not in full -- fail loud
+         * rather than focus a line against half a kernel. No RPROF slot is used: the map at
+         * sar_sequencer.c:162 has 2,4,5,6,9,10,11,12,13,14,15 live, and quietly clobbering timing
+         * telemetry to report a load is a worse trade than returning the error. */
+        if (sar_sinc_load_range((const int16_t *)(uintptr_t)SAR_SINC_TAB_ADDR) != 0)
+            return SAR_SEQ_TIMEOUT_RESAMPLE;
+    }
+
     if (sar_azsinc_enabled()) {
         const int16_t *stab = (const int16_t *)(uintptr_t)SAR_AZSINC_TAB_ADDR;
         for (uint32_t c = 0; c < nch; c++) sar_azsinc_load(SAR_CHAIN[c].feed, stab);

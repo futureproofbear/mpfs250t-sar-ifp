@@ -1,13 +1,19 @@
 #!/usr/bin/env bash
-# run_azsinc_table_load.sh -- stage the AZIMUTH 32-tap sinc coefficients in DDR and arm
-# SAR_AZSINCMODE, so the fused azimuth gather in fft_feeder_v runs 32-tap instead of 2-tap lerp.
+# run_rsinc_fast_load.sh -- stage the RANGE 32-tap sinc coefficients in DDR and arm
+# SAR_SINCMODE, so sar_resample_v runs 32-tap instead of 2-tap lerp.
 #
-# WHY THIS IS FAST AND run_sinc_table_load.sh IS NOT. The RANGE table has to be pushed one
-# AXI4-Lite `set` at a time, because sar_resample_v's table sits behind a CIC register with no
-# other way in -- 8192 writes, ~15 min at the 6 MHz JTAG ceiling. The AZIMUTH table does not:
-# sar_sequencer.c reads it from DDR (SAR_AZSINC_TAB_ADDR = 0xB0060000) and pushes it into BOTH
-# feeders itself, on-chip at CPU speed. The host only has to land 16 KB, which `restore ... binary`
-# does in one transfer.
+# REPLACES run_sinc_table_load.sh, which took ~15 MINUTES every power cycle. That script pushed the
+# table one AXI4-Lite `set` at a time: 8192 gdb round trips, each gdb -> OpenOCD -> JTAG -> ack. The
+# payload is only 16 KB, which at the 6 MHz JTAG ceiling is ~22 ms of actual bits -- so over 99% of
+# that quarter hour was per-transaction LATENCY, not data.
+#
+# The firmware now does those same 8192 register writes itself (sar_sinc_load_range), reading the
+# table from DDR at SAR_SINC_TAB_ADDR = 0xB0064000, on-chip, in microseconds. The host only has to
+# land 16 KB, which one `restore ... binary` does in a single transfer. This is the same trick the
+# azimuth table already used; the asymmetry was historical, not necessary.
+#
+# The firmware reads back the table write pointer and FAILS THE RUN if it has not wrapped to 0,
+# so a partial load cannot silently focus a line against half a kernel.
 #
 # PER POWER CYCLE, not once. The table ends up in FABRIC RAM (one copy per chain) and the mode word
 # is in DDR, so a power-cycle or a fabric reprogram wipes both. The DDR blob must also be re-staged
@@ -19,27 +25,27 @@
 #
 # JTAG hygiene per docs/USER_GUIDE.md 3.3: never taskkill openocd; tear down via telnet 4444.
 #
-# Usage:  bash mpfs/host/run_azsinc_table_load.sh          # stage table + arm SAR_AZSINCMODE
-#         bash mpfs/host/run_azsinc_table_load.sh --off    # disarm (back to the 2-tap lerp)
+# Usage:  bash mpfs/host/run_rsinc_fast_load.sh          # stage table + arm SAR_SINCMODE
+#         bash mpfs/host/run_rsinc_fast_load.sh --off    # disarm (back to the 2-tap lerp)
 set -u
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/sar_env.sh"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-on}"
 
-BIN="$HERE/jtag_full/azsinc_table.bin"
+BIN="$HERE/jtag_full/sinc_table.bin"
 if [ ! -f "$BIN" ]; then
     echo ">>> generating $BIN"
-    "$SAR_PYTHON" "$HERE/gen_azsinc_table_bin.py" || exit 2
+    "$SAR_PYTHON" "$HERE/gen_azsinc_table_bin.py" -o "$BIN" || exit 2
 fi
 SZ=$(wc -c < "$BIN")
 if [ "$SZ" -ne 16384 ]; then echo ">>> ABORT: $BIN is $SZ bytes, expected 16384"; exit 2; fi
 
-TAB_ADDR=0xB0060000
-MODE_ADDR=0xB0059168
-MODE_ON=0x41534E31            # 'ASN1'
+TAB_ADDR=0xB0064000
+MODE_ADDR=0xB0059164
+MODE_ON=0x534E4331            # 'SNC1'
 
-G="$HERE/jtag_full/azsinc_load.gen.gdb"
-L="$HERE/jtag_full/azsinc_load.log"
+G="$HERE/jtag_full/rsinc_load.gen.gdb"
+L="$HERE/jtag_full/rsinc_load.log"
 O="${L%.log}.openocd.log"
 NEW="$SAR_OPENOCD"; SC="$SAR_SOFTCONSOLE"
 GDB="$SC/riscv-unknown-elf-gcc/bin/riscv64-unknown-elf-gdb.exe"
@@ -56,7 +62,7 @@ ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MH
   echo "thread 2"
   if [ "$MODE" = "--off" ]; then
       echo "set *(unsigned int*)$MODE_ADDR = 0"
-      echo 'echo >>> SAR_AZSINCMODE cleared -- azimuth gather back to the 2-tap lerp\n'
+      echo 'echo >>> SAR_SINCMODE cleared -- azimuth gather back to the 2-tap lerp\n'
   else
       # RELATIVE path: gdb runs with cwd = jtag_full, and gdb on Windows cannot open a
       # git-bash "/c/Users/..." path -- it fails the sourced script at that line and every
@@ -69,7 +75,7 @@ ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MH
       echo "printf \">>> tab[0] = %d (expect 1)   tab[15] = %d (expect 32767, the peak)\\n\", *(short*)$TAB_ADDR, *(short*)($TAB_ADDR + 30)"
       echo "printf \">>> tab[8191] = %d (expect -9, last tap of phase 255)\\n\", *(short*)($TAB_ADDR + 16382)"
       echo "set *(unsigned int*)$MODE_ADDR = $MODE_ON"
-      echo 'echo >>> SAR_AZSINCMODE armed (ASN1) -- GATHER_CTRL[2] set per row, table pushed to BOTH chains\n'
+      echo 'echo >>> SAR_SINCMODE armed (ASN1) -- GATHER_CTRL[2] set per row, table pushed to BOTH chains\n'
   fi
   echo "monitor resume"
   echo "monitor shutdown"
@@ -101,7 +107,7 @@ echo "$OUT"
 # ran". That exact failure happened on 2026-07-30 (gdb could not open a git-bash /c/... path, so the
 # sourced script aborted at `restore` and never reached the mode write). Gate on the arming line
 # that the success path always prints.
-if [ "$MODE" != "--off" ] && ! printf '%s' "$OUT" | grep -q "SAR_AZSINCMODE armed"; then
+if [ "$MODE" != "--off" ] && ! printf '%s' "$OUT" | grep -q "SAR_SINCMODE armed"; then
     echo ">>> FAILED -- table not staged / mode not armed. gdb reported:"
     grep -aiE "error|no such file|cannot|failed" "$L" | tr -d '\r' | head -5
     exit 3

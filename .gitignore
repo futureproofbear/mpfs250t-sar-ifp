@@ -216,3 +216,7 @@ mpfs/fpga/trial_sinc32/
 mpfs/host/jtag_full/sinc_table.gdb
 mpfs/fpga/tb/work_*/
 mpfs/fpga/tb/s32_probe.txt
+
+# quarantined during the 2026-07-31 cleanup -- orphaned HLS cores, stale build logs,
+# superseded render artefacts. Kept on disk (reversible) rather than deleted.
+_quarantine_*/

@@ -340,13 +340,16 @@ with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalar
 
 | clock domain | period | setup slack | verdict |
 |---|---|---|---|
-| **fabric 100 MHz** | 10.000 ns | **+0.151 ns** | multi-corner `VIOLRPT` clean |
+| **fabric 100 MHz** | 10.000 ns | *re-closing* | needs high-effort layout — see note |
 | CoreFFT 12.5 MHz | 80.000 ns | +67.784 ns | clean |
 
-The 100 MHz domain is down to **1.5 % margin** from 2.6 % — the two sinc cores consumed 40 % of the
-remaining headroom, and it stays the binding constraint. The critical path is `COEFG`'s multiplier,
-**not** the interpolator: the sinc did not create the critical path, congestion degraded an existing
-one.
+The 100 MHz domain is the binding constraint and the sinc integration has consumed most of what was
+left. At default layout effort the design misses setup by **3 ps** on `COEFG_B/u_mul_inv` — the
+coefficient generator's multiplier — so the flow now runs high-effort, multi-seed placement.
+
+The critical path is that multiplier, **not** the interpolator: the sinc did not create the critical
+path, added logic and congestion degraded an existing one. A 3 ps margin is a placement outcome
+rather than a design margin; the durable fix is to pipeline that multiplier.
 
 ---
 
@@ -430,7 +433,7 @@ that is neither fusable nor local.
 | **Problem** | CPHD → detected 8192×8192 image, ≤ 15 s, minimum silicon |
 | **Approach** | PFA; delete DDR passes rather than accelerate arithmetic |
 | **Key moves** | fuse window/gather/detect into the FFT feeders and unloader; overlap CT#2 with FFT-2; generate coefficients on fabric from 3 scalars per line |
-| **Achieved** | **14.17 s**, 202/784 MACC, 537/812 LSRAM, timing MET (+0.151 ns) |
+| **Achieved** | **14.17 s**, 202/784 MACC, 537/812 LSRAM, 49 % 4LUT |
 | **Interpolation** | 32-tap polyphase sinc in **both** resample passes — scalloping 29.2 dB → 3.5 dB |
 | **Verified** | each arm matches a Python reference running the *same* interpolator; bench gated against silicon parameters |
 

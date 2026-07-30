@@ -32,7 +32,7 @@ import form_image_pfa as ref
 from sar_pipeline import prepare_tables
 from serialize_inputs import interp_coeffs
 
-SHIP = ("data/sar-data/tasks/ship_detection_testdata/6e495891-3cdd-4856-9b6f-b4f512a95f36/"
+SHIP = ("data/ship_20230906/6e495891-3cdd-4856-9b6f-b4f512a95f36/"
         "2023-09-06-06-12-08_UMBRA-04/2023-09-06-06-12-08_UMBRA-04_CPHD.cphd")
 ROOT = HERE.parents[1]
 OUT = ROOT / "output"

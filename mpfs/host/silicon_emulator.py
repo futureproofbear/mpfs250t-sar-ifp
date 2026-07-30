@@ -39,8 +39,7 @@ SCENES = {
     # against a scene that is not on the board.
     "centerfield": "data/centerfield_20231010/2023-10-10-16-57-44_UMBRA-04_CPHD.cphd",
     "ndsu":        "data/umbra_ndsu_20231110/2023-11-10-16-16-44_UMBRA-04_CPHD.cphd",
-    "ship":        "data/sar-data/tasks/ship_detection_testdata/6e495891-3cdd-4856-9b6f-b4f512a95f36/"
-                   "2023-09-06-06-12-08_UMBRA-04/2023-09-06-06-12-08_UMBRA-04_CPHD.cphd",
+    "ship":        "data/ship_20230906/2023-09-06-06-12-08_UMBRA-04_CPHD.cphd",
 }
 ROOT = HERE.parents[1]
 

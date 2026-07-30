@@ -20,7 +20,7 @@
 # after any power-cycle, since DDR does not survive one either.
 #
 # ORDER: this must run BEFORE the PIPE that should use it. The firmware pushes the table at the top
-# of the pass, reading whatever is at 0xB0060000 -- an unstaged blob is whatever DDR powered up as,
+# of the pass, reading whatever is at 0xB0064000 -- an unstaged blob is whatever DDR powered up as,
 # and the image would be wrong in a way that looks like an interpolation bug, not a missing load.
 #
 # JTAG hygiene per docs/USER_GUIDE.md 3.3: never taskkill openocd; tear down via telnet 4444.
@@ -62,7 +62,7 @@ ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MH
   echo "thread 2"
   if [ "$MODE" = "--off" ]; then
       echo "set *(unsigned int*)$MODE_ADDR = 0"
-      echo 'echo >>> SAR_SINCMODE cleared -- azimuth gather back to the 2-tap lerp\n'
+      echo 'echo >>> SAR_SINCMODE cleared -- range gather back to the 2-tap lerp\n'
   else
       # RELATIVE path: gdb runs with cwd = jtag_full, and gdb on Windows cannot open a
       # git-bash "/c/Users/..." path -- it fails the sourced script at that line and every
@@ -75,7 +75,7 @@ ELF="$HERE/../fpga/libero_sar/softconsole/mpfs-hal-ddr-demo/Icicle-Kit-DDR-666MH
       echo "printf \">>> tab[0] = %d (expect 1)   tab[15] = %d (expect 32767, the peak)\\n\", *(short*)$TAB_ADDR, *(short*)($TAB_ADDR + 30)"
       echo "printf \">>> tab[8191] = %d (expect -9, last tap of phase 255)\\n\", *(short*)($TAB_ADDR + 16382)"
       echo "set *(unsigned int*)$MODE_ADDR = $MODE_ON"
-      echo 'echo >>> SAR_SINCMODE armed (ASN1) -- GATHER_CTRL[2] set per row, table pushed to BOTH chains\n'
+      echo 'echo >>> SAR_SINCMODE armed (SNC1) -- LCFG[17] set per line; firmware pushes the table into sar_resample_v\n'
   fi
   echo "monitor resume"
   echo "monitor shutdown"

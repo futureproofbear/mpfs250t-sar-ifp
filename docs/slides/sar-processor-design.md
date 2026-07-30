@@ -94,10 +94,9 @@ Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_
 # ① Range resample — keystone, fast-time
 
 Each pulse $i$ samples the range-frequency axis on its **own non-uniform grid**, because the
-sensor's range to scene centre changes pulse to pulse:
+sensor's range to scene centre changes pulse to pulse, with $j$ = **input** sample within a pulse:
 
 $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
-where $j$ = **input** sample within a pulse, $q$ = **output** sample on the common grid
 
 | symbol | implementation | meaning |
 |---|---|---|
@@ -107,41 +106,47 @@ where $j$ = **input** sample within a pulse, $q$ = **output** sample on the comm
 **On the notation.** $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so
 $p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2).
 
-**The overall scale of $k_r$ is free**, which is why no $2/c$ or $2\pi$ appears above. The
-resample forms only the *ratio* $(K_R[q]-x_{0,i})/\Delta x_i$, so under $k\to\alpha k$ every
-fixed-point quantity is unchanged — the query table, $A$ and $B$ alike. Verified bit-exact for
-$\alpha\in\{1,\;2/c,\;4\pi/c,\;12345.678\}$. `serialize_inputs.py` carries $2/c$ so the value also
-reads as a two-way wavenumber in cycles/m (a true angular wavenumber would add $2\pi$); the fabric
-never sees either.
+---
 
-**$p_r[i]$ is different and cannot go.** It varies *per pulse*. Anything common to every pulse and
-every sample cancels; anything that differs pulse to pulse — $p_r[i]$, $f_0[i]$, $\Delta f[i]$ — is
-the geometry itself.
+# ① Range resample — finding $(k,\mu)$
 
+Resample pulse $i$ onto the common grid $K_R[q]$, $q = 0\ldots N_p-1$, $N_p = 8192$:
 
-Resample each pulse onto the **common** grid $K_R[q]$:
+$$t \;=\; \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
 
-$$t = \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
-$$\text{out}[q] = (1-\mu)\,\text{in}[k] + \mu\,\text{in}[k{+}1]$$
+**The source grid is uniform in $j$**, so $k$ and $\mu$ are closed-form — no search. That is what
+makes on-fabric coefficient generation possible: three scalars per line instead of 8192 pairs.
 
-Indices: $q = 0\ldots N_p-1$ with $N_p = 8192$. $j$ and $q$ count different things
+### The gather kernel — identical in both passes
 
-**The grid is uniform in $j$**, so no search is needed — $k$ and $\mu$ are closed-form. That is
-what later makes on-fabric coefficient generation possible.
+$$\text{out}[q] \;=\; (1-\mu)\,\text{in}[k] \;+\; \mu\,\text{in}[k{+}1]
+\qquad\text{(2-tap, baseline)}$$
+$$\text{out}[q] \;=\; \textstyle\sum_{t=0}^{31} c_t(\mu)\,\text{in}[k{-}15{+}t]
+\qquad\text{(32-tap sinc, variant)}$$
+
+Only $(k,\mu)$ are derived differently by ① and ②. **The blend is the same operation** — which is
+why one gather core serves both, and why an interpolator upgrade applies to both at once.
 
 ---
 
-# ② Azimuth resample — keystone, slow-time
+# ② Azimuth resample — finding $(k,\mu)$
 
-After a transpose, each range bin is resampled along the pulse axis onto a uniform
-cross-range grid $K_C$, using $\tan\phi$ (the sorted aspect angle) as the source abscissa:
+After the transpose a row is one **range bin** $r$, holding $M$ pulses. Its source abscissa is the
+aspect-angle tangent sorted ascending, $\tau[m]=\tan\phi_{\sigma(m)}$ for $m=0\ldots M-1$; the
+query grid is the uniform cross-range grid $K_C[q]$:
 
-$$u = \frac{K_C[q]}{k_r},\qquad k = \max\{\,m : \tan\phi_s[m] \le u\,\},\qquad
-\mu = \frac{u - \tan\phi_s[k]}{\tan\phi_s[k{+}1]-\tan\phi_s[k]}$$
+$$u \;=\; \frac{K_C[q]}{K_R[r]},\qquad
+k \;=\; \max\{\,m : \tau[m] \le u\,\},\qquad
+\mu \;=\; \frac{u - \tau[k]}{\tau[k{+}1]-\tau[k]}$$
 
-Same 2-tap kernel as ①. The difference is structural: the source abscissa is **non-uniform**, so
-$k$ comes from a **monotone merge scan** rather than a division — one pointer walking forward as
-$q$ advances, $O(M+M_p)$ for the whole line rather than $O(M_p \log M)$.
+then the same gather kernel as above.
+
+Note $K_R[r]$ — after pass 1 **every pulse shares one range grid**, so the divisor is that bin's
+single $K_R$ value, not a per-pulse $k_r$.
+
+The structural difference: $\tau$ is **non-uniform**, so $k$ cannot be divided out. It comes from a
+**monotone merge scan** — one pointer walking forward as $q$ advances, $O(M+M_p)$ per row rather
+than $O(M_p\log M)$. Both sequences are sorted, so the pointer never goes back.
 
 Together ① and ② map the polar-sampled phase history onto a **rectangular** $k$-space grid.
 
@@ -169,32 +174,31 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
 
+<!-- One slide on the mpfs250t architecture, draw with drawio, introducing the terms used in the subsequent slides like FIC0 etc-->
+
+---
+
 # Part 3 — Mapping onto fabric: what "fusing" means
 
 Write the pipeline as a composition of operators on the $8192^2$ array:
 
 $$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
 
-Done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s
-each pass costs roughly 0.6 s of pure transfer even before any stall. That is how the **15 s
-wall-clock target** from slide 1 is spent or saved: the design meets it by making most of these
-operators cost *no pass at all*.
-**The criterion.** An operator fuses into a neighbouring streaming pass **iff it is local in the
+If done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s
+each pass costs at least 0.6 s of data transfer.
+
+**Design approach.** An operator fuses into a neighbouring streaming pass **iff it is local in the
 streaming index** — each output depends on $O(1)$ inputs, at a position known when that input is
 read. Then it costs combinational logic in the feeder or unloader and *no traffic at all*.
 
 | operator | form | local? |
 |---|---|---|
 | $W$ window | diagonal: $(Ws)[n]=w[n]s[n]$ | yes — pointwise |
-| $G$ **gather** — the resample's inner op | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support |
+| $G$ **gather** — the resample's inner op | $(Gs)[q]=\sum_{t}c_t\,s[k_q+t]$, $t$ finite | yes — finite support. Note: *Resample* is the intent — put the samples on a new grid; *gather* names the operation the fabric performs — an indexed read of a few neighbouring samples plus a weighted blend, $2$ taps for the linear kernel, $32$ for sinc. |
 | $D$ detect | $(Dz)[n]=\lvert z[n]\rvert$ | yes — pointwise |
 | $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
 | $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
 
-**"Gather" is the hardware name for what stages ①–② do.** *Resample* names the intent — put the
-samples on a new grid; *gather* names the operation the fabric performs — an indexed read of a few
-neighbouring samples plus a weighted blend, $2$ taps for the linear kernel, $32$ for sinc. Same
-thing, one word for the algorithm and one for the datapath.
 ---
 
 # Two compute domains, one narrow bridge
@@ -272,21 +276,11 @@ unloader is where detect is fused. Two such chains run in parallel, splitting ro
 
 ![w:1150](diagrams/fig-sar-dataflow.drawio.svg)
 
-```
-SIG ──① range gather (per pulse, 5634×)──► SCRATCH        3.74 s
-SCRATCH ──corner-turn (tiled transpose)──► SIG            fused
-SIG ──② azimuth gather + ③ window + ④ FFT-1──► SCRATCH    5.42 s
-SCRATCH ──corner-turn #2──► SIG                           overlapped
-SIG ──④ FFT-2 + ⑤ detect──► OUT                           5.77 s
-                                             ───────────────────
-                                             TOTAL       14.92 s
-```
-
-Each arrow is a **full pass over 256 MB**. The count of arrows is the design.
+Each arrow is a full pass over 256 MB. The count of arrows is the design.
 
 ---
 
-# Stage fusion — and why it is mathematically legal
+# Stage fusion — mathematical equivalent
 
 Four stages have **no independent pass** over DDR. Each fusion is justified by an algebraic
 identity, not by convenience:

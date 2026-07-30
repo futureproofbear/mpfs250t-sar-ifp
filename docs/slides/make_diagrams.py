@@ -983,17 +983,21 @@ def fig_sar_kspace(out):
     d.box("c51", 1042.5, 296.5, 7, 7, "", "ip")
     d.box("c52", 1066.5, 296.5, 7, 7, "", "ip")
     d.box("c53", 1090.5, 296.5, 7, 7, "", "ip")
+    # No 2/c and no 2*pi: the overall scale of kr is FREE (the resample forms only a
+    # ratio, and every fixed-point quantity is invariant under k -> alpha*k, verified
+    # bit-exact). Carrying half of the physical constant was the inconsistency that
+    # made a reader ask whether a 2*pi was missing. Do not 'restore' it.
     # Notation follows the IMPLEMENTATION (serialize_inputs.py / the range-resample slide), not
     # Doerry's, so the deck says one thing throughout. They describe the same operation: pr[i] is
     # the projection onto the mean look direction, so kr IS the k_y component and pass 1 lining up
     # the rows is exactly Doerry's radial stage.
     d.note("m1", 40, 350, 370, 104,
-           "kr[i,j] = (2 pr[i]/c) (f0[i] + j df[i])\n\n"
+           "kr[i,j] = pr[i] (f0[i] + j df[i])\n\n"
            "Pulse i is an arc at aspect angle phi_i. pr[i] is\nthe projection on the MEAN look "
            "direction, so kr\nIS the k_y component. Neither axis lands on\nthe lattice yet.", fs=11)
     d.note("m2", 450, 350, 390, 104,
            "PASS 1 (range):  t = (KR[q] - x0_i) / dx_i\n"
-           "   x0_i = 2 pr[i] f0[i]/c,   dx_i = 2 pr[i] df[i]/c\n\n"
+           "   x0_i = pr[i] f0[i],   dx_i = pr[i] df[i]\n\n"
            "Every pulse resampled onto the COMMON grid KR.\nSince kr is the k_y component this "
            "makes k_y\nuniform -- ROWS line up. k_x still carries an\nangular increment: a "
            "trapezoid.", fs=11)

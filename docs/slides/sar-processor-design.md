@@ -96,7 +96,7 @@ Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_
 Each pulse $i$ samples the range-frequency axis on its **own non-uniform grid**, because the
 sensor's range to scene centre changes pulse to pulse:
 
-$$k_r[i,j] \;=\; \frac{2\,p_r[i]}{c}\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
+$$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,\Delta x_i$$
 where $j$ = **input** sample within a pulse, $q$ = **output** sample on the common grid
 
 | symbol | implementation | meaning |
@@ -107,24 +107,16 @@ where $j$ = **input** sample within a pulse, $q$ = **output** sample on the comm
 **On the notation.** $\phi_i$ is pulse $i$'s aspect angle about the mean look direction, so
 $p_r[i]=\cos\phi_i$; the deck uses $\phi$ throughout (it reappears as $\tan\phi$ in pass 2).
 
----
+**The overall scale of $k_r$ is free**, which is why no $2/c$ or $2\pi$ appears above. The
+resample forms only the *ratio* $(K_R[q]-x_{0,i})/\Delta x_i$, so under $k\to\alpha k$ every
+fixed-point quantity is unchanged — the query table, $A$ and $B$ alike. Verified bit-exact for
+$\alpha\in\{1,\;2/c,\;4\pi/c,\;12345.678\}$. `serialize_inputs.py` carries $2/c$ so the value also
+reads as a two-way wavenumber in cycles/m (a true angular wavenumber would add $2\pi$); the fabric
+never sees either.
 
-**And yes, the $2\pi$ is deliberately absent.** A two-way angular wavenumber would be
-$4\pi f/c$ rad/m; the implementation uses $k_r = 2f p_r/c$ — **cycles** per metre, not radians.
-The factor is dropped because the resample only ever forms the *ratio*
-$(K_R[q]-x_{0,i})/\Delta x_i$, in which any common scale cancels exactly, and the $2\pi$ that
-does matter lives in the FFT's own exponent $e^{-2\pi i(\cdot)}$. Carrying it here would change
-no computed value and cost precision in fixed point.
-
-The same argument removes $2/c$ — and the hardware **already does**. Under any global rescale
-$k\to\alpha k$ the fixed-point scalars are *invariant*: $k_{\text{scale}}=2^{30}/\text{span}\to
-k_{\text{scale}}/\alpha$, so the query table, $A=2^{24}/(k_{\text{scale}}\,\Delta x)$ and
-$B=(k_{\text{off}}-x_0)\,2^{24}/\Delta x$ are all unchanged. Verified bit-exact for
-$\alpha\in\{2/c,\;4\pi/c,\;1,\;12345.678\}$.
-
-**But $p_r[i]$ cannot go.** It varies *per pulse*. Anything common to every pulse and every sample
-cancels; anything that differs pulse to pulse — $p_r[i]$, $f_0[i]$, $\Delta f[i]$ — is the actual
-geometry and must stay. $2/c$ survives in the reference only so the quantity reads as a wavenumber.
+**$p_r[i]$ is different and cannot go.** It varies *per pulse*. Anything common to every pulse and
+every sample cancels; anything that differs pulse to pulse — $p_r[i]$, $f_0[i]$, $\Delta f[i]$ — is
+the geometry itself.
 
 
 Resample each pulse onto the **common** grid $K_R[q]$:

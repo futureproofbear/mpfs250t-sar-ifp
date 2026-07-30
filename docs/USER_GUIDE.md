@@ -344,12 +344,19 @@ By this point you must have, in the **current power cycle**:
 
 ### 6.1a Arming the 32-tap sinc interpolator (optional, per power cycle)
 ```bash
-bash mpfs/host/run_sinc_table_load.sh          # load 16 KB table + arm SAR_SINCMODE
-bash mpfs/host/run_sinc_table_load.sh --off    # back to the 2-tap lerp
+bash mpfs/host/run_rsinc_fast_load.sh          # stage 16 KB in DDR + arm SAR_SINCMODE  (~48 s)
+bash mpfs/host/run_rsinc_fast_load.sh --off    # back to the 2-tap lerp
 ```
-Expect `>>> tab_wptr after load = 0 (expect 0)` — after exactly 8192 word writes the pointer must
-have wrapped, which is the cheap proof every write landed rather than a prefix. It takes ~15 min
-over JTAG; do not interrupt it.
+Expect `tab[0] = 1`, `tab[15] = 32767 (the peak)`, `tab[8191] = -9`. At `μ = 0` the kernel is
+`sinc(n−15)`, exactly zero at every integer offset except `n = 15`, so those words catch a reversed
+tap order or a byte swap on sight.
+
+> **This replaces `run_sinc_table_load.sh`, which took ~15 minutes.** That script pushed the table
+> one AXI4-Lite write at a time — 8192 gdb/JTAG round trips for a 16 KB payload, which is ~22 ms of
+> actual bits at the 6 MHz ceiling, so over 99 % of the wall clock was per-transaction latency. The
+> firmware now performs those writes on-chip from a DDR blob and **fails the run** if the table
+> write pointer has not wrapped to 0, so a partial load cannot silently focus against half a kernel.
+> The old script still works and is kept as a fallback.
 
 > **Order matters.** The table is read per query. An unloaded table is all zeros, so every query
 > maps to the same source sample and the image is wrong in a way that looks like an interpolation

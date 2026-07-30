@@ -58,10 +58,12 @@
 > at runtime, so the eMMC PIPE path exercises the fabric chain. Recipe: `docs/USER_GUIDE.md`
 > §4 (eMMC boot-load) + the `emmc-onboard-pipeline` skill. AI-workflow + multi-agent framework:
 > §10 below + the personas under `.claude/agents/`.
-> **Pipeline total: 14.96 s** (measured 2026-07-30, 100 MHz, `sar_resample_v` with the 32-tap sinc
-> range interpolator armed; correlation 0.985). The 2-tap lerp arm of the same bitstream is 14.94 s
-> at correlation 0.976 — and is what a cold boot runs, because the 16 KB sinc table is JTAG-loaded
-> and does not survive a power-cycle. Previous baseline 14.92 s (2026-07-29, lerp). Window AND
+> **Pipeline total: 14.17 s** (measured 2026-07-31, 100 MHz, 32-tap polyphase sinc in BOTH resample
+> passes). Per stage: range gather 1.675 s · corner-turn 2.064 s · FFT-1 4.646 s · FFT-2 5.781 s.
+> A cold boot still runs the 2-tap lerp arm (14.95 s) because both coefficient tables live in DDR
+> and fabric RAM, neither of which survives a power-cycle — but they now load in **seconds**, not
+> the 15 minutes the original JTAG path took. Previous baselines: 14.95 s (lerp), 14.92 s
+> (2026-07-29). Window AND
 > detect are fused into the FFT passes; no CPU stage remains in the datapath, and from this baseline
 > the range-gather coefficients are generated ON FABRIC too, so they never reach DDR.
 > Per stage: resample 3.740 s · range-FFT 5.417 s · azimuth-FFT 5.769 s.

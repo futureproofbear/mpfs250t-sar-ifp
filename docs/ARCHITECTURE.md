@@ -82,9 +82,23 @@ timer reports CT#2 as 0 and FFT-2 as the merged wall time.
 Non-shipping configurations move these buffers around (`gather_fused` and `det_fused` each flip a
 source or destination). The table above is the one that produces CRC `0x319037b2`.
 
-Current shipping baseline runtime: **14.96 s** (2026-07-30, 100 MHz fabric clock, 32-tap sinc
-range interpolation) — resample 3.740 s · range-FFT 5.401 s · azimuth-FFT 5.823 s, correlation
-**0.985** against the top-left crop.
+Current shipping baseline runtime: **14.17 s** (2026-07-31, 100 MHz fabric clock, 32-tap sinc in
+BOTH resample passes) — resample 3.739 s (range gather 1.675 s + corner-turn 2.064 s) ·
+FFT-1 4.646 s · FFT-2 5.781 s.
+
+> **Better interpolation AND faster**, which was not the expected trade. 32 taps were forecast to
+> cost tens of milliseconds; the frame instead fell 0.78 s from the 2-tap baseline's 14.95 s. The
+> saving is a MEMORY-MAP fix, not the interpolator: the azimuth coefficient table had been mapped at
+> `0xB0059200`, a 16 KB span that swallowed `SAR_FICMON` (`0x9240`), `SAR_CWRK` (`0x9300`),
+> `SAR_EMMC_RESULT` (`0xA000`) and `SAR_EMMC_PROV_RESULT` (`0xD000`). `SAR_CWRK` is the multi-hart
+> coefficient-worker region and FFT-1 is the coefficient-paced stage, so the collision was costing
+> 739 ms of FFT-1 as well as corrupting the table between runs. Tables now live at `0xB0060000`
+> (azimuth) and `0xB0064000` (range), checked as SPANS against the whole knob block.
+
+Realised FIC_0 bandwidth (2,295 MB moved per frame / 14.17 s) is **162 MB/s, about 20 % of the
+~800 MB/s ceiling**; the busiest single arrow is corner-turn #1 at 260 MB/s (33 %). The design is
+therefore **no longer bandwidth-bound** — FFT-1 sits within 0.3 % of the CoreFFT `SLOWCLK` transform
+floor, so the transform clock is the binding constraint.
 
 > **The sinc baseline is not the cold-boot state.** The 256x32 Q15 coefficient table is 16 KB, does
 > not fit the L2-scratchpad image, and is pushed over JTAG

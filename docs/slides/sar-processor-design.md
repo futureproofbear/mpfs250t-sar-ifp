@@ -114,8 +114,19 @@ Resample pulse $i$ onto the common grid $K_R[q]$, $q = 0\ldots N_p-1$, $N_p = 81
 
 $$t \;=\; \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
 
-**The source grid is uniform in $j$**, so $k$ and $\mu$ are closed-form — no search. That is what
-makes on-fabric coefficient generation possible: three scalars per line instead of 8192 pairs.
+**Why closed-form?** The source samples are an *arithmetic progression* in $j$, so inverting the
+map is algebra, not search: set $K_R[q]=x_{0,i}+t\,\Delta x_i$ and solve for $t$. One subtract, one
+multiply by a precomputed $1/\Delta x_i$, one floor — $O(1)$, no branching, and independent of every
+other query. Pass ② cannot do this: its abscissa $\tau$ is non-uniform, so $k$ must be *found*.
+
+**And that is what puts the coefficients on fabric.** $t$ is affine in the query value, so the whole
+per-line coefficient set collapses to one fixed-point map
+
+$$v \;=\; \bigl((Q[q]\cdot A)\gg S\bigr) + B,\qquad A \propto 1/\Delta x_i,\quad B \propto -x_{0,i}/\Delta x_i$$
+
+The CPU sends **three scalars per line** instead of 8192 $(k,\mu)$ pairs — the 32 KB $idx$ + 16 KB
+$wq$ per line that used to cross DDR. Measured: 5.21 s → 3.74 s. ($Q[q]$ is tabulated once per
+scene, so the *query* grid need not be uniform — only the source.)
 
 ### The gather kernel — identical in both passes
 

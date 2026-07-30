@@ -254,11 +254,21 @@ unloader is where detect is fused. Two such chains run in parallel, splitting ro
 
 ---
 
-# Dataflow — one frame
+# Dataflow — the unfused pipeline
+
+![w:1150](diagrams/fig-sar-dataflow-unfused.drawio.svg)
+
+Eight operators, eight full-frame DDR passes. Nothing here is wrong — it is just paying bus time
+for work that could ride along inside a pass already moving the data.
+
+---
+
+# Dataflow — one frame, as built
 
 ![w:1150](diagrams/fig-sar-dataflow.drawio.svg)
 
-Each arrow is a full pass over 256 MB. The count of arrows is the design.
+Each arrow is a full pass over 256 MB. Eight stages become **five** passes; window, azimuth gather
+and detect add no traffic at all, and CT#2 hides under FFT-2. The count of arrows is the design.
 
 ---
 

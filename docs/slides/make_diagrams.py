@@ -655,8 +655,8 @@ def fig_sar_dataflow(out):
     d.edge("sig3", "f2", label="5.77 s")
     d.edge("f2", "out")
     d.note("n1", 784, 318, 366, 90,
-           "TOTAL 14.92 s   (budget 15 s)\n\n"
-           "3 passes over 256 MB, not 7.\nThe budget is met by moving less\n"
+           "TOTAL 14.95 s   (budget 15 s)\n\n"
+           "5 DDR passes, not 8.\nThe budget is met by moving less\n"
            "data, not by computing faster.", fs=12)
     d.note("n2", 24, 424, 1126, 74,
            "WHY THE FUSIONS ARE EXACT, not merely convenient:  window -- F{w.s}, a pointwise scale "
@@ -664,6 +664,40 @@ def fig_sar_dataflow(out):
            "present;  detect -- |z| is pointwise on the FFT output;\ncorner-turn #2 -- strip-pipelined "
            "against FFT-2, legal because the 1-D transforms of distinct rows are INDEPENDENT.", fs=12)
     return d.write(out / "fig-sar-dataflow.drawio.svg")
+
+
+def fig_sar_dataflow_unfused(out):
+    """The same eight operators, each as its own DDR pass -- what fusion is measured against."""
+    d = Diagram(1180, 520, "One frame -- the unfused pipeline", draw_title=False)
+    d.note("t", 24, 14, 1130, 34,
+           "Eight conceptual stages. Written naively, each reads a full frame from DDR and writes "
+           "one back.", fs=13)
+
+    S = [("range\nresample", "fab"), ("corner-turn", "fab"), ("azimuth\nresample", "fab"),
+         ("window", "fab"), ("FFT-1", "ip"), ("corner-turn #2", "fab"),
+         ("FFT-2", "ip"), ("detect", "fab")]
+    for i, (lab, st) in enumerate(S):
+        col, row = i % 4, i // 4
+        x, y = 34 + col * 288, 74 + row * 150
+        d.box("m%d" % i, x, y, 116, 56, "DDR", "mem", fs=12)
+        d.box("s%d" % i, x + 128, y, 132, 56, lab, st, fs=12, bold=True)
+        d.edge("m%d" % i, "s%d" % i)
+        # each stage writes its result straight back to DDR -- that write is the other half of the
+        # pass, and is what fusion later removes. The final stage's write lands in OUT.
+        d.note("w%d" % i, x + 128, y + 58, 132, 16,
+               "-> OUT" if i == len(S) - 1 else "-> DDR", fs=10.5)
+
+    d.note("n", 24, 330, 1130, 56,
+           "8 stages  ->  8 full-frame DDR passes.   At 256 MB a frame and ~800 MB/s across FIC_0, "
+           "the bus alone sets the floor:\neach pass is a read and a write, so the traffic -- not "
+           "the arithmetic -- is what the schedule is made of.", fs=12)
+    d.note("n2", 24, 398, 1130, 76,
+           "None of these operators is WRONG. The problem is that four of them are POINTWISE or "
+           "pure ADDRESSING -- window, azimuth gather, detect, and the second transpose -- so "
+           "spending a whole 256 MB round trip on each is\npaying bus time for work that could ride "
+           "along inside a pass that is already moving the data. That is what the next slide "
+           "removes.", fs=12)
+    return d.write(out / "fig-sar-dataflow-unfused.drawio.svg")
 
 
 def fig_sar_range_resamp(out):
@@ -1127,7 +1161,7 @@ def main():
                fig_fabric, fig_dataflow, fig_timing, fig_bug,
                fig_sar_python, fig_sar_fabric, fig_sar_dataflow,
                fig_sar_range_resamp, fig_sar_azimuth_resamp, fig_sar_kspace,
-               fig_sar_mpfs, fig_axi_packing):
+               fig_sar_mpfs, fig_axi_packing, fig_sar_dataflow_unfused):
         fn(out)
     # ARCHITECTURE.md Figure 1 lives with the doc that owns it, not with the deck
     img = (here / ".." / "img").resolve()

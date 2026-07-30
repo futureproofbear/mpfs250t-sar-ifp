@@ -34,8 +34,11 @@ _C = getattr(ref, "C", 299792458.0)
 
 # ---- CPHD scenes cached under data/ (see config.yaml) ----
 SCENES = {
-    "centerfield": "data/sar-data/tasks/Centerfield, Utah/c0dbd830-e863-42c5-97d0-2cfd291bcb2a/"
-                   "2023-10-10-16-57-44_UMBRA-04/2023-10-10-16-57-44_UMBRA-04_CPHD.cphd",
+    # Moved out of the sar-data task tree; the old nested path is gone. This is the collect the
+    # board actually runs (M=5634 x N=4319), so a stale path here silently compared the emulator
+    # against a scene that is not on the board.
+    "centerfield": "data/centerfield_20231010/2023-10-10-16-57-44_UMBRA-04_CPHD.cphd",
+    "ndsu":        "data/umbra_ndsu_20231110/2023-11-10-16-16-44_UMBRA-04_CPHD.cphd",
     "ship":        "data/sar-data/tasks/ship_detection_testdata/6e495891-3cdd-4856-9b6f-b4f512a95f36/"
                    "2023-09-06-06-12-08_UMBRA-04/2023-09-06-06-12-08_UMBRA-04_CPHD.cphd",
 }
@@ -65,7 +68,58 @@ def apply_fixed(fp, idx, wq):
     return out
 
 
-def resample_fixed(signal_i16, tables, grid):
+_SINC_TAB = None
+
+
+def _sinc_tab():
+    """256 x 32 Q15, from the SAME generator the RTL bench uses -- not re-derived here."""
+    global _SINC_TAB
+    if _SINC_TAB is None:
+        import sys as _sys
+        _sys.path.insert(0, str(ROOT / "mpfs" / "fpga" / "tb"))
+        from gen_resample_vectors import sinc_table_q15
+        _SINC_TAB = np.asarray(sinc_table_q15(256, 32), np.int64)
+    return _SINC_TAB
+
+
+def apply_sinc(fp, idx, wq, sn):
+    """32-tap polyphase sinc, bit-accurate to sar_sinc32_gather / gather_sinc().
+
+    Vectorised per line: 8192 outputs x 32 taps is 262k MACs, which numpy does in one shot; a
+    Python loop here would make a full-scale run take hours instead of minutes.
+    """
+    tab = _sinc_tab()
+    TAPS, LO = 32, -15
+    out = np.zeros(idx.shape, np.complex128)
+    ar = np.floor(fp.real).astype(np.int64)
+    ai = np.floor(fp.imag).astype(np.int64)
+
+    interior = (idx >= -LO) & (idx <= sn - (TAPS + LO))
+    edge     = (idx >= 0) & ~interior            # 2-tap fallback, exactly as the RTL's g_edge
+
+    if interior.any():
+        k = idx[interior]
+        cols = k[:, None] + np.arange(LO, LO + TAPS)[None, :]        # idx-15 .. idx+16
+        c = tab[(wq[interior].astype(np.int64) * 256) >> 15]         # phase = top 8 bits of Q15
+        accr = (c * ar[cols]).sum(axis=1)
+        acci = (c * ai[cols]).sum(axis=1)
+        rr = np.right_shift(accr + (1 << 14), 15)                    # ROUND-to-nearest, not floor
+        ri = np.right_shift(acci + (1 << 14), 15)
+        out[interior] = _sat16(rr) + 1j * _sat16(ri)
+
+    if edge.any():
+        k = np.clip(idx[edge], 0, fp.size - 2)
+        w = wq[edge].astype(np.int64)
+        a_r, b_r = ar[k], ar[k + 1]
+        a_i, b_i = ai[k], ai[k + 1]
+        lr = a_r + _shr_floor((b_r - a_r) * w, 15)                   # truncating, as the lerp path
+        li = a_i + _shr_floor((b_i - a_i) * w, 15)
+        out[edge] = _sat16(lr) + 1j * _sat16(li)
+
+    return out
+
+
+def resample_fixed(signal_i16, tables, grid, range_sinc=False, az_sinc=False):
     """sar_sequencer.c::resample_2pass in FIXED POINT. signal_i16 = int16-valued complex."""
     m, n = signal_i16.shape
     Mp = Np = grid
@@ -86,13 +140,16 @@ def resample_fixed(signal_i16, tables, grid):
     for i in range(m):
         kr_i = (2.0 * pr[i] / _C) * (f0[i] + np.arange(n) * df[i])
         idx, wq = interp_coeffs(KRp, kr_i)
-        scratch[inv_order[i]] = apply_fixed(signal_i16[i], idx, wq)
+        scratch[inv_order[i]] = (apply_sinc(signal_i16[i], idx, wq, n) if range_sinc
+                                 else apply_fixed(signal_i16[i], idx, wq))
     sig_t = scratch.T.copy()
+    del scratch                                          # 1.07 GB at grid 8192; the copy is done
     g2 = np.zeros((Np, Mp), np.complex128)               # PASS 2 (azimuth)
     for j in range(Np):
         src = KRp[j] * tan_s
         idx, wq = interp_coeffs(KCp, src)
-        g2[j] = apply_fixed(sig_t[j, :m], idx, wq)
+        g2[j] = (apply_sinc(sig_t[j, :m], idx, wq, m) if az_sinc
+                 else apply_fixed(sig_t[j, :m], idx, wq))
     return g2, (m, n)
 
 
@@ -153,7 +210,7 @@ def detect_fixed(z):
     return np.clip(m, 0, 0xFFFF).astype(np.uint16)
 
 
-def form_image(cphd_path, deci, grid, sgn_default=-1):
+def form_image(cphd_path, deci, grid, sgn_default=-1, range_sinc=False, az_sinc=False):
     reader = ref.open_phase_history(str(cphd_path))
     meta = reader.cphd_meta
     tables = prepare_tables(reader, meta, deci, deci)
@@ -168,13 +225,26 @@ def form_image(cphd_path, deci, grid, sgn_default=-1):
     sig_i16 = (np.floor(signal.real / lsb) + 1j * np.floor(signal.imag / lsb))
     sig_i16 = _sat16(sig_i16.real) + 1j * _sat16(sig_i16.imag)
 
-    g2, (m, n) = resample_fixed(sig_i16, tables, grid)      # 2-pass keystone, fixed point
+    print(f"  interpolator: range={'sinc32' if range_sinc else 'lerp'}  "
+          f"azimuth={'sinc32' if az_sinc else 'lerp'}")
+    g2, (m, n) = resample_fixed(sig_i16, tables, grid, range_sinc, az_sinc)
+    # FREE EACH INTERMEDIATE AS SOON AS IT IS CONSUMED. At grid 8192 every one of these is a
+    # complex128 8192x8192 = 1.07 GB array; holding all of them needs ~7 GB and the run is silently
+    # OOM-killed (and with buffered stdout, killed looks exactly like "produced no output").
+    # Deleting as we go caps the peak at two or three live arrays. Arithmetic is untouched -- this
+    # is not a dtype change, which would cost bit-accuracy.
     g2w = window_fixed(g2, m, n)                            # 2-D Hamming, fixed point
+    del g2
     yr, er = fft_pass_bfp(g2w)                              # range BFP FFT + renorm
+    del g2w
     yt = np.swapaxes(yr, -1, -2)                            # corner-turn
+    del yr
     ya, ea = fft_pass_bfp(yt)                               # azimuth BFP FFT + renorm
+    del yt
     focused = np.swapaxes(ya, -1, -2)
+    del ya
     img = detect_fixed(focused)                            # fixed detect -> uint16
+    del focused
     print(f"  range exp spread {int(er.max()-er.min())}, azimuth exp spread {int(ea.max()-ea.min())}; "
           f"OUT peak={img.max()} mean={img.mean():.1f} sat%={100*(img>=0xFFFF).mean():.2f}")
     return img
@@ -205,15 +275,18 @@ def main():
     ap.add_argument("--scene", choices=list(SCENES) + ["both"], default="both")
     ap.add_argument("--deci", type=int, default=8)
     ap.add_argument("--grid", type=int, default=8192)
+    ap.add_argument("--cphd", default=None, help="explicit CPHD path, overrides --scene")
+    ap.add_argument("--range-sinc", action="store_true", help="32-tap sinc in pass 1")
+    ap.add_argument("--az-sinc", action="store_true", help="32-tap sinc in pass 2")
     a = ap.parse_args()
     outdir = ROOT / "output"
     scenes = list(SCENES) if a.scene == "both" else [a.scene]
     for s in scenes:
-        cphd = ROOT / SCENES[s]
+        cphd = pathlib.Path(a.cphd) if a.cphd else (ROOT / SCENES[s])
         if not cphd.exists():
             print(f"[{s}] MISSING CPHD: {cphd}"); continue
         print(f"[{s}] silicon-mirror focus:")
-        img = form_image(cphd, a.deci, a.grid)
+        img = form_image(cphd, a.deci, a.grid, range_sinc=a.range_sinc, az_sinc=a.az_sinc)
         save(img, s, outdir)
 
 

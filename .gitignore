@@ -226,3 +226,12 @@ mpfs/fpga/tb/s32_probe.txt
 # quarantined during the 2026-07-31 cleanup -- orphaned HLS cores, stale build logs,
 # superseded render artefacts. Kept on disk (reversible) rather than deleted.
 _quarantine_*/
+
+# stray Libero component vault at repo root (lint_netlist.sh resolves $ROOT/component/work)
+component/
+# build-log working dir
+scratch/
+
+# Generated hand-off package (rebuild: python scripts/make_standalone_emulator.py).
+# Copies of sources that live in src/ and mpfs/host/ -- committing them would duplicate and drift.
+sar_emulator/

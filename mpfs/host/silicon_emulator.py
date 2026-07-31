@@ -277,11 +277,21 @@ def main():
     ap.add_argument("--cphd", default=None, help="explicit CPHD path, overrides --scene")
     ap.add_argument("--range-sinc", action="store_true", help="32-tap sinc in pass 1")
     ap.add_argument("--az-sinc", action="store_true", help="32-tap sinc in pass 2")
+    # ROOT/output is right inside this repo, but this file is also shipped flat in the standalone
+    # emulator folder, where ROOT resolves two levels ABOVE the package -- writing results to a
+    # directory the user never named. Explicit flag instead of guessing the layout.
+    ap.add_argument("--outdir", default=None, help="output directory (default: <repo>/output)")
     a = ap.parse_args()
-    outdir = ROOT / "output"
-    scenes = list(SCENES) if a.scene == "both" else [a.scene]
+    outdir = Path(a.outdir) if a.outdir else (ROOT / "output")
+    # --cphd names ONE file, so it must also collapse the loop to one run. Without this it focused
+    # the same file once per entry in SCENES and saved it under every scene's name -- three
+    # identical images, one of them labelled with a scene it does not contain.
+    if a.cphd:
+        scenes = [a.scene] if a.scene != "both" else [Path(a.cphd).stem]
+    else:
+        scenes = list(SCENES) if a.scene == "both" else [a.scene]
     for s in scenes:
-        cphd = pathlib.Path(a.cphd) if a.cphd else (ROOT / SCENES[s])
+        cphd = Path(a.cphd) if a.cphd else (ROOT / SCENES[s])
         if not cphd.exists():
             print(f"[{s}] MISSING CPHD: {cphd}"); continue
         print(f"[{s}] silicon-mirror focus:")

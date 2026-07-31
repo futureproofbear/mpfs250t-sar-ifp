@@ -936,18 +936,6 @@ static int fft1_gather_pass(const sar_geom_t *g, float *f32, uint32_t src, uint3
     /* 32-tap sinc table -> BOTH chains, once per scene. Each feeder holds its own copy in fabric
      * RAM, so this must run for every chain that will be armed, and it must precede the first
      * armed row: the core reads the table per query and an unloaded one is all zeros. */
-    /* RANGE table: pushed here for the same reason as the azimuth one -- from DDR, on-chip, in
-     * microseconds instead of the host's 15-minute JTAG walk. Guarded by the same knob the datapath
-     * uses, so an unarmed run does not touch the table at all. */
-    if (sar_rsv_sinc_enabled()) {
-        /* Non-zero write pointer means the table landed as a PREFIX, not in full -- fail loud
-         * rather than focus a line against half a kernel. No RPROF slot is used: the map at
-         * sar_sequencer.c:162 has 2,4,5,6,9,10,11,12,13,14,15 live, and quietly clobbering timing
-         * telemetry to report a load is a worse trade than returning the error. */
-        if (sar_sinc_load_range((const int16_t *)(uintptr_t)SAR_SINC_TAB_ADDR) != 0)
-            return SAR_SEQ_TIMEOUT_RESAMPLE;
-    }
-
     if (sar_azsinc_enabled()) {
         const int16_t *stab = (const int16_t *)(uintptr_t)SAR_AZSINC_TAB_ADDR;
         for (uint32_t c = 0; c < nch; c++) sar_azsinc_load(SAR_CHAIN[c].feed, stab);
@@ -1466,6 +1454,24 @@ sar_seq_status_t sar_form_image(uint32_t spin_limit)
 
     sar_stage_ts[0] = readmtime();
     /* 1) keystone resample (2-pass, MSS-computed coeffs): -> SCRATCH */
+    /* RANGE sinc table -> sar_resample_v, BEFORE the pass that uses it.
+     *
+     * It lived in fft1_gather_pass() until 2026-07-31, which is one full pass TOO LATE: pass 1 runs
+     * here, FFT-1 runs after. Pass 1 therefore gathered 32-tap against whatever the table happened
+     * to hold. On a fresh boot that is zeros -- every phase weights the same tap -- and the image
+     * was destroyed (corr 0.0017 vs 0.976 for lerp). It went unnoticed because a SECOND run looked
+     * fine: the previous run's FFT-1 phase had by then loaded the table, so pass 1 picked up a
+     * valid one and scored 0.9855. Correct by accident, and only on the second run onward.
+     *
+     * The azimuth table is NOT moved -- fft1_gather_pass loads it before the azimuth gather inside
+     * that same pass, which is the right place for it. */
+    if (sar_rsv_sinc_enabled()) {
+        /* Non-zero write pointer means the table landed as a PREFIX, not in full -- fail loud
+         * rather than focus a line against half a kernel. */
+        if (sar_sinc_load_range((const int16_t *)(uintptr_t)SAR_SINC_TAB_ADDR) != 0)
+            return SAR_SEQ_TIMEOUT_RESAMPLE;
+    }
+
     if (!resample_2pass(&g, spins)) return SAR_SEQ_TIMEOUT_RESAMPLE;
     sar_stage_ts[1] = readmtime();
 

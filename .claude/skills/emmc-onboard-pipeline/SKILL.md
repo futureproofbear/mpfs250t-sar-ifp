@@ -124,8 +124,9 @@ reference placement digit-for-digit). All paths below are relative to the repo r
   (address/struct single-source, mirror of `ddr_sar_layout.h`), `serialize_inputs.py` (CPHD → stage).
 - **Docs** — `docs/USER_GUIDE.md` §4 (eMMC boot-load) + this skill (= authoritative recipe).
 - **NOT committed** (large binaries; regenerate): the staged scene `jtag_stage_deci1/` and packed
-  `emmc_input.img`. The Centerfield scene is ALREADY on the eMMC INPUT partition, so the immediate
-  LOAD/PIPE/SAVEOUT run needs neither. To (re)provision a scene: `serialize_inputs.py --in <CPHD> --out <stage> --grid 8192` →
+  `emmc_input.img`. A scene is ALREADY on the eMMC INPUT partition (**NDSU since 2026-08-01** — it
+  REPLACED Centerfield; see on-card state below), so the immediate LOAD/PIPE/SAVEOUT run needs
+  neither. To (re)provision a scene: `serialize_inputs.py --in <CPHD> --out <stage> --grid 8192` →
   `emmc_pack.py` → `run_emmc_restore.sh` → `run_emmc_prov_iso.sh`. The NDSU production CPHD is under
   `data/umbra_ndsu_20231110/`.
 
@@ -141,9 +142,13 @@ yet flashed** (board was powered off).
 2. Full M3 run: `LOAD → PIPE → crop-verify → SAVEOUT → VERIFY_OUT → (power-cycle) ROIE`.
    See "End-to-end run" below for exact commands.
 
-On-card state at handoff: INPUT partition holds the real Centerfield scene (intact, host CRC
-`0x58d0ea66`, SIG CRC `0x89fa12dc`). The OUTPUT (SARO) partition has a TORN image from a SAVEOUT
-that was interrupted by power-off — harmless; the fixed SAVEOUT overwrites it cleanly.
+On-card state (updated 2026-08-01): INPUT partition holds the **NDSU production scene**
+(`data/umbra_ndsu_20231110/`, 267,885,056 B, host CRC `0x188e2e53`, provisioned verdict 0 with
+readback CRC matching exactly). This **OVERWROTE the Centerfield scene** that was previously there
+(host CRC `0x58d0ea66`, SIG CRC `0x89fa12dc`) — Centerfield is regenerable from `data/`, but only
+via another full restore+provision (~4 h for its 97 MB), so do not assume a quick Centerfield run is
+available. The OUTPUT (SARO) partition still holds a TORN image from a SAVEOUT interrupted by
+power-off — harmless; a clean SAVEOUT overwrites it.
 
 ## eMMC layout (partitions, addresses)
 
@@ -242,14 +247,27 @@ bash run_m3_iso.sh 0x45524F45 0x0E001200 0x0E001200 30000 0xB005E200 \
      0x98000000 2097152 "$(pwd)/jtag_full/crop_emmc.bin"
 ```
 
-Provisioning a NEW scene (one-time, ~3 h + ~16 min):
+Provisioning a NEW scene (one-time; scales with image size — see the two worked examples):
 ```
 # pack (host, fork): stage dir must be CURRENT 10-role format (serialize_inputs.py output)
 python mpfs/host/emmc_pack.py --stage <jtag_stage_deci1> --out emmc_input.img
 python -c "import zlib;print(hex(zlib.crc32(open('emmc_input.img','rb').read())&0xffffffff))"  # note CRC
-bash run_emmc_restore.sh    # ~3 h JTAG restore img->DDR + on-hart CRC32 check vs host CRC
-bash run_emmc_prov_iso.sh 97553408 1100000 0x88000000   # write DDR->eMMC INPUT + verify (~16 min)
+bash run_emmc_restore.sh    # JTAG restore img->DDR   (~9 KB/s -- this is the multi-hour step)
+bash run_emmc_prov_iso.sh <SPAN_BYTES> <SLEEP_MS> 0x88000000   # DDR->eMMC INPUT + readback verify
+
+#  scene         SPAN_BYTES   restore    SLEEP_MS   provision wall
+#  Centerfield     97553408    ~3 h      1100000    ~16 min
+#  NDSU           267885056    8.3 h     3300000    ~49 min   (2026-08-01, verdict 0)
 ```
+`SLEEP_MS` is a **blind `monitor sleep`, not a poll** (unlike `run_m3_iso.sh`). It must exceed
+write+readback or you halt the hart mid-write; over-budgeting only costs wall time, so round up.
+Budget from the measured rates: `span/0.133 MB/s` (write) + `span/1.53 MB/s` (readback).
+
+**The provision's readback CRC is the real gate — not the restore's CRC.** On PASS the log prints
+`crcE == crcR`, and that value must also equal the **host** CRC32 of the packed image (NDSU:
+`0x188e2e53`). That single check covers host → DDR → eMMC over every byte, so a green provision
+retroactively proves the restore too. Do NOT block on the restore step's own CRC line — see the
+stale-read gotcha below.
 
 ## Measured rates & what eMMC does / doesn't solve
 
@@ -316,7 +334,21 @@ Single-block (LEGACY/25 MHz/8-bit): **write 0.13 MB/s** (~3.9 ms/block; per-CMD2
   so a gdb PHYSICAL read gets a stale value (seen 0x00000000 after a good restore). FIX PENDING: add
   `flush_l2_cache` to that handler. Until then verify a restore via `run_ddr_peek.sh` (SARI magic
   0x53415249 at the load addr). The dedicated result RECORDS (0xB005Exxx, 0xB005D000) ARE flushed →
-  trustworthy.
+  trustworthy. **Corollary: `run_emmc_restore.sh` ends with `RESTORE MISMATCH: DDR image CRC != host
+  -- DO NOT provision` after a PERFECTLY GOOD 8 h restore**, because that line reads the stale CRC32.
+  Do not re-run the restore on the strength of it. Confirm SARI + a few spot probes, then let the
+  PROVISION's readback CRC (`crcE == crcR == host CRC`) be the actual gate — it is flushed, and it
+  covers every byte. (2026-08-01: NDSU restore "failed" this check, provisioned verdict 0 with
+  `crcR = 0x188e2e53` = host CRC exactly.)
+- **`run_ddr_peek.sh` only honours its ADDR argument on the `head` line — `mid`/`near-end` are
+  HARDCODED to `0x8ac00000` / `0x8dd00000-0x40`, sized for the 97 MB Centerfield image.** On a
+  larger scene it prints a confident "RESTORE LANDED" while probing only the first ~37 % of, e.g.,
+  NDSU's 268 MB — the tail, which is exactly what a truncated transfer corrupts, is never read. To
+  probe an arbitrary offset, pass it as ADDR and read the value out of the **`NO SARI at load addr
+  (got 0x…)`** line: that message is the script dereferencing your address, and the word it reports
+  is the real memory content. Do not trust the `x/8xw` line for this — for addresses above roughly
+  `0x90000000` it silently prints NOTHING (no error), which looks like an unreadable DDR region but
+  is only a display artefact; the dereference on the very same address returns correct data.
 - **Attach IN PLACE, never `monitor reset halt`** — power-on eNVM boot lands hart1 in the u54_1()
   mailbox loop; a JTAG reset won't reliably re-boot the U54 on this ES silicon.
 - **Never read SDHCI regs (0x20008xxx) before the eMMC clock is enabled** — dead-buses/wedges hart1

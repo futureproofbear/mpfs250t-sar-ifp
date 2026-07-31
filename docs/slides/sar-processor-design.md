@@ -19,7 +19,6 @@ style: |
   section h1 { font-size: 40px; }
   section h2 { font-size: 32px; }
 ---
-
 # A SAR Image-Formation Processor on PolarFire SoC
 
 From CPHD phase history to a detected image, on an MPFS250T
@@ -29,7 +28,6 @@ From CPHD phase history to a detected image, on an MPFS250T
 **Part 3** — how it maps onto fabric
 
 ---
-
 # Part 1 — Problem statement
 
 Take **CPHD phase-history data** and produce a **detected image**, on one MPFS250T.
@@ -48,7 +46,6 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
   - sinc kernel for higher image quality at expense of more fabric resources
 
 ---
-
 # Part 2 — The Python reference pipeline
 
 <br>
@@ -60,7 +57,6 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
 `src/form_image_pfa.py` — python implementation of the **Polar Format Algorithm (PFA)**.
 
 ---
-
 # PFA geometry — polar in, rectangular out
 
 ![w:1020](diagrams/fig-sar-kspace.drawio.svg)
@@ -80,7 +76,6 @@ projects onto the mean look direction, $k_r$ *is* the $k_y$ component, so this m
 $k_x$ still carries an angular increment, leaving a **trapezoid**.
 Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_x$ uniform too.
 ---
-
 # ① Range resample — keystone, fast-time
 
 Each pulse $i$ samples the range-frequency axis on **its own grid** — uniform in $j$, but with an
@@ -99,68 +94,60 @@ $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,
 | $\Delta x_i$ | `a*df[i]` | its spacing — the value ① divides by |
 
 ---
+# Finding $(k,\mu)$ — the only place the two passes differ
 
-# ① Range resample — finding $(k,\mu)$
+Both passes ask the same question: *what is the data value at output location $q$?* Both answer it
+with the same blend. They differ only in how $(k,\mu)$ — which sample, and how far past it — is
+obtained.
 
-For each pulse $i$, we want to find the data value at the output sample location $K_R[q]$, where $q = 0\ldots N_p-1$, $N_p = 8192$. By setting $K_R[q]=x_{0,i}+t\,\Delta x_i$, and solving for $t$:
+<div style="display:flex;gap:1.6em">
+<div style="flex:1">
 
-$$t \;=\; \frac{K_R[q] - x_{0,i}}{\Delta x_i},\qquad k=\lfloor t \rfloor,\qquad \mu = t-k$$
+**① Range — closed form**
 
-We can then find the $q^{th}$ output sample value:
+Source grid is uniform in $j$, so invert it directly:
 
-$$\text{out}[q] \;=\; (1-\mu)\,\text{in}[k] \;+\; \mu\,\text{in}[k{+}1]
-\qquad\text{(2-tap, baseline)}$$
-$$\text{out}[q] \;=\; \textstyle\sum_{n=0}^{31} c_n(\mu)\,\text{in}[k{-}15{+}n]
-\qquad\text{(32-tap sinc, variant)}$$
+$$t=\frac{K_R[q]-x_{0,i}}{\Delta x_i},\quad k=\lfloor t\rfloor,\quad \mu=t-k$$
 
-with the taps spanning $k{-}15 \ldots k{+}16$, so tap $n$ sits at offset $n-15-\mu$ from the
-interpolation point:
+One subtract, one multiply by a precomputed $1/\Delta x_i$, one floor. $O(1)$, no branching.
 
-$$c_n(\mu) \;=\; \frac{\operatorname{sinc}(n-15-\mu)}{\sum_{m=0}^{31}\operatorname{sinc}(m-15-\mu)}$$
+</div>
+<div style="flex:1">
 
----
+**② Azimuth — search**
 
-# ② Azimuth resample — finding $(k,\mu)$
+Source abscissa is $\tau=\tan\phi$ sorted: **not uniform**. Along range bin $r$ a sample sits at
+$K_R[r]\,\tau[m]$, so solving $K_C[q]=K_R[r]\tan\phi$ gives
 
-After pass ①, a sample from pulse $i$ sits in k-space at $k_y = k \cdot \cos \phi_i$ → resampled onto the uniform grid.
+$$u=\frac{K_C[q]}{K_R[r]},\quad k=\max\{m:\tau[m]\le u\},\quad \mu=\frac{u-\tau[k]}{\tau[k+1]-\tau[k]}$$
 
-After the transpose a row is one range bin $r$. So along row $r$ the source abscissa in $k_x$ units is $K_R[r] \cdot \tau[m]$ where $\tau = \tan \phi$ sorted. Pass ② wants output at uniform $K_C[q]$. 
+$u$ is the target expressed as a *tangent*, which lets the search run against $\tau$ directly.
 
-$M$ pulses, to be resampled onto the uniform cross-range grid $K_C[q]$. The source abscissa is the sorted aspect-angle tangent τ = tan φ = $\tau[0\ldots M{-}1]$ — and unlike ①, it is **not uniform**.
+</div>
+</div>
 
-, so for row $r$ it is exactly $K_R[r]$
-k_x = k·sin φᵢ = k_y·tan φᵢ = K_R[r]·tan φᵢ. 
-
-
-So solving $K_C[q] = K_R[r] \cdot \tan \phi$ → $\tan \phi = K_C[q]/K_R[r] ≡ u$. u is just the desired location expressed as a tangent instead of a frequency — which lets the search run against τ directly.
-
-$$u \;=\; \frac{K_C[q]}{K_R[r]},\qquad
-k \;=\; \max\{\,m : \tau[m] \le u\,\},\qquad
-\mu \;=\; \frac{u - \tau[k]}{\tau[k{+}1]-\tau[k]}$$
-
-$K_R[r]$, not a per-pulse $k_r$: after ① every pulse shares one range grid. Its reciprocal is the
-**only divide in the row**.
-
-So $k$ must be *found*, not computed — but $\tau$ and $K_C$ are both sorted, which turns the search
-into a merge scan: one pointer that only ever moves forward.
+$\tau$ is **row-invariant** — one 705-entry table for all 8192 rows. Searching in $k_x$ units instead
+would mean rescaling it 8192 times. And because both $\tau$ and $K_C$ are sorted, the search is a
+merge scan, not a binary search:
 
 ```c
-while (k+2 < M && tau[k+1] <= u) k++;   /* never retreats */
+while (k+2 < M && tau[k+1] <= u) k++;   /* one pointer, never retreats: O(M+Mp) per row */
 ```
 
-Then the same gather kernel as ①. Together the two passes map the polar-sampled phase history onto
-a **rectangular** $k$-space grid.
+### The blend — identical in both passes
 
+$$\text{out}[q]=(1-\mu)\,\text{in}[k]+\mu\,\text{in}[k{+}1]
+\qquad\qquad
+\text{out}[q]=\sum_{n=0}^{31}c_n(\mu)\,\text{in}[k{-}15{+}n]$$
+
+<div style="font-size:0.85em">
+
+2-tap baseline (left) and the 32-tap polyphase sinc (right), taps spanning $k{-}15\ldots k{+}16$ so
+tap $n$ sits at offset $n-15-\mu$, DC-normalised: $c_n(\mu)=\operatorname{sinc}(n-15-\mu)\big/\sum_m \operatorname{sinc}(m-15-\mu)$.
+Only $(k,\mu)$ is derived differently — so an interpolator upgrade applies to both passes.
+
+</div>
 ---
-
-
-
-That matters because τ is row-invariant: the same 705-entry table for all 8192 rows. Search in k_x units instead and the source abscissa K_R[r]·τ[m] changes every row, so you'd rebuild or rescale the whole table 8192 times.
-
-One wrinkle worth knowing: the code doesn't literally divide. sar_coeffs_pass2_range brackets in k_x — SRC(k) = kr*tan_s[k] against KC[q] — and forms μ = (q − x0)·inv with inv = s_inv_tan[k]·(1/kr). Expand it and you get (u − τ[k])/(τ[k+1] − τ[k]), identical to the slide. The rearrangement is the point: s_inv_tan[k] = 1/(τ[k+1] − τ[k]) stays line-invariant and precomputed once per scene, so the row costs one divide (1/kr) instead of one per query
-
----
-
 # ③ Window · ④ FFT · ⑤ Detect
 
 **Window** — separable Hamming, suppressing sidelobes from the finite aperture:
@@ -181,8 +168,7 @@ It is what the polar-to-rectangular resampling exists to construct — the FFT i
 $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
-
-# The Python reference — and what runs where
+# Python pseudo code
 
 ```python
 # ---- HOST ONLY: ingest + geometry (never on the board) -------------------
@@ -210,6 +196,11 @@ ya, ea = fft_pass_bfp(yr.T)                    # corner-turn, FFT-2
 img    = detect_fixed(ya.T)                    # |z| -> uint16   OUT
 ```
 
+<!-- name of actual python files -->
+
+---
+# Python processing stages
+
 | stage | where it runs today |
 |---|---|
 | CPHD read, geometry tables, int16 quantise | **host only** — the board is handed `SIG` + small tables |
@@ -218,10 +209,9 @@ img    = detect_fixed(ya.T)                    # |z| -> uint16   OUT
 
 The middle block is not a model *of* the design — it is a **bit-accurate mirror**: same int16
 truncation, same Q15 weights, same block-floating-point exponents. That is what makes it usable as
-the reference the board is scored against.
+the reference to score the board against.
 
 ---
-
 # Verification — compare like with like
 
 The metric that matters is a **value-level diff against a reference running the same arithmetic**.
@@ -245,7 +235,8 @@ align = solve_orientation(board, py)  # board[i,j] = py.T[(-i)%N, (-j)%N]
 assert corr(board, py[align]) high AND diagonal beats off-diagonal
 ```
 
-**Four traps this exists to catch**, each of which has actually happened here:
+---
+# **Four traps this exists to catch**, each of which has actually happened here:
 
 | trap | what it looked like | caught by |
 |---|---|---|
@@ -255,10 +246,7 @@ assert corr(board, py[align]) high AND diagonal beats off-diagonal
 | reference mismatch | 32-tap scored against a 2-tap golden | run the model with the *same* kernel |
 
 ---
-
-# Reference output — Centerfield, Utah
-
-![w:620](img/centerfield_python.png)
+# Reference data — Centerfield, Utah
 
 <div style="font-size:0.82em">
 
@@ -279,8 +267,12 @@ assert corr(board, py[align]) high AND diagonal beats off-diagonal
 
 </div>
 
-Resolution is $1/\text{k-space span}$; pixel spacing is $1/(N\cdot\Delta k)$ — the grid is
-**oversampled ~1.9×** relative to resolution, which is why the image is not aliased.
+Resolution is $1/\text{k-space span}$; pixel spacing is $1/(N\cdot\Delta k)$ — the grid is **oversampled ~1.9×** relative to resolution, which is why the image is not aliased.
+
+---
+# Image formed from python processing
+
+![w:520](img/centerfield_python.png)
 
 ---
 # Part 3 — MPFS250T Architecture and Resources
@@ -290,7 +282,6 @@ Resolution is $1/\text{k-space span}$; pixel spacing is $1/(N\cdot\Delta k)$ —
 Every fabric operator reaches DDR through the FIC_0 port.
 
 ---
-
 # Resource constraints on the MPFS250T
 
 A 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device does not have enough memory to process fully on chip:
@@ -315,7 +306,6 @@ The engineering approach is therefore *fewer passes over the data*, not only fas
 ![w:900](../img/sar_ddr_map.svg)
 
 ---
-
 # DDR memory map concept
 
 SIG and SCRATCH are 256 MB as the complex data is 4 B/sample. `OUT` is half the size of the others because the detected image is **uint16**, 2 B/px, plus a small geometry/telemetry block .  
@@ -331,13 +321,11 @@ SIG and SCRATCH are 256 MB as the complex data is 4 B/sample. `OUT` is half the 
 **Buffers are 256 MB apart on purpose.** An in-place FFT stalls: the DMA is still flushing transform *t* while the feeder pulls *t+1* over the shared interconnect, CoreFFT drops `BUF_READY` and the pipeline locks. Ping-ponging `SCRATCH`↔`SIG` keeps read and write on  **separate 256 MB pages** — validated on silicon after an in-place build hung at transform 1.
 
 ---
-
 # Fabric-to-DDR routing
 
 ![w:1000](../img/sar_fabric_ddr_routing.svg)
 
 ---
-
 # Optimisation 1 — maximise AXI beat packing
 
 ![w:1080](diagrams/fig-axi-packing.drawio.svg)
@@ -352,7 +340,6 @@ absorbs the offset into the sample **index**, discarding one leading word per ro
 > at 99.99 % packing efficiency.
 
 ---
-
 # CoreFFT streaming chain
 
 ![w:1000](../img/sar_corefft_chain.svg)
@@ -362,14 +349,12 @@ absorbs the offset into the sample **index**, discarding one leading word per ro
 unloader is where detect is fused. Two such chains run in parallel, splitting rows.
 
 ---
-
 # Dataflow — the unfused pipeline
 
 ![w:1150](diagrams/fig-sar-dataflow-unfused.drawio.svg)
 
 
 ---
-
 # Optimisation 2 — fusing operator stages
 
 Write the pipeline as a composition of operators on the $8192^2$ array:
@@ -387,13 +372,11 @@ If done naively, **every operator is one pass over 256 MB** — eight passes, an
 | $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
 
 ---
-
 # Dataflow after fusing operators
 
 ![w:1050](diagrams/fig-sar-dataflow.drawio.svg)
 
 ---
-
 # Stage fusion — mathematical equivalent
 
 Four stages have **no independent pass** over DDR. Each fusion is justified by an algebraic
@@ -409,7 +392,6 @@ identity, not by convenience:
 By fusing, the 8 conceptual stages become 5 full-frame DDR passes, and four of them — window, azimuth gather, detect, CT#2 — does not incur extra DDR traffic. Only the two FFTs and the two transposes, the operators that are *not* local, still need passes of their own.
 
 ---
-
 # Optimisation 3 — coefficient generation on fabric
 
 Per line the 2-tap gather needs $(k,\mu)$ for all 8192 outputs — **32 KB `idx` + 16 KB `wq`**.
@@ -421,7 +403,6 @@ $$v \;=\; \bigl((Q[q]\cdot A) \gg S\bigr) + B,\qquad k \;=\; v \gg 24,\qquad \mu
 with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalars per line**, not 8192 coefficients. The CPU writes 3 registers; the fabric generates the rest.
 
 ---
-
 # Resource utilisation and timing closure
 
 | resource | used | device | % | note |
@@ -447,7 +428,6 @@ path, added logic and congestion degraded an existing one. A 3 ps margin is a pl
 rather than a design margin; the durable fix is to pipeline that multiplier.
 
 ---
-
 # Pipeline timing — where the 14.17 s goes
 
 Measured on Centerfield (5,634 × 4,319 → 8192 grid), both 32-tap sinc interpolators armed.
@@ -469,7 +449,6 @@ The 0.78 s came from a memory-map fix, not the interpolator: a coefficient table
 across `SAR_CWRK`, the multi-hart coefficient-worker region that paces FFT-1.
 
 ---
-
 # Correctness — how the fabric build is trusted
 
 Fusion and fixed point both change the arithmetic, so *matching the Python* has to be proven,
@@ -483,7 +462,6 @@ not assumed:
   pass 1 measured **99.19 % exact** against the model on silicon.
 
 ---
-
 # The interpolation variant — 32-tap sinc
 
 The 2-tap kernel is cheap but lossy where this data lives (≈ 97.8 % of Nyquist):
@@ -501,7 +479,6 @@ Cost: 32 banks (mod-32 banking makes each bank hit exactly once → single-port)
 a 5-level pipelined adder tree. **Resources fit; timing is the risk** at 2.6 % slack.
 
 ---
-
 # Realised bandwidth — the bus is *not* the limit any more
 
 FIC_0 is 64-bit @ 100 MHz ≈ **800 MB/s**. Bytes actually moved per frame, against measured stage time:
@@ -520,7 +497,6 @@ transform-clock bound, not bandwidth bound. The busiest arrow is the corner-turn
 that is neither fusable nor local.
 
 ---
-
 # Summary
 
 | | |

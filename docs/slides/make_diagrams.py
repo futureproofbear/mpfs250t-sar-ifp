@@ -667,36 +667,42 @@ def fig_sar_dataflow(out):
 
 
 def fig_sar_dataflow_unfused(out):
-    """The same eight operators, each as its own DDR pass -- what fusion is measured against."""
-    d = Diagram(1180, 520, "One frame -- the unfused pipeline", draw_title=False)
-    d.note("t", 24, 14, 1130, 34,
-           "Eight conceptual stages. Written naively, each reads a full frame from DDR and writes "
-           "one back.", fs=13)
+    """The same operators, unfused -- drawn in fig-sar-dataflow's grammar for direct comparison."""
+    d = Diagram(1180, 520, "One frame -- unfused", draw_title=False)
+    d.note("t", 24, 12, 1130, 20,
+           "Eight operators, each reading a full frame from DDR and writing one back.", fs=13)
 
-    S = [("range\nresample", "fab"), ("corner-turn", "fab"), ("azimuth\nresample", "fab"),
-         ("window", "fab"), ("FFT-1", "ip"), ("corner-turn #2", "fab"),
-         ("FFT-2", "ip"), ("detect", "fab")]
-    for i, (lab, st) in enumerate(S):
-        col, row = i % 4, i // 4
-        x, y = 34 + col * 288, 74 + row * 150
-        d.box("m%d" % i, x, y, 116, 56, "DDR", "mem", fs=12)
-        d.box("s%d" % i, x + 128, y, 132, 56, lab, st, fs=12, bold=True)
-        d.edge("m%d" % i, "s%d" % i)
-        # each stage writes its result straight back to DDR -- that write is the other half of the
-        # pass, and is what fusion later removes. The final stage's write lands in OUT.
-        d.note("w%d" % i, x + 128, y + 58, 132, 16,
-               "-> OUT" if i == len(S) - 1 else "-> DDR", fs=10.5)
+    ROW = [(("SIG\nphase history", "mem"), ("range\nresample", "fab"), ("SCRATCH", "mem"),
+            ("corner-turn", "fab"), ("SIG", "mem")),
+           (("SIG", "mem"), ("azimuth\nresample", "fab"), ("SCRATCH", "mem"),
+            ("window", "fab"), ("SIG", "mem")),
+           (("SIG", "mem"), ("FFT-1", "ip"), ("SCRATCH", "mem"),
+            ("corner-turn #2", "fab"), ("SIG", "mem")),
+           (("SIG", "mem"), ("FFT-2", "ip"), ("SCRATCH", "mem"),
+            ("detect", "fab"), ("OUT\n8192 x 8192", "mem"))]
+    W = [126, 146, 126, 146, 126]
+    for r, cells in enumerate(ROW):
+        y = 50 + r * 90
+        x = 24
+        ids = []
+        for c, (lab, st) in enumerate(cells):
+            nid = "n%d_%d" % (r, c)
+            d.box(nid, x, y, W[c], 52, lab, st, fs=11,
+                  bold=(r == 3 and c == 4) or (r == 0 and c == 0))
+            ids.append(nid)
+            x += W[c] + 24
+        for a, b in zip(ids, ids[1:]):
+            d.edge(a, b)
+        d.note("p%d" % r, 806, y + 16, 344, 20,
+               "passes %d, %d   --   2 x 256 MB" % (2 * r + 1, 2 * r + 2), fs=11)
 
-    d.note("n", 24, 330, 1130, 56,
-           "8 stages  ->  8 full-frame DDR passes.   At 256 MB a frame and ~800 MB/s across FIC_0, "
-           "the bus alone sets the floor:\neach pass is a read and a write, so the traffic -- not "
-           "the arithmetic -- is what the schedule is made of.", fs=12)
-    d.note("n2", 24, 398, 1130, 76,
-           "None of these operators is WRONG. The problem is that four of them are POINTWISE or "
-           "pure ADDRESSING -- window, azimuth gather, detect, and the second transpose -- so "
-           "spending a whole 256 MB round trip on each is\npaying bus time for work that could ride "
-           "along inside a pass that is already moving the data. That is what the next slide "
-           "removes.", fs=12)
+    d.box("sum", 24, 416, 1130, 42,
+          "8 operators -> 8 full-frame DDR passes = ~2.1 GB per frame. At FIC_0's ~800 MB/s the "
+          "bus alone sets the floor.", "bad", fs=12)
+    d.note("f", 24, 466, 1130, 40,
+           "None of these operators is wrong. FOUR are pointwise or pure addressing -- window, "
+           "azimuth gather, detect, CT#2 -- so each pays a 256 MB round trip for work that could "
+           "ride inside a pass already moving the data. That is what the next slide removes.", fs=11)
     return d.write(out / "fig-sar-dataflow-unfused.drawio.svg")
 
 

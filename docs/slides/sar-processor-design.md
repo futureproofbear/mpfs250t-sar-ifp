@@ -49,26 +49,6 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
 
 ---
 
-# Resource constraints on the MPFS250T
-
-A 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device does not have enough memory to process fully on chip:
-
-| on-chip memory | MPFS250T |
-|---|---|
-| LSRAM | 812 × 20 Kb = **~2.0 MB** |
-| µSRAM | 2,352 × 768 b = **~0.2 MB** |
-| MSS L2 (as scratchpad) | **2 MiB** |
-| **Total** | **~4.4 MB — about 1/58th of one frame** |
-
-No processing stage can be held on chip, and every stage needs to stream through DDR. This constraint drives the whole processing architecture:
-- the design is **bandwidth-bound, not compute-bound**
-- the fabric↔DDR port (FIC_0, 64-bit @ 100 MHz ≈ **800 MB/s**) is the scarce resource
-- **every DDR round-trip costs more than any arithmetic optimisation**
-
-The engineering approach is therefore *fewer passes over the data*, not faster maths.
-
----
-
 # Part 2 — The Python reference pipeline
 
 <br>
@@ -85,10 +65,20 @@ The engineering approach is therefore *fewer passes over the data*, not faster m
 
 ![w:1020](diagrams/fig-sar-kspace.drawio.svg)
 
-Middle panel — **pass 1** resamples every pulse onto the common grid $K_R$. Because $p_r[i]$ is a
-projection onto the mean look direction, $k_r$ is the $k_y$ component, so this makes $k_y$ uniform. $k_x$ still carries an angular increment, leaving a **trapezoid**.
+**$(k_x,k_y)$ is the spatial-frequency plane** — the Fourier domain of the ground scene, in cycles
+per metre. A pulse at aspect angle $\phi_i$ measuring radial frequency $k$ contributes one sample at
+
+$$k_y = k\cos\phi_i \quad\text{(along the mean look direction)},\qquad
+  k_x = k\sin\phi_i \quad\text{(across it)}$$
+
+so a single pulse traces a **radial spoke** at angle $\phi_i$ — hence *polar* format. The 2-D FFT
+that forms the image requires samples on a **rectangular** $(k_x,k_y)$ lattice, and that mismatch is
+the entire reason both resample passes exist.
+
+Middle panel — **pass 1** resamples every pulse onto the common grid $K_R$. Since $p_r[i]=\cos\phi_i$
+projects onto the mean look direction, $k_r$ *is* the $k_y$ component, so this makes $k_y$ uniform.
+$k_x$ still carries an angular increment, leaving a **trapezoid**.
 Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_x$ uniform too.
-<!--Not clear what is k_y and k_x-->
 ---
 
 # ① Range resample — keystone, fast-time
@@ -192,18 +182,141 @@ $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
 
+# The Python reference — and what runs where
+
+```python
+# ---- HOST ONLY: ingest + geometry (never on the board) -------------------
+reader  = open_phase_history(cphd)             # CF8 complex phase history
+tables  = prepare_tables(reader, meta)         # f0, df, pr, tan_phi, KR, KC, window
+sig     = reader.read_chip(...)                # 5634 x 4319 complex64
+sig_i16 = quantise(sig)                        # -> int16 I/Q, the board's SIG buffer
+
+# ---- MIRRORS THE BOARD, op for op (silicon_emulator.py) ------------------
+for i in range(M):                             # PASS 1  range, per pulse
+    kr        = (2*pr[i]/c) * (f0[i] + arange(N)*df[i])
+    idx, wq   = interp_coeffs(KR, kr)          # closed form: uniform source grid
+    scratch[order[i]] = gather(sig_i16[i], idx, wq)     # 2-tap lerp or 32-tap sinc
+
+sig_t = scratch.T                              # corner-turn
+
+for j in range(Np):                            # PASS 2  azimuth, per range bin
+    src      = KR[j] * tan_s                   # NON-uniform abscissa
+    idx, wq  = interp_coeffs(KC, src)          # merge scan, not a division
+    g2[j]    = gather(sig_t[j], idx, wq)
+
+g2w    = window_fixed(g2)                      # separable Hamming, Q15
+yr, er = fft_pass_bfp(g2w)                     # FFT-1 + block-floating-point renorm
+ya, ea = fft_pass_bfp(yr.T)                    # corner-turn, FFT-2
+img    = detect_fixed(ya.T)                    # |z| -> uint16   OUT
+```
+
+| stage | where it runs today |
+|---|---|
+| CPHD read, geometry tables, int16 quantise | **host only** — the board is handed `SIG` + small tables |
+| both gathers, window, FFTs, corner-turns, detect | **emulates the board**, bit-accurate |
+| `interp_coeffs` | **both** — on silicon this is `sar_coeffgen` in fabric |
+
+The middle block is not a model *of* the design — it is a **bit-accurate mirror**: same int16
+truncation, same Q15 weights, same block-floating-point exponents. That is what makes it usable as
+the reference the board is scored against.
+
+---
+
+# Verification — compare like with like
+
+The metric that matters is a **value-level diff against a reference running the same arithmetic**.
+Correlation against a *different* implementation cannot separate "wrong" from "different".
+
+```python
+# 1. board-free: RTL vs a pure-integer model of the same datapath
+gen_*_vectors.py  ->  tb_*.v          # ModelSim: 0 mismatching beats or FAIL
+check_coeffgen_fixed.py               # model byte-identical to the C, both source orders
+
+# 2. is the bench even testing the shipped module?
+check_tb_params.py                    # bench params == what synthesis builds, or FAIL
+
+# 3. non-vacuity: does the test actually exercise the path?
+for mutation in [...]: assert bench_fails(mutation)
+
+# 4. silicon: same interpolator on both sides
+board = EROI(crop)                    # dump from OUT over JTAG
+py    = silicon_emulator(cphd, range_sinc=..., az_sinc=...)
+align = solve_orientation(board, py)  # board[i,j] = py.T[(-i)%N, (-j)%N]
+assert corr(board, py[align]) high AND diagonal beats off-diagonal
+```
+
+**Four traps this exists to catch**, each of which has actually happened here:
+
+| trap | what it looked like | caught by |
+|---|---|---|
+| bench on the wrong parameters | 16/16 cases pass, silicon image wrong | `check_tb_params.py` |
+| vacuous test | mutation changes nothing | mutation sweep |
+| orientation mismatch | corr 0.005 — reads as "broken" | calibrate on a known-good pair first |
+| reference mismatch | 32-tap scored against a 2-tap golden | run the model with the *same* kernel |
+
+---
+
+# Reference output — Centerfield, Utah
+
+![w:620](img/centerfield_python.png)
+
+<div style="font-size:0.82em">
+
+| the dataset | |
+|---|---|
+| source | Umbra open data, `s3://umbra-open-data-catalog/sar-data/tasks/` |
+| task / collect | **Centerfield, Utah** — `2023-10-10-16-57-44_UMBRA-04` |
+| task UUID | `c0dbd830-e863-42c5-97d0-2cfd291bcb2a` |
+| file | `..._CPHD.cphd`, 188 MB, CF8 complex phase history |
+
+| input | | output | |
+|---|---|---|---|
+| pulses × samples | 5,634 × 4,319 | grid | 8192 × 8192 uint16 |
+| bandwidth | 113.6 MHz | size | 134 MB |
+| sample spacing | 26.3 kHz | resolution | 1.41 m rg × 1.73 m cr |
+| | | pixel spacing | 0.74 m rg × 1.19 m cr |
+| | | scene extent | 6.1 km × 9.7 km |
+
+</div>
+
+Resolution is $1/\text{k-space span}$; pixel spacing is $1/(N\cdot\Delta k)$ — the grid is
+**oversampled ~1.9×** relative to resolution, which is why the image is not aliased.
+
+---
 # Part 3 — MPFS250T Architecture and Resources
 
 ![w:1080](diagrams/fig-sar-mpfs.drawio.svg)
 
+Every fabric operator reaches DDR through the FIC_0 port.
+
 ---
-# DDR memory map — the allocation
+
+# Resource constraints on the MPFS250T
+
+A 8192 × 8192 complex frame is **256 MB** at 4 B/sample. The whole device does not have enough memory to process fully on chip:
+
+| on-chip memory | MPFS250T |
+|---|---|
+| LSRAM | 812 × 20 Kb = **~2.0 MB** |
+| µSRAM | 2,352 × 768 b = **~0.2 MB** |
+| MSS L2 (as scratchpad) | **2 MiB** |
+| **Total** | **~4.4 MB — about 1/58th of one frame** |
+
+No processing stage can be held on chip, and every stage needs to stream through DDR. This constraint drives the whole processing architecture:
+- the design is **bandwidth-bound, not compute-bound**
+- the fabric↔DDR port (FIC_0, 64-bit @ 100 MHz ≈ **800 MB/s**) is the scarce resource
+- **every DDR round-trip costs more than any arithmetic optimisation**
+
+The engineering approach is therefore *fewer passes over the data*, not only fast computations.
+
+---
+# DDR memory allocation
 
 ![w:900](../img/sar_ddr_map.svg)
 
 ---
 
-# DDR memory map and why it is laid out this way
+# DDR memory map concept
 
 SIG and SCRATCH are 256 MB as the complex data is 4 B/sample. `OUT` is half the size of the others because the detected image is **uint16**, 2 B/px, plus a small geometry/telemetry block .  
 
@@ -223,22 +336,20 @@ SIG and SCRATCH are 256 MB as the complex data is 4 B/sample. `OUT` is half the 
 
 ![w:1000](../img/sar_fabric_ddr_routing.svg)
 
-Every fabric master reaches DDR through **one** FIC_0 port. The interconnect is single-outstanding,
-so concurrency between masters buys far less than it appears to — measured overlap between
-independent kernels on the shared port is ~81%, not 2×.
-
 ---
 
-# AXI beat packing — why the gather reads full-width
+# Optimisation 1 — maximise AXI beat packing
 
 ![w:1080](diagrams/fig-axi-packing.drawio.svg)
 
-Every remaining DDR stream runs at the full 64-bit width. A pulse row is `N·4` bytes with `N` odd,
+Every DDR stream runs at the full 64-bit width. A pulse row is `N·4` bytes with `N` odd,
 so alternate rows start mid-beat — the gather still reads `AxSIZE 3'd3` from `IN_BASE & ~7` and
 absorbs the offset into the sample **index**, discarding one leading word per row.
 
-The coefficient streams were not made faster — they were **deleted**. `idx` and `wq` are generated
-on fabric from three scalars per line, so 48 KB per line no longer crosses DDR at all.
+> The figure plots the **shipped** per-line traffic, so it already includes Optimisation 3: `idx`
+> and `wq` show **0 beats** because those streams were later deleted entirely, not merely packed.
+> The point *this* slide makes is the two streams that remain — `in` and `out` — both run 8 B/beat
+> at 99.99 % packing efficiency.
 
 ---
 
@@ -256,29 +367,16 @@ unloader is where detect is fused. Two such chains run in parallel, splitting ro
 
 ![w:1150](diagrams/fig-sar-dataflow-unfused.drawio.svg)
 
-Eight operators, eight full-frame DDR passes. Nothing here is wrong — it is just paying bus time
-for work that could ride along inside a pass already moving the data.
 
 ---
 
-# Dataflow — one frame, as built
-
-![w:1150](diagrams/fig-sar-dataflow.drawio.svg)
-
-Each arrow is a full pass over 256 MB. Eight stages become **five** passes; window, azimuth gather
-and detect add no traffic at all, and CT#2 hides under FFT-2. The count of arrows is the design.
-
----
-
-# Mapping onto fabric
+# Optimisation 2 — fusing operator stages
 
 Write the pipeline as a composition of operators on the $8192^2$ array:
 
 $$I \;=\; D\,\circ\,F_2\,\circ\,T\,\circ\,F_1\,\circ\,W\,\circ\,G_{az}\,\circ\,T\,\circ\,G_{rg}\;(S)$$
 
-If done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s. Each pass costs at least 0.6 s of data transfer.
-
-**Design approach.** An operator can be **fused** into a neighbouring streaming pass iff it is local in the streaming index.
+If done naively, **every operator is one pass over 256 MB** — eight passes, and at FIC_0's ~800 MB/s. Each pass costs at least 0.6 s of data transfer. The design approach is to **fuse** any operator into a neighbouring streaming pass iff it is local in the streaming index.
 
 | operator | form | local? |
 |---|---|---|
@@ -288,6 +386,11 @@ If done naively, **every operator is one pass over 256 MB** — eight passes, an
 | $F$ FFT | every output depends on **all** inputs | **no** — needs its own pass |
 | $T$ transpose | output $(r,c)$ from input $(c,r)$ | **no** — the access pattern *is* the cost |
 
+---
+
+# Dataflow after fusing operators
+
+![w:1050](diagrams/fig-sar-dataflow.drawio.svg)
 
 ---
 
@@ -303,27 +406,19 @@ identity, not by convenience:
 | **detect → FFT-2 unloader** | $D$ is pointwise on $F_2$'s output, so $\lvert z\rvert$ is computed as samples drain. Reading 256 MB back merely to square-and-add would be pure waste. |
 | **corner-turn #2 ∥ FFT-2** | $F_2=\bigoplus_r F_2^{(r)}$ — rows are **independent**, so strip $s$ may be transposed while strip $s-1$ transforms. Overlap, not elimination. |
 
-**What it buys.** Eight conceptual stages become **five** full-frame DDR passes, and four of them —
-window, azimuth gather, detect, CT#2 — cost **zero** extra traffic. Only the two FFTs and the two
-transposes, the operators that are *not* local, still need passes of their own.
+By fusing, the 8 conceptual stages become 5 full-frame DDR passes, and four of them — window, azimuth gather, detect, CT#2 — does not incur extra DDR traffic. Only the two FFTs and the two transposes, the operators that are *not* local, still need passes of their own.
 
 ---
 
-# Coefficient generation — the largest single win
+# Optimisation 3 — coefficient generation on fabric
 
 Per line the 2-tap gather needs $(k,\mu)$ for all 8192 outputs — **32 KB `idx` + 16 KB `wq`**.
-Computing that on the MSS and publishing it to DDR cost more than the gather itself: bus
-telemetry showed **~40 %** of the 5.21 s range gather was the port sitting *idle*, waiting on CPU
-coefficients.
+Computing that on the MSS and publishing it to DDR cost more than the gather itself: bus telemetry showed **~40 %** of the range gather was the port sitting *idle*, waiting on CPU coefficients.
 
 Because the range grid is uniform, $(k,\mu)$ is closed-form in fixed point:
 
-$$v = \frac{(Q[q]\cdot A) \gg S}{} + B,\qquad k = v \gg 24,\qquad \mu = v[23{:}9]$$
-
-with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalars per line**, not
-8192 coefficients. The CPU writes 3 registers; the fabric generates the rest.
-
-**5.21 s → 3.74 s**, and the coefficient traffic disappears from DDR entirely.
+$$v \;=\; \bigl((Q[q]\cdot A) \gg S\bigr) + B,\qquad k \;=\; v \gg 24,\qquad \mu \;=\; v[23{:}9]$$
+with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalars per line**, not 8192 coefficients. The CPU writes 3 registers; the fabric generates the rest.
 
 ---
 

@@ -122,9 +122,10 @@ There are two paths. **(a) is the current, preferred path** — read
 for the full mailbox reference; the commands below are the exact ones it documents. **(b)** is the
 fallback for a board whose eMMC has not been provisioned yet.
 
-### 4.1 Path A — eMMC boot-load (preferred, ~81.5 s per run)
+### 4.1 Path A — eMMC boot-load (preferred, ~82-225 s per run depending on scene size)
 The CPHD scene is provisioned onto the board's soldered eMMC **once**; every subsequent run loads it
-from eMMC into DDR in about 81.5 s instead of a multi-hour JTAG transfer.
+from eMMC into DDR at the eMMC read rate (~1.5 MB/s) instead of a multi-hour JTAG transfer — measured
+**81.5 s** for Centerfield (97.5 MB) and **225 s** for the 268 MB NDSU scene.
 
 **One-time provisioning** (only if the eMMC INPUT partition is not already populated with your scene):
 ```bash
@@ -132,9 +133,29 @@ from eMMC into DDR in about 81.5 s instead of a multi-hour JTAG transfer.
 python mpfs/host/emmc_pack.py --stage <jtag_stage_deci1> --out emmc_input.img
 python -c "import zlib;print(hex(zlib.crc32(open('emmc_input.img','rb').read())&0xffffffff))"  # note the CRC
 
-bash mpfs/host/run_emmc_restore.sh                          # ~3 h: JTAG image -> DDR + on-hart CRC32 check
-bash mpfs/host/run_emmc_prov_iso.sh 97553408 1100000 0x88000000   # ~16 min: DDR -> eMMC INPUT + verify
+bash mpfs/host/run_emmc_restore.sh                          # JTAG image -> DDR (~9 KB/s; hours)
+bash mpfs/host/run_emmc_prov_iso.sh <SPAN_BYTES> <SLEEP_MS> 0x88000000   # DDR -> eMMC INPUT + verify
 ```
+Both steps scale with image size — worked examples:
+
+| scene | SPAN_BYTES | restore | SLEEP_MS | provision |
+|---|---|---|---|---|
+| Centerfield | 97553408 | ~3 h | 1100000 | ~16 min |
+| NDSU | 267885056 | 8.3 h | 3300000 | ~49 min |
+
+`SLEEP_MS` is a blind `monitor sleep`, **not** a poll: it must exceed write + readback or the hart is
+halted mid-write. Budget `span/0.133 MB/s` + `span/1.53 MB/s` and round up.
+
+> **The restore's closing CRC line is unreliable — do not act on it.** `run_emmc_restore.sh` ends by
+> reading `MBX_CMD_CRC32`, whose result is not L2-flushed, so it can print
+> `RESTORE MISMATCH: DDR image CRC != host -- DO NOT provision` after a perfectly good transfer (seen
+> 2026-08-01: an 8.3 h NDSU restore reported `0x00000000` and was byte-perfect). Confirm the `SARI` magic
+> with `run_ddr_peek.sh`, then let the **provision's** readback CRC be the gate — it is flushed, covers
+> every byte, and must equal the host image CRC (`crcE == crcR == <host CRC>`).
+>
+> Note also that `run_ddr_peek.sh` honours its address argument only on the `head` line; its `mid` and
+> `near-end` probes are hardcoded for the 97 MB Centerfield image, so on a larger scene it reports
+> "RESTORE LANDED" while never probing the tail.
 
 **Every run after that** — from `mpfs/host`:
 ```bash
@@ -378,10 +399,14 @@ Expect `tab[0] = 1 (expect 1)`, `tab[15] = 32767 (expect 32767, the peak)`. Thos
 wrong tap order or a byte swap on sight: at `μ = 0` the kernel is `sinc(n−15)`, exactly zero at
 every integer offset except `n = 15`.
 
-> **Seconds, not the ~15 minutes 6.1a takes.** The range table has to be pushed one AXI4-Lite write
-> at a time (8192 of them) because `sar_resample_v`'s table sits behind a CIC register. The azimuth
-> table does not: the firmware reads it from DDR at `0xB0059200` and pushes it into **both** feeder
-> chains itself, on-chip, so the host only lands a 16 KB `restore`.
+> **Seconds — and so is 6.1a now.** Both tables use the same fast path: the host lands a 16 KB
+> `restore` into DDR and the firmware pushes it on-chip. The azimuth table is read from
+> `SAR_AZSINC_TAB_ADDR = 0xB0060000` and goes into **both** feeder chains; the range table is read
+> from `SAR_SINC_TAB_ADDR = 0xB0064000` into `sar_resample_v`.
+>
+> (The ~15 minute figure belongs to the superseded `run_sinc_table_load.sh`, which pushed the range
+> table one AXI4-Lite write at a time — 8192 JTAG round trips. `run_rsinc_fast_load.sh` replaced it;
+> see the note in 6.1a.)
 >
 > Same ordering trap as 6.1a — run it **before** the PIPE that should use it, and re-run it after
 > every power-cycle (the DDR blob, the mode word at `0xB0059168`, and the fabric-RAM copies are all

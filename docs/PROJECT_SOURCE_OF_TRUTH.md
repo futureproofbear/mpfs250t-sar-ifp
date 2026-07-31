@@ -43,13 +43,18 @@
 >    longer needed. Until then: this repo is authoritative for RTL; the sibling is legacy.
 > **On-board eMMC pipeline (M1–M3) PROVEN on silicon** — the scene lives on the board eMMC and is loaded +
 > focused entirely on-board, retiring the recurring ~3 h JTAG scene load: **M1** bring-up (write→read→CRC);
-> **M2** provision a CPHD scene to the INPUT partition (`crcE==crcR==0x58d0ea66`, Centerfield 97.6 MB); **M3**
+> **M2** provision a CPHD scene to the INPUT partition (currently the **NDSU production scene**, 267.9 MB,
+> `crcE==crcR==0x188e2e53` == host image CRC, provisioned 2026-08-01 and REPLACING the earlier Centerfield
+> 97.6 MB / `0x58d0ea66`); **M3**
 > boot-load eMMC→DDR (81.5 s; 10 segments → role addresses + JOB reconstruct), run `sar_form_image` end-to-end
 > (**SAR_SEQ_OK**, no stage timeout), confirm a coherent focused SAR image via an ROI crop, and persist the
 > output to the eMMC OUTPUT partition (commit-last, crash-safe). LOAD/PIPE/crop proven; the commit-last
 > SAVEOUT + a VERIFY_OUT command are built and await a reflash + re-run next board session. eMMC read
-> ~1.5 MB/s (scene load 81.5 s), write ~0.13 MB/s; **host↔PC dump is still ~3 h** (FlashPro6 JTAG ~9 KB/s is
-> the bottleneck, not the eMMC) — verify via small ROI crops.
+> ~1.5 MB/s (scene load 81.5 s for Centerfield, 225 s for the 268 MB NDSU scene), write ~0.13 MB/s;
+> **host↔PC dump is still hours** — the FlashPro6 JTAG link is the bottleneck, not the eMMC. Measured
+> 2026-08-01: dump READ **6.8 KB/s** (2 MB crop in 308-314 s, reproduced twice), so the full 128 MB OUT
+> frame is **~5.2 h**; JTAG WRITE is ~9 KB/s (268 MB restore in 8.3 h). Tiling does NOT help — 6.8 KB/s is
+> the link itself, so tiling buys only restartability. Verify via small ROI crops.
 > **FFT engine (corrected):** the range/azimuth FFTs run on the **fabric CoreFFT** chain
 > (`fft_feeder → gearbox → CoreFFT → fft_unloader`), selected at runtime by **`SAR_FFTMODE`
 > @`0xB0059110` = 1**, which the pipeline flow scripts (`flow_pipe_*.gdb`) set before PIPE. CPU

@@ -95,6 +95,13 @@ FFT-1 4.646 s · FFT-2 5.781 s.
 > 739 ms of FFT-1 as well as corrupting the table between runs. Tables now live at `0xB0060000`
 > (azimuth) and `0xB0064000` (range), checked as SPANS against the whole knob block.
 
+**Production scene (2026-08-01).** The NDSU collect (`2023-11-10-16-16-44_UMBRA-04`, Fargo ND, scene
+centre 46.9043 N / 96.8288 W) was boot-loaded from the board's own eMMC and focused end-to-end with no host
+data transfer: **15.738 s** — resample 4.311 s · range-FFT 5.766 s · azimuth-FFT 5.661 s (window and detect
+fused, 0). Input is 8,167 × 8,192, which is **2.75× Centerfield's 24.3 M samples** for only **+1.57 s**,
+because both transforms are fixed at 8192² and do not scale with the scene; only the resample does. This run
+is the first at a full-width `N = 8192` line and sits just over the 15 s budget.
+
 **Timing closure (2026-07-31).** Fabric 100 MHz setup slack **+0.924 ns** (9.2 %), CoreFFT 12.5 MHz
 +68.413 ns, multi-corner `VIOLRPT` clean on setup and hold. Getting both 32-tap sinc kernels to close
 required pipelining `sar_fp32_mul` from 2 to 3 stages: with both kernels present `COEFG`'s fp32
@@ -766,9 +773,16 @@ fields.
 Measured rates (LEGACY mode, 25 MHz, 8-bit, single-block): read 1.5 MB/s, write 0.13 MB/s. Scene
 LOAD is 81.5 s; persisting the 128 MiB OUT image is about 16 min.
 
-What eMMC does and does not solve: it eliminates the recurring 3 h JTAG input load. It does not
-speed host transfer — dumping the full OUT image to the PC is still bound by the FlashPro6 JTAG
-link at roughly 9 KB/s. Keep the image on-card and dump small ROI crops to verify.
+What eMMC does and does not solve: it eliminates the recurring multi-hour JTAG input load (~3 h for
+Centerfield's 97.5 MB, 8.3 h for NDSU's 268 MB). It does not speed host transfer — dumping the full OUT
+image to the PC is still bound by the FlashPro6 JTAG link. Measured 2026-08-01: **read 6.8 KB/s** (a 2 MB
+ROI crop takes 308-314 s, reproduced twice), so the full 128 MB frame is **~5.2 h**. Tiling the dump does
+NOT raise throughput — 6.8 KB/s is the link, so tiling buys only restartability after a failure.
+
+The only real lever is moving fewer bytes: decimate or multilook on-chip before dumping (an 8x block mean
+turns the whole 8192² frame into 1024² = 2 MB, one ~5 min dump instead of 5.2 h), emit `uint8` rather than
+`uint16` where a display product suffices, or pull full resolution only for crops chosen from an overview.
+A genuinely fast full-resolution offload needs a different host link (Ethernet/USB), not the eMMC.
 
 SDMA would speed writes by one to two orders of magnitude but is currently unusable: hart1 runs
 with `MSTATUS_MIE` cleared and `MSS_MMC_sdma_write` completes via the MMC PLIC ISR, so with

@@ -208,7 +208,18 @@ ya, ea = fft_pass_bfp(yr.T)                    # corner-turn, FFT-2
 img    = detect_fixed(ya.T)                    # |z| -> uint16   OUT
 ```
 
-<!-- name of actual python files -->
+<div style="font-size:0.8em">
+
+| what it does | file | entry points |
+|---|---|---|
+| CPHD ingest, geometry tables, int16 quantise, **coefficient generation** | `mpfs/host/serialize_inputs.py` | `serialize()`, `resample_coeffs()`, `interp_coeffs()` |
+| **bit-accurate board mirror** — both gathers, window, FFTs, detect | `mpfs/host/silicon_emulator.py` | `form_image()`, `resample_fixed()`, `apply_fixed()` / `apply_sinc()`, `window_fixed()`, `fft_pass_bfp()`, `detect_fixed()` |
+| contrast stretch / display | `mpfs/host/sar_display.py` | `normal_score()`, `multilook()` |
+
+</div>
+
+The names in the listing above are the **real function names**, not paraphrases — `interp_coeffs`,
+`window_fixed`, `fft_pass_bfp` and `detect_fixed` can be grepped directly.
 
 ---
 # Python processing stages
@@ -254,7 +265,30 @@ assert corr(board, py[align]) high AND diagonal beats off-diagonal
 | vacuous test | mutation changes nothing | mutation sweep |
 | orientation mismatch | corr 0.005 — reads as "broken" | calibrate on a known-good pair first |
 | reference mismatch | 32-tap scored against a 2-tap golden | run the model with the *same* kernel |
-<!-- I think this slide should be about the 16 cases-->
+
+---
+# The verification cases
+
+**25 generated cases across three benches.** Every vector is emitted by the same Python that models
+the datapath, so a bench failure is a real disagreement, not a hand-written expectation drifting.
+
+<div style="font-size:0.8em">
+
+| bench | module under test | cases |
+|---|---|---|
+| `tb_sar_resample.v` | `sar_resample_v` | **4** — real scene lines: `real-L0`, `real-L1`, `real-L2817`, `real-L5633` |
+| `tb_fft_feeder_gather.v` | `fft_feeder_v` + `sar_sinc32_gather` | **9** — `normal`, `zerofill`, `bypass`, `stray`, `descend`, `nowin`, `sinc_in`, `sinc_edge`, `sinc_nowin` |
+| `tb_sar_coeffgen.v` | `sar_coeffgen` | **12** — `asc_real`, `desc_real`, `asc_dense`, `desc_dense`, `stutter`, `edges`, `degen_kr0`, `p1_row0..2`, `p1_dense`, `p1_degen` |
+
+</div>
+
+The resample bench moved from synthetic stimulus to **real scene lines** — a line that actually
+occurs in the Centerfield collect, including the first two (worst-conditioned) and two deep into the
+aperture. Random R-channel gaps and W-channel backpressure run on top of *every* case.
+
+> Counts are read from the generated `tb/*_dims.vh` headers, which are the ground truth — the
+> `gen_*_vectors.py` scripts write them, so a case added in Python cannot silently miss the deck.
+
 ---
 # Reference data — Centerfield, Utah
 
@@ -278,6 +312,14 @@ assert corr(board, py[align]) high AND diagonal beats off-diagonal
 </div>
 
 Resolution is $1/\text{k-space span}$; pixel spacing is $1/(N\cdot\Delta k)$ — the grid is **oversampled ~1.9×** relative to resolution, which is why the image is not aliased.
+
+<div style="font-size:0.82em">
+
+The **production** dataset is a second Umbra collect, held on the board's eMMC and processed
+end-to-end on silicon: **NDSU / Fargo, ND** — `2023-11-10-16-16-44_UMBRA-04`, 590 MB CPHD, cropped
+to 8,167 × 8,192. It fills the 8192 grid almost exactly, where Centerfield pads from 4,319.
+
+</div>
 
 ---
 # Image formed from python processing
@@ -471,17 +513,6 @@ lands *between* samples by up to 29 dB.
 Cost per kernel: 32 banks (mod-32 banking makes each bank hit exactly once → single-port),
 64 MACs/stage, a 5-level pipelined adder tree.
 
-**Both kernels are in the shipping design and verified on silicon.** Timing was the risk and is now
-resolved: the fabric closes at **+0.924 ns**, not the 2.6 % this slide once warned about. The cost
-of getting there was not in the interpolators — see the timing-closure slide.
-
-| on silicon, Centerfield top-left 1024² | corr vs reference | peak |
-|---|---|---|
-| 2-tap lerp | 0.9765 | 3029 |
-| range sinc only | 0.9855 | 3234 |
-| azimuth sinc only | 0.9755 | 3169 |
-| **both** | **0.9846** | 3381 |
-
 <div style="font-size:0.85em">
 
 Read these as *"the design runs"*, **not** as *"sinc is better"*. Every arm is scored against a
@@ -492,17 +523,13 @@ diff against a model running the **same** interpolator.
 </div>
 
 ---
-# Output from the MPFS250T
+# Output — Centerfield formed on the MPFS250T
 
-![w:1000](img/silicon_bothsinc.png)
+![w:700](img/silicon_bothsinc.png)
 
 <div style="font-size:0.85em">
 
-Centerfield **formed on the MPFS250T** — both 32-tap sinc kernels, first run after a power-cycle.
-1024×2048, stitched from two 1024² ROI reads either side of the scene centre: the board stores the
-un-`fftshift`ed transform, so the scene centre sits at the array **corner**, not its middle. Field
-boundaries, roads and bright farm structures; the join is seamless. Gaussian normal-score stretch,
-single-look.
+ Both 32-tap sinc kernels, data extracted from 1024×2048 samples around the scene centre.
 
 | | |
 |---|---|
@@ -513,15 +540,35 @@ single-look.
 
 </div>
 
-> The first attempt at this image came back as diagonal streaks, correlation **0.0017**. The cause
-> was not the interpolator: the range sinc table was being pushed to the fabric *one pass after* the
-> pass that consumes it, so the first run of a fresh boot gathered against an empty table. It hid
-> because a *second* run inherited the previous run's table and looked perfect — the arm that
-> appeared broken was the only one being tested honestly.
+---
+
+# Output — NDSU (Fargo, ND) formed on the MPFS250T
+
+![w:820](img/ndsu_mpfs250t.png)
+
+<div style="font-size:0.8em">
+
+Production dataset, boot-loaded **from the on-board eMMC** — no host data transfer in the run.
+UMBRA-04, 2023-11-10 16:16:45 UTC, X-band 9.60 GHz; scene centre 46.9043 N, 96.8288 W, ground
+footprint 5.65 × 5.63 km. Crop is 1024 × 2048 anchored at the scene centre.
+
+| measured on silicon | | | Centerfield | NDSU |
+|---|---|---|---|---|
+| resample | **4.311 s** | input pulses × samples | 5,634 × 4,319 | **8,167 × 8,192** |
+| range-FFT | **5.766 s** | input samples | 24.3 M | **66.9 M** (2.75×) |
+| azimuth-FFT | **5.661 s** | frame | 14.17 s | **15.74 s** |
+| window / detect | 0 (fused) | eMMC → DDR load | — | 225 s |
+| **total** | **15.738 s** | | | |
+
+</div>
+
+> 2.75× the input for **+1.57 s**. The two transforms are fixed at 8192² and do not scale with the
+> scene; only the resample does. Further budget work has to target the FFTs, not the resampler.
+> This run also sits just over the 15 s budget.
 
 ---
 
-# Realised bandwidth — the bus is *not* the limit any more
+# Realised bandwidth
 
 FIC_0 is 64-bit @ 100 MHz ≈ **800 MB/s**. Bytes actually moved per frame, against measured stage time:
 

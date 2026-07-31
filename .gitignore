@@ -168,6 +168,9 @@ mpfs/fpga/*.log
 *.npy
 *.bin
 *.png
+# ...but slide figures are deliverables: the deck references them by path, so an untracked one
+# silently breaks the build for anyone else. Keep them versioned.
+!docs/slides/img/*.png
 mpfs/host/*.txt
 Notes.docx
 mpfs/fpga/sim/

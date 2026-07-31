@@ -423,20 +423,11 @@ with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalar
 | **fabric 100 MHz** | 10.000 ns | **+0.924 ns** | multi-corner `VIOLRPT` clean |
 | CoreFFT 12.5 MHz | 80.000 ns | +68.413 ns | clean |
 
-**Both 32-tap sinc kernels fit at 100 MHz with 9.2 % margin** — more headroom than the original
-2-tap baseline had (+0.255 ns, 2.6 %).
-
-Getting there needed one structural change. With both kernels present, `COEFG`'s fp32 multiplier
-became the critical path — it had been marginal since long before the sinc work, and the extra
-fabric simply consumed the headroom hiding it. Adding a third pipeline stage (splitting the
-round-add off the 48-bit normalise mux) moved the worst slack from 0.000 to **+0.924 ns**.
-
-The interpolators were never on a timing path. Cost of the fix: +12 k 4LUT, +6.8 k DFF, +64 MACC —
-and closure that no longer depends on the layout seed: all three seeds return +0.819 / +0.924 /
-+0.700, so the *worst* placement still clears by 7 %.
+**Both 32-tap sinc kernels fit at 100 MHz with 9.2 % margin** 
 
 ---
-# Pipeline timing — where the 14.17 s goes
+
+# Pipeline timing
 
 Measured on Centerfield (5,634 × 4,319 → 8192 grid), both 32-tap sinc interpolators armed.
 
@@ -449,18 +440,12 @@ Measured on Centerfield (5,634 × 4,319 → 8192 grid), both 32-tap sinc interpo
 | Window, azimuth gather, detect, CT#2 | **0 s** | — | fused / overlapped |
 | **Total** | **14.17 s** | | **within the 15 s budget** |
 
-The FFTs are **74 %** of the frame and their domain has 85 % timing margin, so the CoreFFT clock —
-not the resample — remains the clearest lever.
-
-**Both sincs are faster than the 2-tap baseline was** (14.95 s), which was not the expected trade.
-The 0.78 s came from a memory-map fix, not the interpolator: a coefficient table had been mapped
-across `SAR_CWRK`, the multi-hart coefficient-worker region that paces FFT-1.
+The FFTs are **74 %** of the frame.
 
 ---
 # Correctness — how the fabric build is trusted
 
-Fusion and fixed point both change the arithmetic, so *matching the Python* has to be proven,
-not assumed:
+Fusion and fixed point both change the arithmetic, so *matching the Python* is needed:
 
 - **Value-level, not correlation.** Correlation is scale-, phase- and orientation-invariant; it
   passes on a conjugated or bin-reversed FFT. Stages are compared **sample by sample** against a
@@ -470,7 +455,7 @@ not assumed:
   pass 1 measured **99.19 % exact** against the model on silicon.
 
 ---
-# Interpolation variant — 32-tap sinc
+# 32-tap sinc — now the baseline, in both passes
 
 The 2-tap kernel is cheap but lossy where this data lives (≈ 97.8 % of Nyquist):
 
@@ -483,10 +468,59 @@ The 2-tap kernel is cheap but lossy where this data lives (≈ 97.8 % of Nyquist
 gain collapses to $|\cos(\pi f/2)|\!\to\!0.034$, so a scatterer's brightness depends on where it
 lands *between* samples by up to 29 dB.
 
-Cost: 32 banks (mod-32 banking makes each bank hit exactly once → single-port), 64 MACs/stage,
-a 5-level pipelined adder tree. **Resources fit; timing is the risk** at 2.6 % slack.
+Cost per kernel: 32 banks (mod-32 banking makes each bank hit exactly once → single-port),
+64 MACs/stage, a 5-level pipelined adder tree.
+
+**Both kernels are in the shipping design and verified on silicon.** Timing was the risk and is now
+resolved: the fabric closes at **+0.924 ns**, not the 2.6 % this slide once warned about. The cost
+of getting there was not in the interpolators — see the timing-closure slide.
+
+| on silicon, Centerfield top-left 1024² | corr vs reference | peak |
+|---|---|---|
+| 2-tap lerp | 0.9765 | 3029 |
+| range sinc only | 0.9855 | 3234 |
+| azimuth sinc only | 0.9755 | 3169 |
+| **both** | **0.9846** | 3381 |
+
+<div style="font-size:0.85em">
+
+Read these as *"the design runs"*, **not** as *"sinc is better"*. Every arm is scored against a
+**2-tap float32** reference, which cannot separate *better* from *different* — a sharper kernel
+diverging from a blurry golden looks identical to a mild defect. Settling that needs a value-level
+diff against a model running the **same** interpolator.
+
+</div>
 
 ---
+# Output from the MPFS250T
+
+![w:1000](img/silicon_bothsinc.png)
+
+<div style="font-size:0.85em">
+
+Centerfield **formed on the MPFS250T** — both 32-tap sinc kernels, first run after a power-cycle.
+1024×2048, stitched from two 1024² ROI reads either side of the scene centre: the board stores the
+un-`fftshift`ed transform, so the scene centre sits at the array **corner**, not its middle. Field
+boundaries, roads and bright farm structures; the join is seamless. Gaussian normal-score stretch,
+single-look.
+
+| | |
+|---|---|
+| frame | **14.17 s** (budget 15 s) |
+| corr vs same-interpolator model | **0.9889** |
+| chip power | **2.73 W** |
+| fabric timing | MET, **+0.924 ns** |
+
+</div>
+
+> The first attempt at this image came back as diagonal streaks, correlation **0.0017**. The cause
+> was not the interpolator: the range sinc table was being pushed to the fabric *one pass after* the
+> pass that consumes it, so the first run of a fresh boot gathered against an empty table. It hid
+> because a *second* run inherited the previous run's table and looked perfect — the arm that
+> appeared broken was the only one being tested honestly.
+
+---
+
 # Realised bandwidth — the bus is *not* the limit any more
 
 FIC_0 is 64-bit @ 100 MHz ≈ **800 MB/s**. Bytes actually moved per frame, against measured stage time:
@@ -499,7 +533,7 @@ FIC_0 is 64-bit @ 100 MHz ≈ **800 MB/s**. Bytes actually moved per frame, agai
 | CT#2 + FFT-2 (+ detect) | 939.5 | 5.781 | 162.5 | 20 % |
 | **whole frame** | **2,295** | **14.17** | **162.0** | **20 %** |
 
-Nothing exceeds a third of the bus. Deleting DDR passes worked so well that **the bottleneck moved**:
+After optimisation, currently none of the processes exceeds a third of the bus. 
 FFT-1's 4.65 s sits within 0.3 % of the CoreFFT `SLOWCLK` transform floor, so the design is now
 transform-clock bound, not bandwidth bound. The busiest arrow is the corner-turn — the one operator
 that is neither fusable nor local.
@@ -514,7 +548,8 @@ that is neither fusable nor local.
 | **Key moves** | fuse window/gather/detect into the FFT feeders and unloader; overlap CT#2 with FFT-2; generate coefficients on fabric from 3 scalars per line |
 | **Achieved** | **14.17 s**, **2.73 W**, timing MET **+0.924 ns**, 266/784 MACC, 537/812 LSRAM |
 | **Interpolation** | 32-tap polyphase sinc in **both** resample passes — scalloping 29.2 dB → 3.5 dB |
-| **Verified** | each arm matches a Python reference running the *same* interpolator; bench gated against silicon parameters |
+| **Verified** | runs on silicon, first-run-clean after power-cycle, corr 0.9846; benches gated against silicon parameters and mutation-checked |
+| **Open** | whether sinc *improves* the image — needs a value-level diff vs the same-interpolator model |
 
 The budget was met by **moving less data**, not by computing faster — the frame now runs at 20 % of
 the available bus bandwidth and is limited by the 12.5 MHz transform clock.

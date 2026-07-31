@@ -61,21 +61,28 @@ Take **CPHD phase-history data** and produce a **detected image**, on one MPFS25
 
 ![w:1020](diagrams/fig-sar-kspace.drawio.svg)
 
+---
+
+# Broad description of the polar format
+
 **$(k_x,k_y)$ is the spatial-frequency plane** — the Fourier domain of the ground scene, in cycles
 per metre. A pulse at aspect angle $\phi_i$ measuring radial frequency $k$ contributes one sample at
 
 $$k_y = k\cos\phi_i \quad\text{(along the mean look direction)},\qquad
   k_x = k\sin\phi_i \quad\text{(across it)}$$
 
-so a single pulse traces a **radial spoke** at angle $\phi_i$ — hence *polar* format. The 2-D FFT
-that forms the image requires samples on a **rectangular** $(k_x,k_y)$ lattice, and that mismatch is
-the entire reason both resample passes exist.
+so a single pulse traces a **radial spoke** at angle $\phi_i$ — hence *polar* format. 
+
+The 2-D FFT that forms the image requires samples on a **rectangular** $(k_x,k_y)$ lattice. 
 
 Middle panel — **pass 1** resamples every pulse onto the common grid $K_R$. Since $p_r[i]=\cos\phi_i$
 projects onto the mean look direction, $k_r$ *is* the $k_y$ component, so this makes $k_y$ uniform.
 $k_x$ still carries an angular increment, leaving a **trapezoid**.
+
 Right panel — **pass 2** resamples along the pulse axis onto $K_C$, making $k_x$ uniform too.
+
 ---
+
 # ① Range resample — keystone, fast-time
 
 Each pulse $i$ samples the range-frequency axis on **its own grid** — uniform in $j$, but with an
@@ -94,11 +101,10 @@ $$k_r[i,j] \;=\; p_r[i]\,\bigl(f_0[i] + j\,\Delta f[i]\bigr) \;=\; x_{0,i} + j\,
 | $\Delta x_i$ | `a*df[i]` | its spacing — the value ① divides by |
 
 ---
-# Finding $(k,\mu)$ — the only place the two passes differ
 
-Both passes ask the same question: *what is the data value at output location $q$?* Both answer it
-with the same blend. They differ only in how $(k,\mu)$ — which sample, and how far past it — is
-obtained.
+# Finding the resampling indices $(k,\mu)$
+
+Both resample passes seek to finds the data value at output location $q$. The difference is only in how $(k,\mu)$ is obtained, where $k$ is the integer sample, $\mu$ is the fractional value.
 
 <div style="display:flex;gap:1.6em">
 <div style="flex:1">
@@ -109,15 +115,13 @@ Source grid is uniform in $j$, so invert it directly:
 
 $$t=\frac{K_R[q]-x_{0,i}}{\Delta x_i},\quad k=\lfloor t\rfloor,\quad \mu=t-k$$
 
-One subtract, one multiply by a precomputed $1/\Delta x_i$, one floor. $O(1)$, no branching.
+Computationally, it consists of one subtract, one multiply by a precomputed $1/\Delta x_i$, and one floor operation.
 
-</div>
-<div style="flex:1">
+---
 
-**② Azimuth — search**
+# ② Azimuth resample - across pulses
 
-Source abscissa is $\tau=\tan\phi$ sorted: **not uniform**. Along range bin $r$ a sample sits at
-$K_R[r]\,\tau[m]$, so solving $K_C[q]=K_R[r]\tan\phi$ gives
+Source abscissa is $\tau=\tan\phi$ sorted: **not uniform**. Along range bin $r$ a sample sits at $K_R[r]\,\tau[m]$, so solving $K_C[q]=K_R[r]\tan\phi$ gives
 
 $$u=\frac{K_C[q]}{K_R[r]},\quad k=\max\{m:\tau[m]\le u\},\quad \mu=\frac{u-\tau[k]}{\tau[k+1]-\tau[k]}$$
 
@@ -126,15 +130,17 @@ $u$ is the target expressed as a *tangent*, which lets the search run against $\
 </div>
 </div>
 
-$\tau$ is **row-invariant** — one 705-entry table for all 8192 rows. Searching in $k_x$ units instead
-would mean rescaling it 8192 times. And because both $\tau$ and $K_C$ are sorted, the search is a
-merge scan, not a binary search:
+$\tau$ is **row-invariant** — one table for all 8192 rows. Searching in $k_x$ units instead would mean rescaling it 8192 times. And because both $\tau$ and $K_C$ are sorted, the search is a merge scan, not a binary search:
 
 ```c
 while (k+2 < M && tau[k+1] <= u) k++;   /* one pointer, never retreats: O(M+Mp) per row */
 ```
 
-### The blend — identical in both passes
+---
+
+# Common interpolation kernel across both resample passes
+
+The output value from the resample operation can be either:
 
 $$\text{out}[q]=(1-\mu)\,\text{in}[k]+\mu\,\text{in}[k{+}1]
 \qquad\qquad
@@ -143,11 +149,16 @@ $$\text{out}[q]=(1-\mu)\,\text{in}[k]+\mu\,\text{in}[k{+}1]
 <div style="font-size:0.85em">
 
 2-tap baseline (left) and the 32-tap polyphase sinc (right), taps spanning $k{-}15\ldots k{+}16$ so
-tap $n$ sits at offset $n-15-\mu$, DC-normalised: $c_n(\mu)=\operatorname{sinc}(n-15-\mu)\big/\sum_m \operatorname{sinc}(m-15-\mu)$.
-Only $(k,\mu)$ is derived differently — so an interpolator upgrade applies to both passes.
+tap $n$ sits at offset $n-15-\mu$, DC-normalised: 
+
+$$c_n(\mu)=\operatorname{sinc}(n-15-\mu)\big/\sum_m \operatorname{sinc}(m-15-\mu)$$
+
+Only $(k,\mu)$ is derived differently — so an interpolator kernel is applicable to both passes.
 
 </div>
+
 ---
+
 # ③ Window · ④ FFT · ⑤ Detect
 
 **Window** — separable Hamming, suppressing sidelobes from the finite aperture:
@@ -168,6 +179,7 @@ It is what the polar-to-rectangular resampling exists to construct — the FFT i
 $$\text{OUT}[y,x] = \sqrt{\Re^2 + \Im^2}$$
 
 ---
+
 # Python pseudo code
 
 ```python
@@ -207,12 +219,10 @@ img    = detect_fixed(ya.T)                    # |z| -> uint16   OUT
 | both gathers, window, FFTs, corner-turns, detect | **emulates the board**, bit-accurate |
 | `interp_coeffs` | **both** — on silicon this is `sar_coeffgen` in fabric |
 
-The middle block is not a model *of* the design — it is a **bit-accurate mirror**: same int16
-truncation, same Q15 weights, same block-floating-point exponents. That is what makes it usable as
-the reference to score the board against.
+The middle block is a **bit-accurate mirror** of the FPGA design: same int16 truncation, same Q15 weights, same block-floating-point exponents. This serves as a reference to validate the board implementation.
 
 ---
-# Verification — compare like with like
+# Verification
 
 The metric that matters is a **value-level diff against a reference running the same arithmetic**.
 Correlation against a *different* implementation cannot separate "wrong" from "different".
@@ -244,7 +254,7 @@ assert corr(board, py[align]) high AND diagonal beats off-diagonal
 | vacuous test | mutation changes nothing | mutation sweep |
 | orientation mismatch | corr 0.005 — reads as "broken" | calibrate on a known-good pair first |
 | reference mismatch | 32-tap scored against a 2-tap golden | run the model with the *same* kernel |
-
+<!-- I think this slide should be about the 16 cases-->
 ---
 # Reference data — Centerfield, Utah
 
@@ -328,16 +338,9 @@ SIG and SCRATCH are 256 MB as the complex data is 4 B/sample. `OUT` is half the 
 ---
 # Optimisation 1 — maximise AXI beat packing
 
-![w:1080](diagrams/fig-axi-packing.drawio.svg)
+![w:980](diagrams/fig-axi-packing.drawio.svg)
 
-Every DDR stream runs at the full 64-bit width. A pulse row is `N·4` bytes with `N` odd,
-so alternate rows start mid-beat — the gather still reads `AxSIZE 3'd3` from `IN_BASE & ~7` and
-absorbs the offset into the sample **index**, discarding one leading word per row.
-
-> The figure plots the **shipped** per-line traffic, so it already includes Optimisation 3: `idx`
-> and `wq` show **0 beats** because those streams were later deleted entirely, not merely packed.
-> The point *this* slide makes is the two streams that remain — `in` and `out` — both run 8 B/beat
-> at 99.99 % packing efficiency.
+> The two streams — `in` and `out` — both run at the full 64-bit width or 8 B/beat > at 99.99 % packing efficiency.
 
 ---
 # CoreFFT streaming chain
@@ -413,6 +416,7 @@ with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalar
 | uSRAM | 1,620 | 2,352 | 69 % | polyphase coefficient tables |
 | **MACC** | **266** | **784** | **34 %** | still *not* compute-bound |
 | User I/O | 11 | 144 | 8 % | |
+| Chip power | 2.726 W | | | 438 mW static / 2288 mW dynamic (vectorless) |
 
 | clock domain | period | setup slack | verdict |
 |---|---|---|---|
@@ -466,7 +470,7 @@ not assumed:
   pass 1 measured **99.19 % exact** against the model on silicon.
 
 ---
-# The interpolation variant — 32-tap sinc
+# Interpolation variant — 32-tap sinc
 
 The 2-tap kernel is cheap but lossy where this data lives (≈ 97.8 % of Nyquist):
 
@@ -508,7 +512,7 @@ that is neither fusable nor local.
 | **Problem** | CPHD → detected 8192×8192 image, ≤ 15 s, minimum silicon |
 | **Approach** | PFA; delete DDR passes rather than accelerate arithmetic |
 | **Key moves** | fuse window/gather/detect into the FFT feeders and unloader; overlap CT#2 with FFT-2; generate coefficients on fabric from 3 scalars per line |
-| **Achieved** | **14.17 s**, timing MET **+0.924 ns**, 266/784 MACC, 537/812 LSRAM |
+| **Achieved** | **14.17 s**, **2.73 W**, timing MET **+0.924 ns**, 266/784 MACC, 537/812 LSRAM |
 | **Interpolation** | 32-tap polyphase sinc in **both** resample passes — scalloping 29.2 dB → 3.5 dB |
 | **Verified** | each arm matches a Python reference running the *same* interpolator; bench gated against silicon parameters |
 

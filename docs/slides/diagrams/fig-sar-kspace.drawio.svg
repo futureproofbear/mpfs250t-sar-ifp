@@ -863,7 +863,7 @@
                             <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
                                 <div style="display: inline-block; font-size: 11px; font-family: &quot;Helvetica&quot;; color: light-dark(#000000, #ffffff); line-height: 1.2; pointer-events: all; white-space: nowrap; ">
                                     <font style="font-size: 14px;">
-                                        PASS 2 (azimuth):  u = KC[q] / kr
+                                        PASS 2 (azimuth):  u = KC[q] / KR[r]
                                         <br/>
                                         bracket k by a merge scan on tan(phi)
                                         <br/>
@@ -881,7 +881,7 @@
                         </div>
                     </foreignObject>
                     <text x="986" y="391" fill="light-dark(#000000, #ffffff)" font-family="&quot;Helvetica&quot;" font-size="11px" text-anchor="middle">
-                        PASS 2 (azimuth):  u = KC[q] / kr...
+                        PASS 2 (azimuth):  u = KC[q] / KR[r]...
                     </text>
                 </switch>
             </g>

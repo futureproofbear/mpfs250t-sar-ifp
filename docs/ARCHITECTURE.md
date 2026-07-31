@@ -95,6 +95,17 @@ FFT-1 4.646 s · FFT-2 5.781 s.
 > 739 ms of FFT-1 as well as corrupting the table between runs. Tables now live at `0xB0060000`
 > (azimuth) and `0xB0064000` (range), checked as SPANS against the whole knob block.
 
+**Timing closure (2026-07-31).** Fabric 100 MHz setup slack **+0.924 ns** (9.2 %), CoreFFT 12.5 MHz
++68.413 ns, multi-corner `VIOLRPT` clean on setup and hold. Getting both 32-tap sinc kernels to close
+required pipelining `sar_fp32_mul` from 2 to 3 stages: with both kernels present `COEFG`'s fp32
+multiplier became the critical path, and the design would not close — three high-effort layout seeds
+gave 0.000 / −0.011 / −0.148 ns. The multiplier had been marginal long before the sinc work; the
+extra fabric only consumed the headroom that was concealing it. Neither interpolator appears on any
+reported timing path. After the split, all three seeds return +0.819 / +0.924 / +0.700, so the worst
+placement clears by 7 % and closure no longer depends on the seed. Cost: +12 k 4LUT, +6.8 k DFF,
++64 MACC. The extra stage is functionally invisible — `check_coeffgen_fixed.py` GATE 2 still shows
+the generator byte-identical to `sar_coeffs_pass2_range()` over 45,038 outputs in both source orders.
+
 Realised FIC_0 bandwidth (2,295 MB moved per frame / 14.17 s) is **162 MB/s, about 20 % of the
 ~800 MB/s ceiling**; the busiest single arrow is corner-turn #1 at 260 MB/s (33 %). The design is
 therefore **no longer bandwidth-bound** — FFT-1 sits within 0.3 % of the CoreFFT `SLOWCLK` transform

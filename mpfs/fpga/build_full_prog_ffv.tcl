@@ -38,11 +38,16 @@ if {[catch { run_tool -name {SYNTHESIZE} } e]} { puts "SYN_RC: $e" } else { puts
 ## between layout seeds -- so the flow now asks for high effort and several passes and keeps the
 ## best. If a build ever needs MORE than this to close, the honest fix is to pipeline that
 ## multiplier, not to keep re-rolling seeds.
+##
+## 2026-07-31: sar_fp32_mul WAS pipelined, and the seed lottery is over -- all three seeds now come
+## back positive (+0.819 / +0.924 / +0.700), so the WORST placement still closes with 7% margin.
+## Dropped to 1 pass: multi-seed existed only because the design was hovering at zero, and it costs
+## ~40 minutes per rebuild. Raise it again only if a future change puts the worst seed near zero.
 ## DO NOT wrap this in a bare `catch`. On 2026-07-31 an illegal MULTI_PASS_CRITERIA value was
 ## swallowed by catch, the tool silently fell back to "High-effort : OFF", and the rebuild produced
 ## a byte-identical failing result -- looking exactly like "high effort did not help" when high
 ## effort had never run. Legal criteria: SLOWEST_CLOCK, SPECIFIC_CLOCK, VIOLATIONS, TOTAL_POWER.
-if {[catch { configure_tool -name {PLACEROUTE}         -params {REPAIR_MIN_DELAY:true}         -params {EFFORT_LEVEL:true}         -params {TDPR:true}         -params {MULTI_PASS_LAYOUT:true}         -params {NUM_MULTI_PASSES:3}         -params {START_SEED_INDEX:1}         -params {MULTI_PASS_CRITERIA:VIOLATIONS} } e]} {
+if {[catch { configure_tool -name {PLACEROUTE}         -params {REPAIR_MIN_DELAY:true}         -params {EFFORT_LEVEL:true}         -params {TDPR:true}         -params {MULTI_PASS_LAYOUT:true}         -params {NUM_MULTI_PASSES:1}         -params {START_SEED_INDEX:1}         -params {MULTI_PASS_CRITERIA:VIOLATIONS} } e]} {
     puts "PNR_CONFIG_FAIL: $e"
     puts "FFV_BUILD_DONE"
     return

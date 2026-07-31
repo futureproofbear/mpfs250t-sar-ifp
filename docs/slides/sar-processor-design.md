@@ -407,25 +407,29 @@ with $A \approx 2^{S}/\Delta x$ and $B \approx -x_0/\Delta x$ — **three scalar
 
 | resource | used | device | % | note |
 |---|---|---|---|---|
-| 4LUT | 124,380 | 254,196 | 49 % | |
-| DFF | 86,910 | 254,196 | 34 % | |
+| 4LUT | 136,595 | 254,196 | 54 % | |
+| DFF | 93,678 | 254,196 | 37 % | |
 | **LSRAM** | **537** | **812** | **66 %** | line buffers, FFT ping-pong, 2×32 sinc banks |
 | uSRAM | 1,620 | 2,352 | 69 % | polyphase coefficient tables |
-| **MACC** | **202** | **784** | **26 %** | still *not* compute-bound |
+| **MACC** | **266** | **784** | **34 %** | still *not* compute-bound |
 | User I/O | 11 | 144 | 8 % | |
 
 | clock domain | period | setup slack | verdict |
 |---|---|---|---|
-| **fabric 100 MHz** | 10.000 ns | *re-closing* | needs high-effort layout — see note |
-| CoreFFT 12.5 MHz | 80.000 ns | +67.784 ns | clean |
+| **fabric 100 MHz** | 10.000 ns | **+0.924 ns** | multi-corner `VIOLRPT` clean |
+| CoreFFT 12.5 MHz | 80.000 ns | +68.413 ns | clean |
 
-The 100 MHz domain is the binding constraint and the sinc integration has consumed most of what was
-left. At default layout effort the design misses setup by **3 ps** on `COEFG_B/u_mul_inv` — the
-coefficient generator's multiplier — so the flow now runs high-effort, multi-seed placement.
+**Both 32-tap sinc kernels fit at 100 MHz with 9.2 % margin** — more headroom than the original
+2-tap baseline had (+0.255 ns, 2.6 %).
 
-The critical path is that multiplier, **not** the interpolator: the sinc did not create the critical
-path, added logic and congestion degraded an existing one. A 3 ps margin is a placement outcome
-rather than a design margin; the durable fix is to pipeline that multiplier.
+Getting there needed one structural change. With both kernels present, `COEFG`'s fp32 multiplier
+became the critical path — it had been marginal since long before the sinc work, and the extra
+fabric simply consumed the headroom hiding it. Adding a third pipeline stage (splitting the
+round-add off the 48-bit normalise mux) moved the worst slack from 0.000 to **+0.924 ns**.
+
+The interpolators were never on a timing path. Cost of the fix: +12 k 4LUT, +6.8 k DFF, +64 MACC —
+and closure that no longer depends on the layout seed: all three seeds return +0.819 / +0.924 /
++0.700, so the *worst* placement still clears by 7 %.
 
 ---
 # Pipeline timing — where the 14.17 s goes
@@ -504,7 +508,7 @@ that is neither fusable nor local.
 | **Problem** | CPHD → detected 8192×8192 image, ≤ 15 s, minimum silicon |
 | **Approach** | PFA; delete DDR passes rather than accelerate arithmetic |
 | **Key moves** | fuse window/gather/detect into the FFT feeders and unloader; overlap CT#2 with FFT-2; generate coefficients on fabric from 3 scalars per line |
-| **Achieved** | **14.17 s**, 202/784 MACC, 537/812 LSRAM, 49 % 4LUT |
+| **Achieved** | **14.17 s**, timing MET **+0.924 ns**, 266/784 MACC, 537/812 LSRAM |
 | **Interpolation** | 32-tap polyphase sinc in **both** resample passes — scalloping 29.2 dB → 3.5 dB |
 | **Verified** | each arm matches a Python reference running the *same* interpolator; bench gated against silicon parameters |
 

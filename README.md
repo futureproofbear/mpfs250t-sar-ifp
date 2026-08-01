@@ -13,14 +13,22 @@ data), in two implementations:
    FFT, and detection, streaming DDR-to-DDR. Range/azimuth FFTs run on the fabric **CoreFFT**
    hard IP; the MSS RISC-V cores drive the pipeline.
 
-**Status:** the full deci-1 Centerfield scene focuses **end-to-end on silicon in 18.45 s**
-(2026-07-27, 100 MHz fabric, timing MET multi-corner), scene loaded from the board's own eMMC
-(no host JTAG data load). Output is **bit-exact** — crop CRC `0x319037b2`, reproduced from a cold
-start — and the reconstructed 8192² image matches the reference scene-for-scene (0.9923 correlation
-vs. golden, speckle-limited at full single-look resolution).
+**Status (2026-08-01):** the pipeline runs entirely on the board — scene loaded from its own eMMC,
+no host JTAG data load — with **32-tap polyphase sinc interpolation in both resample passes**.
 
-Got there in thirteen individually-measured steps: **110.8 s → 18.45 s**, every one silicon-validated
-with the CRC unchanged. See `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3.
+| scene | input | frame |
+|---|---|---|
+| Centerfield, Utah | 5,634 × 4,319 | **14.17 s** |
+| NDSU, Fargo ND *(production)* | 8,167 × 8,192 | **15.738 s** |
+
+Fabric closes at **100 MHz with +0.924 ns setup slack** (multi-corner, setup and hold), draws
+**2.73 W**, and correlates **0.9889** against a Python model running the *same* interpolator.
+NDSU feeds 2.75× the input samples for only +1.57 s, because both 8192² transforms are fixed-size —
+only the resample scales with the scene.
+
+Got there in thirteen individually-measured steps, **110.8 s → 18.45 s**, each silicon-validated
+with the output CRC unchanged; the sinc interpolators and a memory-map fix then took it to 14.17 s.
+See `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3.
 
 ## Start here
 
@@ -42,8 +50,12 @@ mpfs250t-sar-ifp/
 │   ├── fpga/                  # Libero design, HLS kernels (resample/window/detect), CoreFFT feeder
 │   └── host/                  # JTAG load/run/dump scripts + bit-accurate silicon emulator
 │       ├── silicon_emulator.py    # fixed-point mirror of the on-silicon datapath (== golden)
+│       ├── sar_display.py         # normal-score contrast stretch for viewing output
 │       ├── stitch_silicon_deci1.py# reconstruct + correlate the dumped 8192² OUT
 │       └── render_quarters.py      # per-quarter / stitched image render of silicon OUT
+├── scripts/
+│   └── make_standalone_emulator.py # assemble the hand-off emulator package (see below)
+├── sar_emulator/              # GENERATED standalone package (git-ignored; rebuild with the above)
 ├── docs/
 │   ├── USER_GUIDE.md          # operate the board: bring-up, load, build+program, run, verify
 │   ├── SAR_IMPLEMENTATION_RECORD.md           # algorithm, staged fabric port, optimization history
@@ -95,12 +107,22 @@ implements and the knobs at the top of the script.
 ## Quick run — silicon emulator (board-free)
 
 ```bash
-python mpfs/host/silicon_emulator.py            # both scenes, board config (deci 8, grid 8192)
+python mpfs/host/silicon_emulator.py                       # both scenes, deci 8, grid 8192
+python mpfs/host/silicon_emulator.py --cphd <file.cphd> \
+       --grid 8192 --range-sinc --az-sinc                  # the SHIPPING configuration
 ```
 
-A bit-accurate fixed-point mirror of the FPGA datapath — predicts exactly what the board
-produces, without hardware. For actual on-board bring-up, data loading, building, running, and
-verification, see [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
+A bit-accurate fixed-point mirror of the FPGA datapath — predicts exactly what the board produces,
+without hardware. `--range-sinc --az-sinc` selects the 32-tap interpolators the board actually
+ships; omit them for the 2-tap linear fallback. For on-board bring-up, data loading, building,
+running and verification, see [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
+
+### Hand-off package
+
+`python scripts/make_standalone_emulator.py` assembles the emulator into a flat, self-contained
+`sar_emulator/` folder that runs with no repo, no board and no vendor toolchain — 10 modules plus a
+README. It is a *builder*, not a checked-in copy: the sources span `src/`, `mpfs/host/` and
+`mpfs/fpga/tb/`, and a hand-made copy would drift from them silently.
 
 ## Requires
 

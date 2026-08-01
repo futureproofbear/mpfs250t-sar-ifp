@@ -312,7 +312,8 @@ pattern — create the slice first, then connect it:
 sd_create_pin_slices -sd_name SAR_TOP -pin_name {CIC:TARGET5_ARADDR} -pin_slices {[10:0]}
 sd_connect_pins      -sd_name SAR_TOP -pin_names {"CIC:TARGET5_ARADDR[10:0]" "DMA:CTRL_ARADDR"}
 ```
-See `mpfs/fpga/build_addrfix.tcl` for the full pattern.
+See `mpfs/fpga/sartop_assembly.tcl` for the full pattern as it is actually applied in this repo,
+and `mpfs/fpga/tb/check_sartop_wiring.tcl` for the gate that fails the build if it is missing.
 
 ### Convention 4 — lint-gate every build (pre-synth firebreak)
 

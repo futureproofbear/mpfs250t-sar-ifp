@@ -35,8 +35,17 @@ latency of buffer slots) that no in-flight sample arrives to a full buffer.
 - **WHEN** the downstream sink de-asserts `tready` for extended, arbitrary spans during the
   unload of an 8192-point frame (forcing the gearbox output FIFO toward full)
 - **THEN** every one of the 8192 samples the FFT emits is delivered to the sink, in order, with
-  correct re/im pairing (verified by `mpfs/fpga/sim/corefft_stream64_lossck_tb.v`: samples
-  received == samples emitted, zero mismatch, even though `READ_OUTP` drops many times).
+  correct re/im pairing.
+
+  > ⚠ **EVIDENCE MISSING — this requirement is currently unverified in this repo.** It previously
+  > cited `mpfs/fpga/sim/corefft_stream64_lossck_tb.v` ("samples received == samples emitted, zero
+  > mismatch, even though `READ_OUTP` drops many times"), but that testbench has never existed here —
+  > it is a leftover reference from the retired sarProcessor tree. Several benches drive `READ_OUTP`
+  > (`corefft_fft_tb.v`, `tb_fft_dual_chain.v`, `tb_fft_unloader_det.v`), but none has been confirmed
+  > to assert the received-equals-emitted property under *extended, arbitrary* de-assertion, so none
+  > is substituted here. Treat this scenario as a stated requirement, not a demonstrated one, until a
+  > bench proves it. The end-to-end silicon result is consistent with no sample loss, but an
+  > end-to-end image does not isolate this property.
 
 #### Scenario: Backpressure via READ_OUTP is spec-legal
 - **WHEN** the gearbox pauses the read by de-asserting `READ_OUTP`

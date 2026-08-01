@@ -107,15 +107,19 @@ implements and the knobs at the top of the script.
 ## Quick run — silicon emulator (board-free)
 
 ```bash
-python mpfs/host/silicon_emulator.py                       # both scenes, deci 8, grid 8192
 python mpfs/host/silicon_emulator.py --cphd <file.cphd> \
-       --grid 8192 --range-sinc --az-sinc                  # the SHIPPING configuration
+       --deci 1 --grid 8192 --range-sinc --az-sinc         # the SHIPPING configuration
 ```
 
 A bit-accurate fixed-point mirror of the FPGA datapath — predicts exactly what the board produces,
 without hardware. `--range-sinc --az-sinc` selects the 32-tap interpolators the board actually
 ships; omit them for the 2-tap linear fallback. For on-board bring-up, data loading, building,
 running and verification, see [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md).
+
+> **The silicon runs undecimated.** The emulator's *default* is `--deci 8`, which is a fast smoke
+> test, **not** the board configuration — decimation discards pulses and samples, so a decimated run
+> is not comparable to a silicon result and must never be used to score one. Pass `--deci 1` for
+> anything claiming to mirror the board; budget ~8 GB RAM and tens of minutes.
 
 ### Hand-off package
 

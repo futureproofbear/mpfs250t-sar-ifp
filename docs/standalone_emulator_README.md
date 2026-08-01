@@ -60,7 +60,11 @@ python sar_emulator/fetch_data.py
 ## 3. Run
 
 ```bash
-# quick smoke test -- confirms the install works (heavily decimated, speckly by design)
+# THE REAL CONFIGURATION -- undecimated, what the hardware runs (~8 GB RAM, tens of minutes)
+python silicon_emulator.py --cphd path/to/scene_CPHD.cphd --deci 1 --grid 8192 \
+       --range-sinc --az-sinc --outdir ./output
+
+# install smoke test ONLY -- heavily decimated, speckly by design, not comparable to the above
 python silicon_emulator.py --cphd path/to/scene_CPHD.cphd --deci 16 --grid 1024 --outdir ./output
 
 # full resolution, both 32-tap sinc interpolators (the shipping configuration)

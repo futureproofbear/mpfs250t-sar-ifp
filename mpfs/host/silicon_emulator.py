@@ -41,7 +41,11 @@ SCENES = {
     "ndsu":        "data/umbra_ndsu_20231110/2023-11-10-16-16-44_UMBRA-04_CPHD.cphd",
     "ship":        "data/ship_20230906/2023-09-06-06-12-08_UMBRA-04_CPHD.cphd",
 }
-ROOT = HERE.parents[1]
+# In the development tree this file sits at <repo>/mpfs/host/, so parents[1] is the repo root.
+# In the flat standalone package it sits at <repo>/sar_emulator/, where parents[1] would point
+# OUTSIDE the checkout entirely -- writing outputs and looking for scenes in a directory nobody
+# chose. Probe for the development layout and fall back to the containing folder.
+ROOT = HERE.parents[1] if (HERE.parents[1] / "mpfs").is_dir() else HERE.parent
 
 
 def _sat16(x):

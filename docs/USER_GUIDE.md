@@ -421,7 +421,8 @@ DETMODE=3 GATHMODE=1 OVLMODE=1 CGENMODE=0x43474E31 DUALFFT=0x44464632 RWRKNW=0x5
 
 > **Every engine knob defaults to OFF** in `run_m3_iso.sh`. The bare command (no env vars)
 > produces an unfused, single-chain run — several seconds slower and NOT the configuration any
-> baseline in these docs was measured with. The line above is the shipping 18.45 s configuration;
+> baseline in these docs was measured with. The line above is the 18.45 s configuration (2026-07-27);
+> the shipping baseline is now 14.17 s with both 32-tap sinc kernels armed — see 6.1a/6.1b;
 > drop individual knobs only to build a deliberate A/B arm.
 
 > **From the 2026-07-28 bitstream on, the range gather runs on `sar_resample_v` whether you ask for

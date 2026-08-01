@@ -31,5 +31,7 @@ so the system is bare-metal C on the MSS + fabric kernels + host-offload over a 
 
 ## Status
 The CoreFFT-on-fabric pipeline is the shipping product — complete and proven on silicon
-(`fft_mode=1` confirmed at runtime, 37.72 s per frame (2026-07-24, 100 MHz, azimuth-gather + detect + corner-turn/FFT-2 overlap), corr 0.9923 vs golden). The CPU FFT remains
+(`fft_mode=1` confirmed at runtime). Current baseline 2026-08-01, 100 MHz, 32-tap sinc in both
+resample passes: **14.17 s** Centerfield / **15.738 s** NDSU per frame, corr **0.9889** vs a model
+running the same interpolator, timing MET +0.924 ns, 2.73 W. The CPU FFT remains
 only as the mode-0 fallback. See `openspec/specs/fabric-range-fft/` and `docs/ARCHITECTURE.md`.

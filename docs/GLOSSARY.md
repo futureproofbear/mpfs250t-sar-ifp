@@ -153,7 +153,7 @@ variables to `run_m3_iso.sh`.
 | **iso-test** | A test that arms exactly one kernel and reads its output back, isolating it from the pipeline. |
 | **mutation testing** | Deliberately breaking the design to prove the testbench notices. A test that cannot fail is worthless. |
 | **re-arm** | Starting the same kernel instance again without a reset — what firmware does thousands of times per frame. Benches that reset between runs cannot see re-arm bugs. |
-| **crop CRC** | On-board CRC over a 1024×1024 crop. **Current baseline (2026-07-29, `sar_resample_v`): `0x221e5e7a`** on the TOP-LEFT crop. The older `0x319037b2` was the float32 path's CENTRE crop and is *not* superseded by it — different region, different arithmetic. CRC equality is no longer the gate: `sar_resample_v` is fixed-point by design, so validate by **correlation** against `jtag_full/crop_topleft.bin` (currently 0.977). Two crops compare only if the same `(r0,r1,c0,c1)` produced both. |
+| **crop CRC** | On-board CRC over a 1024x1024 crop, used as a bit-exactness check between builds. `0x319037b2` = the pre-sinc float32 path; `0x221e5e7a` = the 2026-07-29 `sar_resample_v` 2-tap build on the TOP-LEFT crop. **Neither describes the current both-sinc baseline** — a different interpolator produces different samples, so a CRC mismatch across interpolator changes is expected, not a fault. Only compare CRCs between runs of the *same* configuration. |
 | **golden** | The reference implementation (float, host-side) that silicon is compared against. |
 
 ---

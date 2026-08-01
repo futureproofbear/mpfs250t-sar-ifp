@@ -51,7 +51,8 @@ Parts 1–2. This section and §2 describe only the current as-built contract.
 
 ![Figure 1 — SAR pipeline dataflow](img/sar_pipeline.drawio.svg)
 
-**Figure 1 — SAR pipeline dataflow.** Stage times are the silicon-verified 18.45 s baseline
+**Figure 1 — SAR pipeline dataflow.** Stage times shown are the 18.45 s baseline (2026-07-27),
+not the current 14.17 s one — the shape of the dataflow is unchanged, the numbers are historical
 (2026-07-27, CRC `0x319037b2`). `*` marks the corner-turn/FFT-2 overlap: CT#2 is strip-pipelined
 under FFT-2, so its cost is hidden and 5.396 s is the merged wall time. Note the stage names are
 historically inverted — "range FFT" is FFT-1, the AZIMUTH transform.

@@ -287,7 +287,7 @@ about **moving data**: burst shape, DDR read latency, and one 64-bit port shared
 | Magnitude detect | fused into the FFT-2 unloader — no separate pass |
 
 **Scene in, image out, entirely on the board.** The 8192² scene is loaded from the board's own
-eMMC, focused in **18.45 s**, and written back as a uint16 image — no host involvement in the
+eMMC, focused in **14.17 s**, and written back as a uint16 image — no host involvement in the
 datapath. Orchestration is a bare-metal sequencer on one RISC-V hart, with three more harts doing
 the coefficient and renormalisation work in parallel.
 
@@ -462,11 +462,12 @@ Three conclusions, each of which **overturned a plan**:
 
 | | |
 |---|---|
-| Frame time | **18.45 s** (from 110.8 s) |
-| Correctness | **bit-exact** — crop CRC `0x319037b2`, from a cold start |
-| Correlation vs golden | 0.9923 (speckle-limited at full single-look resolution) |
-| Timing | MET multi-corner, setup **and** hold |
-| Scene load | 81 s from the board's own eMMC (was ~3 h over JTAG) |
+| Frame time | **14.17 s** Centerfield · **15.738 s** NDSU (from 110.8 s) |
+| Interpolation | 32-tap polyphase sinc in **both** resample passes |
+| Correlation | **0.9889** vs a model running the *same* interpolator |
+| Timing | MET multi-corner, setup **and** hold, **+0.924 ns** |
+| Power | **2.73 W** |
+| Scene load | 81 s Centerfield / 225 s NDSU from the board's own eMMC (was hours over JTAG) |
 
 **Thirteen individually-measured optimisation steps**, every one silicon-validated
 with the CRC unchanged.

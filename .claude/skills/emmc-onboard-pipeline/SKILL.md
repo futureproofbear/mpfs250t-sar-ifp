@@ -214,18 +214,31 @@ bash run_program.sh                                        # ~4 min, fpgenprog
 #    re-boot the U54 on this ES silicon -- only a power-cycle. Check the pc before trusting a run.
 
 # 1) LOAD scene from eMMC -> DDR (+ JOB). PASS: verdict 0, nseg=10, sig_crc_exp==got
-bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 81.5 s
+bash run_m3_iso.sh 0x454C4F44 0 0 120000 0xB005E000        # 81.5 s Centerfield / 225 s NDSU (268 MB)
+
+# 1b) ARM BOTH 32-tap SINC TABLES -- REQUIRED for the shipping baseline, and REQUIRED BEFORE the
+#     first PIPE. Skipping this does NOT fail: you silently get the 2-tap lerp arm instead, which
+#     is a valid but DIFFERENT (and worse) interpolator. Both are wiped by every power-cycle and by
+#     any fabric reprogram, so they are per-power-cycle steps, not one-time provisioning.
+bash run_rsinc_fast_load.sh      # range  -> SAR_SINCMODE  0xB0059164, table 0xB0064000 (~48 s)
+bash run_azsinc_table_load.sh    # azimuth-> SAR_AZSINCMODE 0xB0059168, table 0xB0060000 (seconds)
+#     Expect from each: tab[0]=1, tab[15]=32767 (the peak), tab[8191]=-9, then "armed".
+#     ORDER MATTERS: the range table is consumed by resample_2pass. Loading it late is invisible on
+#     a second run (which inherits the previous run's table) and produces a wrong image on the first.
 
 # 2) run the pipeline (focus). PASS: mbx result = 0 (SAR_SEQ_OK).
-#    MEASURED 2026-07-20 (deci-1 Centerfield 5634x4319 -> 8192 grid, FABRIC CoreFFT, CPU detect):
-#      TOTAL 18.45 s (2026-07-27, 100 MHz, commit d07bce7, bit-exact crop CRC 0x319037b2). Breakdown in
-#      exactly one place -- docs/SAR_IMPLEMENTATION_RECORD.md Part 3 -- do not restate it here.
+#    MEASURED, deci-1, 8192 grid, FABRIC CoreFFT, both 32-tap sinc:
+#      Centerfield 5634x4319 -> 14.17 s   (2026-07-31, 100 MHz, timing MET +0.924 ns, 2.73 W)
+#      NDSU        8167x8192 -> 15.738 s  (2026-08-01; resample 4.311 / rFFT 5.766 / aFFT 5.661)
+#    Breakdown lives in exactly one place -- docs/SAR_IMPLEMENTATION_RECORD.md Part 3.
+#    (The older 18.45 s / CRC 0x319037b2 figure is the PRE-SINC baseline. A sinc run does not
+#     reproduce that CRC -- a different interpolator gives different samples, not a fault.)
 #    A 300000 ms (5 min) budget is ample; the runner POLLS and returns as soon as it completes.
 #    For CMD 0x50495045 the runner sets FFTMODE @0xB0059110 = 1 (FABRIC CoreFFT chain -- the
 #    shipping FFT path; mode 0 = legacy CPU FFT), and prints per-stage timing from sar_stage_ts
 #    (start/resample/window/rangeFFT/cornerturn/azimuthFFT/detect, 1 us/tick).
 # EVERY engine knob defaults OFF in run_m3_iso.sh -- the bare command gives an unfused,
-# single-chain run. This is the 18.45 s shipping configuration:
+# single-chain run. This is the shipping engine configuration (sinc is armed separately, in 1b):
 DETMODE=3 GATHMODE=1 OVLMODE=1 CGENMODE=0x43474E31 DUALFFT=0x44464632 RWRKNW=0x52575204 FFTBLK=64 \n  bash run_m3_iso.sh 0x50495045 0 0 180000 0xB0058020   # ~18.5 s; polls, exits on completion
 bash run_stage_timing.sh                                   # re-read per-stage timing anytime (no re-run)
 

@@ -245,7 +245,7 @@ value-level checks (not correlation) that had actually caught these bugs.
 ## Part 3: Optimized approach — what was actually sped up on fabric, and by how much
 
 Once the full pipeline first ran end-to-end on silicon, a sequence of measured optimizations brought
-it from a **110.8 s** baseline down to the current **18.45 s**. Every number below is a real
+it from a **110.8 s** baseline down to **18.45 s**. Every number below is a real
 on-silicon measurement (this section is the project's stated single numeric source of truth).
 
 ### 3.1 Chronological before/after
@@ -268,9 +268,17 @@ on-silicon measurement (this section is the project's stated single numeric sour
 
 | 13 | Hand-written corner-turn `corner_turn_v.v` replacing the SmartHLS kernel (full-width `arsize=3'b011` bursts, double-buffered fill/drain) | pipeline 25.16 s | pipeline 18.45 s | **−6.71 s** | biggest single win of the campaign. Costs ~3x the LSRAM (128 vs ~43 blocks). Its FIRST build was bit-WRONG on silicon — see the re-arm bug below |
 
-**Current shipping baseline: 18.45 s** (2026-07-27, 100 MHz), verified bit-exact against the
-reference crop CRC `0x319037b2` from a cold start. Correlation vs. golden reference **0.9923** on
-the Centerfield scene; output bit-identical across every fusion/overlap/clock configuration tested.
+**Baseline at the end of this 13-step campaign: 18.45 s** (2026-07-27, 100 MHz), verified bit-exact
+against the reference crop CRC `0x319037b2` from a cold start. Correlation vs. golden reference
+**0.9923** on the Centerfield scene; output bit-identical across every fusion/overlap/clock
+configuration tested.
+
+> **This is no longer the shipping baseline.** Work after this campaign — 32-tap polyphase sinc in
+> *both* resample passes, plus a memory-map fix — took Centerfield to **14.17 s** (2026-07-31), and
+> the NDSU production scene runs in **15.738 s** (2026-08-01). Those runs use a different
+> interpolator, so the CRC `0x319037b2` and the 0.9923 correlation above do **not** describe them;
+> the current figure is corr **0.9889** against a model running the *same* interpolator. See §3.5
+> and `docs/ARCHITECTURE.md`.
 
 Per stage at that baseline: resample 7.267 s (39.4%) · range-FFT (FFT-1, the **azimuth** transform)
 5.788 s · azimuth-FFT (FFT-2, the **range** transform, with corner-turn #2 overlapped into it) 5.396 s.
@@ -450,8 +458,12 @@ passing timing. Verified on silicon, twice.
 ### 3.4 Remaining levers, ranked by MEASUREMENT (2026-07-27)
 
 Ranked after E4, not before it. Two entries were demoted and one promoted by the measurement, so
-prefer this table to any earlier prose. Frame 18.45 s; resample 7.267 · range-FFT 5.788 ·
-azimuth-FFT 5.396.
+prefer this table to any earlier prose *of the same era*. Frame 18.45 s; resample 7.267 ·
+range-FFT 5.788 · azimuth-FFT 5.396.
+
+> Measured at the 18.45 s baseline, **before** the sinc interpolators. The stage split has since
+> changed: at 14.17 s the resample is no longer the dominant block, so re-measure before acting on
+> this ranking.
 
 | lever | est. payoff | basis | status |
 |---|---:|---|---|

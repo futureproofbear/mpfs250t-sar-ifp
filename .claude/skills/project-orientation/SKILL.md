@@ -33,15 +33,21 @@ target-neutral (see `sar-pipeline-design`); the FPGA/toolchain specifics are sco
 
 ## What is PROVEN vs OPEN
 Proven (on silicon):
-- **Full autonomous on-board run (re-confirmed 2026-07-20):** scene loaded from the board's own eMMC
-  (81.5 s, `sig_crc 0x89fa12dc` verified) → focused in **18.45 s** (2026-07-27, 100 MHz, commit `d07bce7`, bit-exact crop CRC `0x319037b2`; `SAR_SEQ_OK`, `fft_mode=1` FABRIC
-  CoreFFT confirmed at runtime) → ROI crop rendered to a coherent focused image. No host JTAG data load.
+- **Full autonomous on-board run (current baseline 2026-08-01):** scene loaded from the board's own
+  eMMC → focused with **32-tap sinc in BOTH resample passes** → ROI crop rendered to a coherent
+  focused image. No host JTAG data load.
+    - Centerfield 5634x4319 → **14.17 s** (2026-07-31, 100 MHz, timing MET +0.924 ns, 2.73 W)
+    - NDSU 8167x8192 (production scene, now the one on the card) → **15.738 s**, eMMC load 225 s
+    - The earlier **18.45 s** / CRC `0x319037b2` (2026-07-27, commit `d07bce7`) is the PRE-SINC
+      baseline. A sinc run does not reproduce that CRC — different interpolator, different samples,
+      not a fault.
   Reproducible: the superseded 88.1 s baseline ran 88.04 s / 88.11 s, output byte-identical to the previous
   88.1 s pre-flush-fix build had the same top-left 1024² ROI crc `0xd596c9eb`).
   Per-stage breakdown (single source of truth): `docs/SAR_IMPLEMENTATION_RECORD.md` Part 3; re-read
   anytime with `bash mpfs/host/run_stage_timing.sh`.
-- Full pipeline runs end-to-end and forms a correctly focused image (corr 0.9923 vs the CPHD-derived
-  golden). Resample, window, corner-turn all validated.
+- Full pipeline runs end-to-end and forms a correctly focused image. Current figure: corr **0.9889**
+  against a Python model running the *same* interpolator (0.9846 against the 2-tap reference). The
+  older 0.9923 belongs to the pre-sinc 18.45 s build. Resample, window, corner-turn all validated.
 - The fabric FFT chain is phase-exact (0.0° spread @ 256 & 8192) and value-equals the CPU FFT
   (corr 0.9999); zero-loss gearbox.
 - Bit-accurate emulator (`silicon_emulator.py`) == float golden (corr 1.0).
@@ -49,7 +55,8 @@ Proven (on silicon):
   a correct-signed CPU detect (see `sar-pipeline-design` + `mpfs-platform-gotchas`).
 
 Open / next (image is already correct; these are latency + hardening):
-- Latency reduction (18.45 s, 2026-07-27, 100 MHz). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
+- Latency reduction (now **14.17 s** Centerfield / 15.738 s NDSU, 2026-08-01, 100 MHz; the two
+  8192² transforms are fixed-size and cost ~11.4 s of that, so they are the remaining lever). The FFT is already on fabric, and the targeted coefficient-bank CCACHE
   FLUSH64 writeback is now DONE and measured (resample 53.6 → 29.2 s, frame 110.8 → 88.1 s, output bits
   unchanged) — do not treat the per-line L2 flush as a pending lever, and disregard the old "2% L2
   flush" split, which came from a profile of a since-reverted experiment. The live levers, in order:

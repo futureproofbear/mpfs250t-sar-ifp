@@ -552,6 +552,10 @@ Production dataset, boot-loaded **from the on-board eMMC** — no host data tran
 UMBRA-04, 2023-11-10 16:16:45 UTC, X-band 9.60 GHz; scene centre 46.9043 N, 96.8288 W, ground
 footprint 5.65 × 5.63 km. Crop is 1024 × 2048 anchored at the scene centre.
 
+---
+
+# Output — NDSU (Fargo, ND) formed on the MPFS250T
+
 | measured on silicon | | | Centerfield | NDSU |
 |---|---|---|---|---|
 | resample | **4.311 s** | input pulses × samples | 5,634 × 4,319 | **8,167 × 8,192** |
